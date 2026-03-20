@@ -1,0 +1,217 @@
+[gd_scene load_steps=2 format=3 uid="uid://b1r8c14vmcdai"]
+
+[sub_resource type="LabelSettings" id="LabelSettings_jglrs"]
+
+[node name="UI_Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Console" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.8
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+text = "Console占位文本"
+label_settings = SubResource("LabelSettings_jglrs")
+
+[node name="局内信息" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.8
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="局内信息"]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 0.1
+
+[node name="局内" type="Button" parent="局内信息/HBoxContainer"]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "局内"
+
+[node name="抽牌堆详细" type="Button" parent="局内信息/HBoxContainer"]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "抽牌堆详细"
+
+[node name="弃牌堆详细" type="Button" parent="局内信息/HBoxContainer"]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "弃牌堆详细"
+
+[node name="对局信息显示" type="Label" parent="局内信息"]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.1
+anchor_right = 1.0
+anchor_bottom = 1.0
+text = "文字示例"
+
+[node name="操作面板" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 0.5
+anchor_bottom = 0.8
+
+[node name="卡牌操作" type="HBoxContainer" parent="操作面板"]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 0.2
+alignment = 1
+
+[node name="抽牌" type="Button" parent="操作面板/卡牌操作"]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "抽牌"
+
+[node name="弃牌" type="Button" parent="操作面板/卡牌操作"]
+editor_description = "参数想要弃牌的顺序（从1开始），强制需要参数"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "弃牌"
+
+[node name="新增卡牌" type="Button" parent="操作面板/卡牌操作"]
+editor_description = "参数：卡牌ID、目标位置（1手牌、2抽牌堆、3弃牌堆）（待拓展）（强制需要参数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增卡牌
+"
+
+[node name="消耗卡牌" type="Button" parent="操作面板/卡牌操作"]
+editor_description = "参数：手牌index（强制需要参数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "消耗卡牌
+"
+
+[node name="销毁卡牌" type="Button" parent="操作面板/卡牌操作"]
+editor_description = "参数：手牌index（强制需要参数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "销毁卡牌"
+
+[node name="回合控制" type="HBoxContainer" parent="操作面板"]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.2
+anchor_right = 1.0
+anchor_bottom = 0.4
+alignment = 1
+
+[node name="开始游戏" type="Button" parent="操作面板/回合控制"]
+editor_description = "无需参数
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "开始游戏"
+
+[node name="结束回合" type="Button" parent="操作面板/回合控制"]
+editor_description = "无需参数
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "结束回合"
+
+[node name="新增敌人" type="Button" parent="操作面板/回合控制"]
+editor_description = "参数：敌人种类ID、自定义攻击、HP、防御，每回合执行行动次数，若不填默认随机，否则如果无法匹配，则报错"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增敌人"
+
+[node name="修改意图" type="Button" parent="操作面板/回合控制"]
+editor_description = "参数：仅填写意图序号（攻击防御debuffbuff等，取决于怪物种类）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "修改意图"
+
+[node name="修改属性" type="HBoxContainer" parent="操作面板"]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.4
+anchor_right = 1.0
+anchor_bottom = 0.6
+alignment = 1
+
+[node name="生命" type="Button" parent="操作面板/修改属性"]
+editor_description = "只填一个默认当前，/XX当作上限"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "生命值（当前/最大）"
+
+[node name="防御" type="Button" parent="操作面板/修改属性"]
+editor_description = "强制需要参数"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "防御"
+
+[node name="攻击" type="Button" parent="操作面板/修改属性"]
+editor_description = "强制需要参数"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "攻击"
+
+[node name="+能量" type="Button" parent="操作面板/修改属性"]
+editor_description = "不填参数默认加到上限为止"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "+能量"
+
+[node name="能量上限" type="Button" parent="操作面板/修改属性"]
+editor_description = "强制需要参数，不得小于1"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "能量上限"
+
+[node name="参数框" type="HBoxContainer" parent="操作面板"]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.6
+anchor_right = 1.0
+anchor_bottom = 0.8
+alignment = 1
+
+[node name="LineEdit" type="LineEdit" parent="操作面板/参数框"]
+editor_description = "所有使用的参数前都需要包含目标的index，然后再是对应按钮需要的参数"
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
