@@ -1,0 +1,3 @@
+CardId,CardName,CardType,EnergyCost,EffectType,NeedTarget,EffectDesc,AttackDamage,ShieldValue,StateType
+1001,攻击,Attack,1,Damage,True,攻击,0,0,None
+2001,护盾,Skill,1,Shield,False,防御,0,0,None
