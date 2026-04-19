@@ -1,15 +1,897 @@
 using Godot;
 using System;
+using System.Collections.Generic;
+using System.Text;
 
 public partial class BattleSytem : Node
 {
-	// Called when the node enters the scene tree for the first time.
-	public override void _Ready()
-	{
-	}
+    private static readonly Random RandomGenerator = new Random();
 
-	// Called every frame. 'delta' is the elapsed time since the previous frame.
-	public override void _Process(double delta)
-	{
-	}
+    private const string DefaultCharacterCsvPath = "res://DataBase/Unit/Character.csv";
+    private const string DefaultMonsterCsvPath = "res://DataBase/Unit/Monster.csv";
+    private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用.csv";
+
+    [Export]
+    public BattleSetupData SetupData;
+
+    [Export]
+    public int SelectedCharacterId = 1001;
+
+    [Export]
+    public Godot.Collections.Array<int> SelectedMonsterIds = new Godot.Collections.Array<int>();
+
+    [Export]
+    public bool IsBattleStarted = false;
+
+    [Export]
+    public bool IsPlayerTurn = false;
+
+    // 玩家角色实例（唯一）
+    public CharacterInstance Player;
+
+    // 怪物实例字典，Key 为 UniqueInGameId
+    public Dictionary<int, MonsterInstance> Monsters;
+
+    // Called when the node enters the scene tree for the first time.
+    public override void _Ready()
+    {
+        if (SetupData != null)
+        {
+            SelectedCharacterId = SetupData.CharacterId;
+            SyncSelectedMonsterIdsFromSetupData();
+        }
+        else
+        {
+            RefreshBattleInfoDisplay();
+        }
+
+        RefreshBattleInfoDisplay();
+    }
+
+    public bool StartGameFromSetupData()
+    {
+        if (IsBattleStarted)
+        {
+            AppendPanelConsoleError("错误：当前战斗已经开始，不能重复开始游戏。");
+            return false;
+        }
+
+        if (SetupData == null)
+        {
+            AppendPanelConsoleError("错误：BattleSetupData 为空，无法开始游戏。");
+            return false;
+        }
+
+        SetupData.EnsureMonsterDictionaryInitialized();
+        EnsureUnitCachesLoaded();
+
+        if (SetupData.CharacterId <= 0)
+        {
+            AppendPanelConsoleError("错误：BattleSetupData 缺少有效的 CharacterID，无法开始游戏。");
+            return false;
+        }
+
+        if (!LoadingSystem.CharacterDictionary.ContainsKey(SetupData.CharacterId))
+        {
+            AppendPanelConsoleError($"错误：CharacterID {SetupData.CharacterId} 未在角色配置中找到，无法开始游戏。");
+            return false;
+        }
+
+        if (SetupData.GetTotalMonsterCount() <= 0)
+        {
+            AppendPanelConsoleError("错误：BattleSetupData 缺少 MonsterID，无法开始游戏。");
+            return false;
+        }
+
+        List<int> monsterIds = SetupData.GetMonsterIdList();
+        for (int index = 0; index < monsterIds.Count; index++)
+        {
+            int monsterId = monsterIds[index];
+            if (!LoadingSystem.MonsterDictionary.ContainsKey(monsterId))
+            {
+                AppendPanelConsoleError($"错误：MonsterID {monsterId} 未在怪物配置中找到，无法开始游戏。");
+                return false;
+            }
+        }
+
+        SelectedCharacterId = SetupData.CharacterId;
+        SyncSelectedMonsterIdsFromSetupData();
+        AppendPanelConsoleInfo($"开始游戏：角色ID={SetupData.CharacterId}，怪物数量={monsterIds.Count}。");
+        OnInit(SetupData.CharacterId, monsterIds);
+        return true;
+    }
+
+    /// <summary>
+    /// 初始化战斗系统，根据指定的角色ID和怪物ID列表
+    /// </summary>
+    /// <param name="characterId">玩家角色ID</param>
+    /// <param name="monsterIds">怪物ID列表</param>
+    public void OnInit(int characterId, List<int> monsterIds)
+    {
+        EnsureUnitCachesLoaded();
+        InitializePlayer(characterId);
+        InitializeMonsters(monsterIds);
+
+        InitializePlayerDrawPileFromCharacterCards();
+
+        IsBattleStarted = true;
+        IsPlayerTurn = false;
+        StartPlayerTurn();
+        RefreshBattleInfoDisplay();
+    }
+
+    /// <summary>
+    /// 初始化战斗系统，根据指定的角色ID和单个怪物ID
+    /// </summary>
+    /// <param name="characterId">玩家角色ID</param>
+    /// <param name="monsterId">怪物ID</param>
+    public void OnInit(int characterId, int monsterId)
+    {
+        OnInit(characterId, new List<int> { monsterId });
+    }
+
+    // Called every frame. 'delta' is the elapsed time since the previous frame.
+    public override void _Process(double delta)
+    {
+    }
+
+    public BattleSetupData EnsureSetupData()
+    {
+        if (SetupData == null)
+        {
+            SetupData = new BattleSetupData
+            {
+                CharacterId = SelectedCharacterId
+            };
+        }
+
+        SetupData.EnsureMonsterDictionaryInitialized();
+        RefreshBattleInfoDisplay();
+        return SetupData;
+    }
+
+    public void SyncSelectedMonsterIdsFromSetupData()
+    {
+        SelectedMonsterIds.Clear();
+        if (SetupData == null)
+        {
+            RefreshBattleInfoDisplay();
+            return;
+        }
+
+        foreach (int monsterId in SetupData.GetMonsterIdList())
+        {
+            SelectedMonsterIds.Add(monsterId);
+        }
+
+        RefreshBattleInfoDisplay();
+    }
+
+    public void RefreshBattleInfoDisplay()
+    {
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return;
+        }
+
+        Label battleInfoLabel = scene.GetNodeOrNull<Label>("局内信息/对局信息显示");
+        if (battleInfoLabel == null)
+        {
+            battleInfoLabel = scene.GetNodeOrNull<Label>("UI_Main/局内信息/对局信息显示");
+        }
+
+        if (battleInfoLabel == null)
+        {
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        if (IsBattleStarted && Player != null)
+        {
+            BuildRuntimeBattleInfo(builder);
+        }
+        else
+        {
+            BuildSetupBattleInfo(builder);
+        }
+
+        battleInfoLabel.Text = builder.ToString();
+    }
+
+    private void BuildRuntimeBattleInfo(StringBuilder builder)
+    {
+        builder.AppendLine($"角色ID：{Player.id} 名称：{Player.Name} UniqueInGameID：{FormatUniqueInGameId(Player.UniqueInGameId)} HP：{Player.HP}/{Player.Max_HP}（当前/最大） Atk：{Player.Attack} Def：{Player.Defend} Costs：{Player.costs}");
+        builder.AppendLine("手牌：");
+
+        if (Player.handcards == null || Player.handcards.Count == 0)
+        {
+            builder.AppendLine("无");
+        }
+        else
+        {
+            List<string> handCardParts = new List<string>();
+            for (int index = 0; index < Player.handcards.Count; index++)
+            {
+                Card card = Player.handcards[index];
+                handCardParts.Add($"{index + 1}、{GetCardDisplayName(card)}");
+            }
+
+            builder.AppendLine(string.Join(" ", handCardParts));
+        }
+
+        if (Monsters == null || Monsters.Count == 0)
+        {
+            builder.Append("无怪物");
+            return;
+        }
+
+        List<int> monsterKeys = new List<int>(Monsters.Keys);
+        monsterKeys.Sort();
+        foreach (int monsterKey in monsterKeys)
+        {
+            MonsterInstance monster = Monsters[monsterKey];
+            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend}");
+        }
+    }
+
+    private string FormatUniqueInGameId(int uniqueInGameId)
+    {
+        return uniqueInGameId.ToString("D7");
+    }
+
+    private void BuildSetupBattleInfo(StringBuilder builder)
+    {
+        EnsureUnitCachesLoaded();
+
+        string characterName = LoadingSystem.CharacterDictionary.TryGetValue(SelectedCharacterId, out Character character)
+            ? character.Name
+            : "未知";
+        builder.AppendLine($"当前选中角色ID：{SelectedCharacterId} 名称：{characterName}");
+        builder.AppendLine("已存在敌人ID：");
+
+        Dictionary<int, int> monsterCounts = GetConfiguredMonsterCounts();
+        if (monsterCounts.Count == 0)
+        {
+            builder.Append("无");
+            return;
+        }
+
+        List<int> monsterIds = new List<int>(monsterCounts.Keys);
+        monsterIds.Sort();
+        for (int index = 0; index < monsterIds.Count; index++)
+        {
+            int monsterId = monsterIds[index];
+            string monsterName = LoadingSystem.MonsterDictionary.TryGetValue(monsterId, out Monster monster)
+                ? monster.Name
+                : "未知";
+            builder.Append($"{monsterId}({monsterName}) x{monsterCounts[monsterId]}");
+            if (index < monsterIds.Count - 1)
+            {
+                builder.AppendLine();
+            }
+        }
+    }
+
+    private string GetCardDisplayName(Card card)
+    {
+        if (card == null)
+        {
+            return "空卡牌";
+        }
+
+        if (!string.IsNullOrWhiteSpace(card.CardName))
+        {
+            return card.CardName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(card.EffectDescription))
+        {
+            return card.EffectDescription.Trim();
+        }
+
+        return $"CardId={card.CardId}";
+    }
+
+    private Dictionary<int, int> GetConfiguredMonsterCounts()
+    {
+        Dictionary<int, int> monsterCounts = new Dictionary<int, int>();
+
+        if (SetupData != null)
+        {
+            SetupData.EnsureMonsterDictionaryInitialized();
+            foreach (int monsterId in SetupData.MonsterIds.Keys)
+            {
+                monsterCounts[monsterId] = SetupData.MonsterIds[monsterId];
+            }
+
+            return monsterCounts;
+        }
+
+        foreach (int monsterId in SelectedMonsterIds)
+        {
+            if (monsterCounts.ContainsKey(monsterId))
+            {
+                monsterCounts[monsterId]++;
+            }
+            else
+            {
+                monsterCounts[monsterId] = 1;
+            }
+        }
+
+        return monsterCounts;
+    }
+
+    /// <summary>
+    /// 初始化玩家角色实例，根据指定的角色ID
+    /// </summary>
+    /// <param name="characterId">角色ID</param>
+    private void InitializePlayer(int characterId)
+    {
+        var characters = LoadingSystem.CharacterDictionary;
+        if (characters.TryGetValue(characterId, out var character))
+        {
+            Player = new CharacterInstance(character);
+            AppendPanelConsoleInfo($"已创建角色 {Player.Name}（ID: {characterId}, UniqueInGameId: {Player.UniqueInGameId}）。");
+        }
+        else
+        {
+            AppendPanelConsoleError($"错误：角色ID {characterId} 未在缓存中找到。");
+        }
+    }
+
+    /// <summary>
+    /// 初始化怪物实例字典，根据指定的怪物ID列表
+    /// </summary>
+    /// <param name="monsterIds">怪物ID列表</param>
+    private void InitializeMonsters(List<int> monsterIds)
+    {
+        var monsters = LoadingSystem.MonsterDictionary;
+        Monsters = new Dictionary<int, MonsterInstance>();
+        foreach (int id in monsterIds)
+        {
+            if (monsters.TryGetValue(id, out var monster))
+            {
+                var monsterInstance = new MonsterInstance(monster);
+                Monsters[monsterInstance.UniqueInGameId] = monsterInstance;
+                AppendPanelConsoleInfo($"已创建怪物 {monsterInstance.Name}（模板ID: {id}, UniqueInGameId: {monsterInstance.UniqueInGameId}，字典key: {monsterInstance.UniqueInGameId}）。");
+            }
+            else
+            {
+                AppendPanelConsoleError($"错误：怪物ID {id} 未在缓存中找到。");
+            }
+        }
+        AppendPanelConsoleInfo($"已初始化怪物数量：{Monsters.Count}。");
+    }
+
+    public int GetCurrentMonsterInstanceCount()
+    {
+        return Monsters == null ? 0 : Monsters.Count;
+    }
+
+    public int AddMonsterInstancesByTemplateId(int monsterId, int count)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        EnsureUnitCachesLoaded();
+        if (!LoadingSystem.MonsterDictionary.TryGetValue(monsterId, out Monster template))
+        {
+            return 0;
+        }
+
+        Monsters ??= new Dictionary<int, MonsterInstance>();
+
+        int currentCount = Monsters.Count;
+        int remainingCapacity = BattleSetupData.MaxMonsterCapacity - currentCount;
+        if (remainingCapacity <= 0)
+        {
+            return 0;
+        }
+
+        int addCount = count < remainingCapacity ? count : remainingCapacity;
+        int added = 0;
+        for (int index = 0; index < addCount; index++)
+        {
+            MonsterInstance instance = new MonsterInstance(template);
+
+            // 极低概率下若随机冲突，继续生成直到拿到可用UniqueInGameId。
+            while (Monsters.ContainsKey(instance.UniqueInGameId))
+            {
+                instance = new MonsterInstance(template);
+            }
+
+            Monsters[instance.UniqueInGameId] = instance;
+            added++;
+
+            AppendPanelConsoleInfo($"战斗中新增怪物 {instance.Name}（模板ID: {monsterId}, UniqueInGameId: {instance.UniqueInGameId}）。");
+        }
+
+        if (added > 0)
+        {
+            AppendPanelConsoleInfo($"战斗中怪物总数：{Monsters.Count}/{BattleSetupData.MaxMonsterCapacity}。");
+            RefreshBattleInfoDisplay();
+        }
+
+        return added;
+    }
+
+    /// <summary>
+    /// 确保角色与怪物缓存已加载
+    /// </summary>
+    private void EnsureUnitCachesLoaded()
+    {
+        if (LoadingSystem.CardDictionary.Count == 0)
+        {
+            LoadingSystem.LoadCards(DefaultCardCsvPath, true);
+        }
+
+        if (LoadingSystem.CharacterDictionary.Count == 0)
+        {
+            LoadingSystem.LoadCharacters(DefaultCharacterCsvPath, true);
+        }
+
+        if (LoadingSystem.MonsterDictionary.Count == 0)
+        {
+            LoadingSystem.LoadMonsters(DefaultMonsterCsvPath, true);
+        }
+    }
+
+    /// <summary>
+    /// 根据卡牌 ID 向玩家的指定牌堆添加卡牌实例
+    /// </summary>
+    /// <param name="cardId">卡牌 ID</param>
+    /// <param name="pileType">牌堆类型："hand"（手牌）、"draw"（抽牌堆）、"discard"（弃牌堆）</param>
+    public void AddCardToPlayer(int cardId, string pileType)
+    {
+        if (Player == null)
+        {
+            AppendPanelConsoleError("错误：玩家角色尚未初始化。");
+            return;
+        }
+
+        var cardTemplate = LoadingSystem.CardDictionary.TryGetValue(cardId, out var card) ? card : null;
+        if (cardTemplate == null)
+        {
+            AppendPanelConsoleError($"错误：卡牌ID {cardId} 未在缓存中找到。");
+            return;
+        }
+
+        Card cardInstance = cardTemplate.CreateRuntimeInstance();
+
+        switch (pileType.ToLower())
+        {
+            case "hand":
+                Player.handcards.Add(cardInstance);
+                AppendPanelConsoleInfo($"已将卡牌ID {cardId} 加入手牌。UniqueInGameId: {cardInstance.UniqueInGameId}");
+                break;
+            case "draw":
+                Player.drawpile.Add(cardInstance);
+                AppendPanelConsoleInfo($"已将卡牌ID {cardId} 加入抽牌堆。UniqueInGameId: {cardInstance.UniqueInGameId}");
+                break;
+            case "discard":
+                Player.discardpile.Add(cardInstance);
+                AppendPanelConsoleInfo($"已将卡牌ID {cardId} 加入弃牌堆。UniqueInGameId: {cardInstance.UniqueInGameId}");
+                break;
+            default:
+                AppendPanelConsoleError($"错误：无效牌堆类型 {pileType}，请使用 hand/draw/discard。");
+                break;
+        }
+
+        RefreshBattleInfoDisplay();
+    }
+
+    public bool PlayHandCard(int handIndex, IUnitInstance target = null)
+    {
+        if (Player == null)
+        {
+            AppendPanelConsoleError("错误：玩家角色尚未初始化，无法出牌。");
+            return false;
+        }
+
+        if (handIndex < 0 || handIndex >= Player.handcards.Count)
+        {
+            AppendPanelConsoleError($"错误：手牌索引 {handIndex} 超出范围，当前手牌数量为 {Player.handcards.Count}。");
+            return false;
+        }
+
+        Card card = Player.handcards[handIndex];
+        return PlayHandCard(card, target);
+    }
+
+    public bool PlayHandCard(string uniqueInGameId, IUnitInstance target = null)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueInGameId))
+        {
+            AppendPanelConsoleError("错误：出牌失败，未提供卡牌 UniqueInGameId。");
+            return false;
+        }
+
+        if (Player == null)
+        {
+            AppendPanelConsoleError("错误：玩家角色尚未初始化，无法出牌。");
+            return false;
+        }
+
+        Card card = Player.handcards.Find(current => current.UniqueInGameId == uniqueInGameId);
+        if (card == null)
+        {
+            AppendPanelConsoleError($"错误：手牌中不存在 UniqueInGameId={uniqueInGameId} 的卡牌。");
+            return false;
+        }
+
+        return PlayHandCard(card, target);
+    }
+
+    public bool PlayHandCard(Card card, IUnitInstance target = null)
+    {
+        if (!IsBattleStarted)
+        {
+            AppendPanelConsoleError("错误：当前不在战斗中，无法出牌。");
+            return false;
+        }
+
+        if (!IsPlayerTurn)
+        {
+            AppendPanelConsoleError("错误：当前不是玩家回合，无法出牌。");
+            return false;
+        }
+
+        if (Player == null)
+        {
+            AppendPanelConsoleError("错误：玩家角色尚未初始化，无法出牌。");
+            return false;
+        }
+
+        if (card == null)
+        {
+            AppendPanelConsoleError("错误：出牌失败，卡牌为空。");
+            return false;
+        }
+
+        int handIndex = Player.handcards.IndexOf(card);
+        if (handIndex < 0)
+        {
+            AppendPanelConsoleError($"错误：卡牌ID {card.CardId} 不在当前玩家手牌中，无法打出。");
+            return false;
+        }
+
+        if (Player.costs < card.EnergyCost)
+        {
+            AppendPanelConsoleError($"错误：费用不足，打出卡牌ID {card.CardId} 需要 {card.EnergyCost} 点费用，当前仅有 {Player.costs} 点。");
+            return false;
+        }
+
+        Card.CardApplyResult applyResult = card.Apply(Player, target);
+        if (!applyResult.Success)
+        {
+            return false;
+        }
+
+        Player.costs -= card.EnergyCost;
+        Player.handcards.RemoveAt(handIndex);
+        Player.discardpile.Add(card);
+
+        AppendPanelConsoleInfo($"玩家打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {Player.costs}。卡牌已移入弃牌堆。手牌剩余 {Player.handcards.Count} 张，弃牌堆当前 {Player.discardpile.Count} 张。");
+
+        if (applyResult.EffectResult != null)
+        {
+            AppendPanelConsoleInfo($"卡牌结算：{applyResult.EffectResult.BuildSummary()}");
+        }
+
+        RemoveDeadMonsters();
+        RefreshBattleInfoDisplay();
+        CheckBattleEndAndHandle();
+
+        return true;
+    }
+
+    public void EndPlayerTurn()
+    {
+        if (!IsBattleStarted)
+        {
+            AppendPanelConsoleError("错误：当前不在战斗中，无法结束回合。");
+            return;
+        }
+
+        if (!IsPlayerTurn)
+        {
+            AppendPanelConsoleError("错误：当前不是玩家回合，无需重复结束回合。");
+            return;
+        }
+
+        IsPlayerTurn = false;
+        AppendPanelConsoleInfo("玩家回合结束。进入怪物回合。");
+        StartMonsterTurn();
+    }
+
+    public void StartPlayerTurn()
+    {
+        if (!IsBattleStarted || Player == null)
+        {
+            return;
+        }
+
+        if (CheckBattleEndAndHandle())
+        {
+            return;
+        }
+
+        IsPlayerTurn = true;
+        int drawCount = Player.drawCardNum > 0 ? Player.drawCardNum : 0;
+        int drawn = DrawCardsToHand(drawCount);
+        Player.costs = Player.Max_costs;
+
+        AppendPanelConsoleInfo($"玩家回合开始：抽牌 {drawn}/{drawCount}，费用重置为 {Player.costs}。");
+        RefreshBattleInfoDisplay();
+    }
+
+    private void StartMonsterTurn()
+    {
+        if (!IsBattleStarted || Player == null)
+        {
+            return;
+        }
+
+        if (CheckBattleEndAndHandle())
+        {
+            return;
+        }
+
+        List<int> orderedKeys = Monsters == null ? new List<int>() : new List<int>(Monsters.Keys);
+        orderedKeys.Sort();
+
+        AppendPanelConsoleInfo($"怪物回合开始：本轮行动怪物数量 {orderedKeys.Count}。");
+
+        foreach (int uniqueInGameId in orderedKeys)
+        {
+            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster))
+            {
+                continue;
+            }
+
+            if (monster.HP <= 0)
+            {
+                continue;
+            }
+
+            int attackValue = monster.Attack > 0 ? monster.Attack : 0;
+            int shieldValue = monster.Defend > 0 ? monster.Defend : 0;
+
+            EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player, attackValue);
+            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）攻击：{attackResult.BuildSummary()}");
+
+            EffectResult shieldResult = EffectSystem.ApplyShield(monster, shieldValue);
+            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）护盾：{shieldResult.BuildSummary()}");
+
+            if (CheckBattleEndAndHandle())
+            {
+                return;
+            }
+        }
+
+        RemoveDeadMonsters();
+        RefreshBattleInfoDisplay();
+        if (CheckBattleEndAndHandle())
+        {
+            return;
+        }
+
+        StartPlayerTurn();
+    }
+
+    private int DrawCardsToHand(int count)
+    {
+        if (Player == null || count <= 0)
+        {
+            return 0;
+        }
+
+        int drawn = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (Player.drawpile.Count == 0)
+            {
+                if (Player.discardpile.Count == 0)
+                {
+                    break;
+                }
+
+                Player.drawpile.AddRange(Player.discardpile);
+                Player.discardpile.Clear();
+                ShuffleCards(Player.drawpile);
+                AppendPanelConsoleInfo("抽牌堆为空：已将弃牌堆随机洗牌后放回抽牌堆。");
+            }
+
+            Card topCard = Player.drawpile[0];
+            Player.drawpile.RemoveAt(0);
+            Player.handcards.Add(topCard);
+            drawn++;
+        }
+
+        return drawn;
+    }
+
+    private void ShuffleCards(List<Card> cards)
+    {
+        if (cards == null || cards.Count <= 1)
+        {
+            return;
+        }
+
+        for (int index = cards.Count - 1; index > 0; index--)
+        {
+            int swapIndex = RandomGenerator.Next(index + 1);
+            (cards[index], cards[swapIndex]) = (cards[swapIndex], cards[index]);
+        }
+    }
+
+    private void InitializePlayerDrawPileFromCharacterCards()
+    {
+        if (Player == null)
+        {
+            return;
+        }
+
+        Player.handcards.Clear();
+        Player.drawpile.Clear();
+        Player.discardpile.Clear();
+
+        if (Player.cards.Count == 0)
+        {
+            List<int> cardIds = new List<int>(LoadingSystem.CardDictionary.Keys);
+            cardIds.Sort();
+            foreach (int cardId in cardIds)
+            {
+                Player.cards.Add(LoadingSystem.CardDictionary[cardId]);
+            }
+        }
+
+        foreach (Card baseCard in Player.cards)
+        {
+            if (baseCard == null)
+            {
+                continue;
+            }
+
+            Player.drawpile.Add(baseCard.CreateRuntimeInstance());
+        }
+
+        AppendPanelConsoleInfo($"角色初始卡组已复制到抽牌堆，共 {Player.drawpile.Count} 张。");
+    }
+
+    private void RemoveDeadMonsters()
+    {
+        if (Monsters == null || Monsters.Count == 0)
+        {
+            return;
+        }
+
+        List<int> deadIds = new List<int>();
+        foreach (KeyValuePair<int, MonsterInstance> pair in Monsters)
+        {
+            if (pair.Value == null || pair.Value.HP <= 0)
+            {
+                deadIds.Add(pair.Key);
+            }
+        }
+
+        deadIds.Sort();
+        foreach (int deadId in deadIds)
+        {
+            MonsterInstance dead = Monsters[deadId];
+            AppendPanelConsoleInfo($"怪物死亡：{dead.Name}（UniqueInGameId: {deadId}）。");
+            Monsters.Remove(deadId);
+        }
+
+        if (deadIds.Count > 0)
+        {
+            RefreshBattleInfoDisplay();
+        }
+    }
+
+    private bool CheckBattleEndAndHandle()
+    {
+        if (!IsBattleStarted)
+        {
+            return true;
+        }
+
+        if (Player == null || Player.HP <= 0)
+        {
+            AppendPanelConsoleInfo("战斗结束：玩家已死亡。游戏结束。");
+            EndGame();
+            return true;
+        }
+
+        if (Monsters == null || Monsters.Count == 0)
+        {
+            EndBattle();
+            return true;
+        }
+
+        return false;
+    }
+
+    public void EndBattle()
+    {
+        int monsterCount = Monsters == null ? 0 : Monsters.Count;
+        if (Monsters != null)
+        {
+            Monsters.Clear();
+            Monsters = null;
+        }
+
+        IsBattleStarted = false;
+        IsPlayerTurn = false;
+
+        AppendPanelConsoleInfo($"战斗结束：已销毁怪物实例 {monsterCount} 个。");
+        RefreshBattleInfoDisplay();
+    }
+
+    public void EndGame()
+    {
+        int monsterCount = Monsters == null ? 0 : Monsters.Count;
+        bool hadPlayer = Player != null;
+
+        if (Player != null)
+        {
+            Player.handcards?.Clear();
+            Player.drawpile?.Clear();
+            Player.discardpile?.Clear();
+            Player = null;
+        }
+
+        if (Monsters != null)
+        {
+            Monsters.Clear();
+            Monsters = null;
+        }
+
+        IsBattleStarted = false;
+        IsPlayerTurn = false;
+
+        AppendPanelConsoleInfo($"战斗结束：已销毁角色实例 {(hadPlayer ? 1 : 0)} 个，怪物实例 {monsterCount} 个。");
+        RefreshBattleInfoDisplay();
+    }
+
+    private void AppendPanelConsoleInfo(string message)
+    {
+        AppendPanelConsole("[信息] " + message);
+    }
+
+    private void AppendPanelConsoleError(string message)
+    {
+        AppendPanelConsole("[错误] " + message);
+    }
+
+    private void AppendPanelConsole(string message)
+    {
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return;
+        }
+
+        RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
+        if (console == null)
+        {
+            console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
+        }
+
+        if (console == null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(console.Text))
+        {
+            console.Text += "\n";
+        }
+
+        console.Text += message;
+    }
 }

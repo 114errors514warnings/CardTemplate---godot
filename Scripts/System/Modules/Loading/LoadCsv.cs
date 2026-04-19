@@ -1,7 +1,6 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.IO;
 
 /// <summary>
 /// 通用CSV读写工具类，提供基础的CSV解析和保存功能
@@ -16,20 +15,20 @@ public partial class LoadCsv : Node
 	/// <returns>包含所有行的字符串数组，如果失败返回空数组</returns>
 	public static string[] LoadCSVLines(string filePath)
 	{
-		if (!File.Exists(filePath))
+		using (var file = FileAccess.Open(filePath, FileAccess.ModeFlags.Read))
 		{
-			GD.PrintErr($"CSV file not found: {filePath}");
-			return Array.Empty<string>();
-		}
+			if (file == null)
+			{
+				GD.PrintErr($"CSV file not found: {filePath}");
+				return Array.Empty<string>();
+			}
 
-		try
-		{
-			return File.ReadAllLines(filePath);
-		}
-		catch (Exception ex)
-		{
-			GD.PrintErr($"Error reading CSV file {filePath}: {ex.Message}");
-			return Array.Empty<string>();
+			List<string> lines = new List<string>();
+			while (!file.EofReached())
+			{
+				lines.Add(file.GetLine());
+			}
+			return lines.ToArray();
 		}
 	}
 
@@ -41,16 +40,20 @@ public partial class LoadCsv : Node
 	/// <returns>是否成功保存</returns>
 	public static bool SaveCSVLines(string filePath, string[] lines)
 	{
-		try
+		using (var file = FileAccess.Open(filePath, FileAccess.ModeFlags.Write))
 		{
-			File.WriteAllLines(filePath, lines);
+			if (file == null)
+			{
+				GD.PrintErr($"Failed to open CSV file for writing: {filePath}");
+				return false;
+			}
+
+			foreach (string line in lines)
+			{
+				file.StoreLine(line);
+			}
 			GD.Print($"Successfully saved CSV to {filePath}");
 			return true;
-		}
-		catch (Exception ex)
-		{
-			GD.PrintErr($"Error saving CSV file {filePath}: {ex.Message}");
-			return false;
 		}
 	}
 
@@ -62,23 +65,20 @@ public partial class LoadCsv : Node
 	/// <returns>是否成功保存</returns>
 	public static bool SaveCSVLinesStream(string filePath, string[] lines)
 	{
-		try
+		using (var file = FileAccess.Open(filePath, FileAccess.ModeFlags.Write))
 		{
-			using (StreamWriter writer = new StreamWriter(filePath))
+			if (file == null)
 			{
-				foreach (string line in lines)
-				{
-					writer.WriteLine(line);
-				}
+				GD.PrintErr($"Failed to open CSV file for writing: {filePath}");
+				return false;
 			}
 
+			foreach (string line in lines)
+			{
+				file.StoreLine(line);
+			}
 			GD.Print($"Successfully saved CSV to {filePath}");
 			return true;
-		}
-		catch (Exception ex)
-		{
-			GD.PrintErr($"Error saving CSV file {filePath}: {ex.Message}");
-			return false;
 		}
 	}
 

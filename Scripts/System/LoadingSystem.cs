@@ -17,6 +17,40 @@ public partial class LoadingSystem : Node
     /// </summary>
     private static Dictionary<int, Card> cardCache = new Dictionary<int, Card>();
 
+    /// <summary>
+    /// 缓存已加载的角色数据，Key 为 id
+    /// </summary>
+    private static Dictionary<int, Character> characterCache = new Dictionary<int, Character>();
+
+    /// <summary>
+    /// 缓存已加载的怪物数据，Key 为 id
+    /// </summary>
+    private static Dictionary<int, Monster> monsterCache = new Dictionary<int, Monster>();
+
+    /// <summary>
+    /// 公开的卡牌字典访问器
+    /// </summary>
+    public static Dictionary<int, Card> CardDictionary
+    {
+        get { return cardCache; }
+    }
+
+    /// <summary>
+    /// 公开的角色字典访问器
+    /// </summary>
+    public static Dictionary<int, Character> CharacterDictionary
+    {
+        get { return characterCache; }
+    }
+
+    /// <summary>
+    /// 公开的怪物字典访问器
+    /// </summary>
+    public static Dictionary<int, Monster> MonsterDictionary
+    {
+        get { return monsterCache; }
+    }
+
     public override void _Ready()
     {
         OnInit();
@@ -29,14 +63,7 @@ public partial class LoadingSystem : Node
     {
         Dictionary<int, Card> cards = LoadCards(DefaultCardCsvPath, true);
 
-        if (cards.Count > 0)
-        {
-            GD.Print($"Loaded {cards.Count} cards into cache from {DefaultCardCsvPath}");
-        }
-        else
-        {
-            GD.PrintErr($"Failed to load any cards from {DefaultCardCsvPath}");
-        }
+        // 移除打印，由调用者处理
     }
 
     /// <summary>
@@ -49,7 +76,6 @@ public partial class LoadingSystem : Node
     {
         if (useCache && cardCache.Count > 0)
         {
-            GD.Print($"Loading cards from cache: {filePath}");
             return cardCache;
         }
 
@@ -67,7 +93,7 @@ public partial class LoadingSystem : Node
             }
             else
             {
-                GD.PrintWarning($"Duplicate CardId detected while loading cards: {card.CardId}. Ignoring later entry.");
+                GD.PrintErr($"Duplicate CardId detected while loading cards: {card.CardId}. Ignoring later entry.");
             }
         }
 
@@ -135,20 +161,81 @@ public partial class LoadingSystem : Node
     // ========== 后续可扩展的功能 ==========
 
     /// <summary>
-    /// 加载角色数据（示例，待实现）
+    /// 加载角色数据（支持缓存）
     /// </summary>
-    public static void LoadCharacters(string filePath)
+    /// <param name="filePath">CSV文件路径</param>
+    /// <param name="useCache">是否使用缓存</param>
+    /// <returns>角色字典，Key 为 id</returns>
+    public static Dictionary<int, Character> LoadCharacters(string filePath, bool useCache = true)
     {
-        GD.Print("Character loading feature coming soon");
-        // 可在此处调用 LoadCharacterCsv.LoadCharactersFromCSV(filePath)
+        if (useCache && characterCache.Count > 0)
+        {
+            return characterCache;
+        }
+
+        Character[] characters = LoadCharacterCsv.LoadCharactersFromCSV(filePath);
+        Dictionary<int, Character> characterDict = new Dictionary<int, Character>();
+
+        foreach (Character character in characters)
+        {
+            if (character == null)
+                continue;
+
+            if (!characterDict.ContainsKey(character.id))
+            {
+                characterDict[character.id] = character;
+            }
+            else
+            {
+                GD.PrintErr($"Duplicate Character id detected while loading characters: {character.id}. Ignoring later entry.");
+            }
+        }
+
+        if (useCache)
+        {
+            characterCache = characterDict;
+        }
+
+        return characterDict;
     }
 
     /// <summary>
-    /// 加载敌人数据（示例，待实现）
-    public static void LoadEnemies(string filePath)
+    /// 加载怪物数据（支持缓存）
+    /// </summary>
+    /// <param name="filePath">CSV文件路径</param>
+    /// <param name="useCache">是否使用缓存</param>
+    /// <returns>怪物字典，Key 为 id</returns>
+    public static Dictionary<int, Monster> LoadMonsters(string filePath, bool useCache = true)
     {
-        GD.Print("Enemy loading feature coming soon");
-        // 可在此处调用 LoadEnemyCsv.LoadEnemiesFromCSV(filePath)
+        if (useCache && monsterCache.Count > 0)
+        {
+            return monsterCache;
+        }
+
+        Monster[] monsters = LoadMonsterCsv.LoadMonstersFromCSV(filePath);
+        Dictionary<int, Monster> monsterDict = new Dictionary<int, Monster>();
+
+        foreach (Monster monster in monsters)
+        {
+            if (monster == null)
+                continue;
+
+            if (!monsterDict.ContainsKey(monster.id))
+            {
+                monsterDict[monster.id] = monster;
+            }
+            else
+            {
+                GD.PrintErr($"Duplicate Monster id detected while loading monsters: {monster.id}. Ignoring later entry.");
+            }
+        }
+
+        if (useCache)
+        {
+            monsterCache = monsterDict;
+        }
+
+        return monsterDict;
     }
 
     /// <summary>

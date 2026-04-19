@@ -9,8 +9,8 @@ public partial class StateCard : Card
 	public StateCard() { }
 
 	// 带参数构造（无专属属性）
-	public StateCard(int cardId, string uniqueInGameId, int energyCost, EffectType effectType, string effectDesc, bool needTarget)
-		: base(cardId, uniqueInGameId, energyCost, CardCategory.State, effectType, effectDesc, needTarget)
+	public StateCard(int cardId, string uniqueInGameId, int energyCost, EffectType effectType, string effectDesc, bool needTarget, string cardName = "")
+		: base(cardId, uniqueInGameId, energyCost, CardCategory.State, effectType, effectDesc, needTarget, cardName)
 	{
 	}
 
@@ -19,6 +19,20 @@ public partial class StateCard : Card
 	{
 		var baseInfo = base.GetCardInfo();
 		return $"{baseInfo} | 类型：状态卡牌";
+	}
+
+	public override Card CreateRuntimeInstance()
+	{
+		StateCard card = new StateCard(CardId, string.Empty, EnergyCost, EffectType, EffectDescription, NeedTarget, CardName);
+		card.GenerateUniqueInGameId();
+		return card;
+	}
+
+	protected override CardApplyResult ApplyEffect(IUnitInstance source, IUnitInstance target)
+	{
+		string errorMessage = $"状态牌 CardId={CardId} 的效果类型 {EffectType} 暂未实现。";
+		AppendConsoleError(errorMessage, true);
+		return new CardApplyResult(false, this, source, target, errorMessage: errorMessage);
 	}
 
 	// 状态卡牌专属方法：应用状态效果（示例）

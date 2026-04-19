@@ -13,8 +13,8 @@ public partial class SkillCard : Card
 	public SkillCard() { }
 
 	// 带参数构造
-	public SkillCard(int cardId, string uniqueInGameId, int energyCost, EffectType effectType, string effectDesc, bool needTarget, int extraShield)
-		: base(cardId, uniqueInGameId, energyCost, CardCategory.Skill, effectType, effectDesc, needTarget)
+	public SkillCard(int cardId, string uniqueInGameId, int energyCost, EffectType effectType, string effectDesc, bool needTarget, int extraShield, string cardName = "")
+		: base(cardId, uniqueInGameId, energyCost, CardCategory.Skill, effectType, effectDesc, needTarget, cardName)
 	{
 		ExtraShield = extraShield;
 	}
@@ -22,7 +22,29 @@ public partial class SkillCard : Card
 	// 重写基类方法
 	public override string GetCardInfo()
 	{
-		
+		return base.GetCardInfo() + $", Shield: {ExtraShield}";
+	}
+
+	public override Card CreateRuntimeInstance()
+	{
+		SkillCard card = new SkillCard(CardId, string.Empty, EnergyCost, EffectType, EffectDescription, NeedTarget, ExtraShield, CardName);
+		card.GenerateUniqueInGameId();
+		return card;
+	}
+
+	protected override CardApplyResult ApplyEffect(IUnitInstance source, IUnitInstance target)
+	{
+		switch (EffectType)
+		{
+			case EffectType.Shield:
+				return new CardApplyResult(true, this, source, target, EffectSystem.ApplyShield(source, ExtraShield));
+			case EffectType.Damage:
+				return new CardApplyResult(true, this, source, target, EffectSystem.ApplyAttack(source, target));
+			default:
+				string errorMessage = $"技能牌 CardId={CardId} 的效果类型 {EffectType} 暂未实现。";
+				AppendConsoleError(errorMessage, true);
+				return new CardApplyResult(false, this, source, target, errorMessage: errorMessage);
+		}
 	}
 
 	// 技能卡牌专属方法：执行技能效果（示例）

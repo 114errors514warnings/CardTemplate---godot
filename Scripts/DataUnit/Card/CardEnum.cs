@@ -12,7 +12,8 @@ namespace CardSimulator
 	// 效果类型枚举（示例，你可根据需求扩展）
 	public enum EffectType
 	{
-		Damage = 0,        // 造成伤害
+		None = 0,       // 无效果
+		Damage = 1,        // 造成伤害
 		Shield,        // 增加护盾
 		AddState,		//添加状态
 		ClearState,

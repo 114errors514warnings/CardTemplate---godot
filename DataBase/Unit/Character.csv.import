@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b2li36qtjcn4r"
+
+[deps]
+
+files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation"]
+
+source_file="res://DataBase/Unit/Character.csv"
+dest_files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

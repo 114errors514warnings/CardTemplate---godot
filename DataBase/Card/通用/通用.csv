@@ -1,3 +1,7 @@
 CardId,CardName,CardType,EnergyCost,EffectType,NeedTarget,EffectDesc,AttackDamage,ShieldValue,StateType
 1001,攻击,Attack,1,Damage,True,攻击,0,0,None
 2001,护盾,Skill,1,Shield,False,防御,0,0,None
+2002,治疗,Skill,1,Heal,False,治疗,0,0,None
+3001,燃烧,State,1,None,False,获得2点攻击力，回合结束时移除,0,0,Ignite
+3002,易伤,State,1,None,True,赋予2层易伤,0,0,Vulnerable
+3003,虚弱,State,1,None,True,赋予2层虚弱,0,0,Weak
