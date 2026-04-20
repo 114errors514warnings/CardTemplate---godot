@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cvghtqmqelbug"
+
+[deps]
+
+files=["res://DataBase/Unit/Character/CharacterDefaultDeck.CardId.translation", "res://DataBase/Unit/Character/CharacterDefaultDeck.Count.translation"]
+
+source_file="res://DataBase/Unit/Character/CharacterDefaultDeck.csv"
+dest_files=["res://DataBase/Unit/Character/CharacterDefaultDeck.CardId.translation", "res://DataBase/Unit/Character/CharacterDefaultDeck.Count.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

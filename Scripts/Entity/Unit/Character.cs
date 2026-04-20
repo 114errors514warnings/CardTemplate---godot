@@ -24,7 +24,23 @@ public class CharacterInstance : Character, IUnitInstance
 {
     public int UniqueInGameId { get; set; }
     public int Max_HP { get; set; }
-    public int HP { get; set; }
+
+    private int _hp;
+    public int HP
+    {
+        get => _hp;
+        set
+        {
+            bool wasAlive = _hp > 0;
+            _hp = value;
+            if (wasAlive && _hp <= 0)
+            {
+                OnDead?.Invoke();
+            }
+        }
+    }
+
+    public System.Action OnDead { get; set; }
     // public List<State> states { get; set; }
     public int Shield { get; set; }
     public int Max_costs;
@@ -45,7 +61,7 @@ public class CharacterInstance : Character, IUnitInstance
         // states = new List<State>();
         UniqueInGameId = UniqueIdGenerator.NextCharacterId();
         Max_HP = MAX_HP;
-        HP = MAX_HP;
+        _hp = MAX_HP;
         Attack = Ini_Attack;
         Defend = Ini_Defend;
         Shield = 0;
@@ -65,7 +81,7 @@ public class CharacterInstance : Character, IUnitInstance
     {
         // this.states = new List<State>(states);
         UniqueInGameId = UniqueIdGenerator.NextCharacterId();
-        this.HP = HP;
+        _hp = HP;
         this.Attack = Attack;
         this.Defend = Defend;
         this.Shield = Shield;
@@ -84,7 +100,7 @@ public class CharacterInstance : Character, IUnitInstance
         // states = new List<State>();
         UniqueInGameId = UniqueIdGenerator.NextCharacterId();
         Max_HP = c.MAX_HP;
-        HP = c.MAX_HP;
+        _hp = c.MAX_HP;
         Attack = c.Ini_Attack;
         Defend = c.Ini_Defend;
         Shield = 0;

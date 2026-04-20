@@ -8,6 +8,7 @@
 [ext_resource type="Script" uid="uid://d3dwqrovoe2a" path="res://Scripts/Interact/回合控制/PlayCard.cs" id="6"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddCharacterCard.cs" id="9"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -105,6 +106,7 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "新增卡牌
 "
+script = ExtResource("9")
 
 [node name="出牌" type="Button" parent="操作面板/卡牌操作" unique_id=896988153]
 editor_description = "参数：手牌index、目标敌人UniqueInGameId（不需要目标时填-1）"

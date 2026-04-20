@@ -23,7 +23,23 @@ public class MonsterInstance : Monster, IUnitInstance
 {
     public int UniqueInGameId { get; set; }
     public int Max_HP { get; set; }
-    public int HP { get; set; }
+
+    private int _hp;
+    public int HP
+    {
+        get => _hp;
+        set
+        {
+            bool wasAlive = _hp > 0;
+            _hp = value;
+            if (wasAlive && _hp <= 0)
+            {
+                OnDead?.Invoke();
+            }
+        }
+    }
+
+    public System.Action OnDead { get; set; }
     // public List<State> states { get; set; }
     public int Shield { get; set; }
     public int Attack { get; set; }
@@ -37,7 +53,7 @@ public class MonsterInstance : Monster, IUnitInstance
         // states = new List<State>();
         UniqueInGameId = UniqueIdGenerator.NextMonsterId();
         Max_HP = MAX_HP;
-        HP = MAX_HP;
+        _hp = MAX_HP;
         Attack = Ini_Attack;
         Defend = Ini_Defend;
         Shield = 0;
@@ -52,7 +68,7 @@ public class MonsterInstance : Monster, IUnitInstance
         // this.states = new List<State>(states);
         UniqueInGameId = UniqueIdGenerator.NextMonsterId();
         Max_HP = MAX_HP;
-        this.HP = HP;
+        _hp = HP;
         this.Attack = Attack;
         this.Defend = Defend;
         this.Shield = Shield;
@@ -65,7 +81,7 @@ public class MonsterInstance : Monster, IUnitInstance
         // states = new List<State>();
         UniqueInGameId = UniqueIdGenerator.NextMonsterId();
         Max_HP = m.MAX_HP;
-        HP = Max_HP;
+        _hp = Max_HP;
         Attack = Ini_Attack;
         Defend = Ini_Defend;
         Shield = 0;

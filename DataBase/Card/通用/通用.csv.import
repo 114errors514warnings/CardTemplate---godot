@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://br4jssh1tergt"
+
+[deps]
+
+files=["res://DataBase/Card/通用/通用.CardName.translation", "res://DataBase/Card/通用/通用.CardType.translation", "res://DataBase/Card/通用/通用.EnergyCost.translation", "res://DataBase/Card/通用/通用.EffectType.translation", "res://DataBase/Card/通用/通用.NeedTarget.translation", "res://DataBase/Card/通用/通用.EffectDesc.translation", "res://DataBase/Card/通用/通用.AttackDamage.translation", "res://DataBase/Card/通用/通用.ShieldValue.translation", "res://DataBase/Card/通用/通用.StateType.translation"]
+
+source_file="res://DataBase/Card/通用/通用.csv"
+dest_files=["res://DataBase/Card/通用/通用.CardName.translation", "res://DataBase/Card/通用/通用.CardType.translation", "res://DataBase/Card/通用/通用.EnergyCost.translation", "res://DataBase/Card/通用/通用.EffectType.translation", "res://DataBase/Card/通用/通用.NeedTarget.translation", "res://DataBase/Card/通用/通用.EffectDesc.translation", "res://DataBase/Card/通用/通用.AttackDamage.translation", "res://DataBase/Card/通用/通用.ShieldValue.translation", "res://DataBase/Card/通用/通用.StateType.translation"]
+
+[params]
+
+compress=true
+delimiter=0
+unescape_keys=false
+unescape_translations=true
