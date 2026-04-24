@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CardSimulator;
 
 public class Monster : Unit
 {
@@ -40,7 +41,7 @@ public class MonsterInstance : Monster, IUnitInstance
     }
 
     public System.Action OnDead { get; set; }
-    // public List<State> states { get; set; }
+    public Dictionary<StateType, StateRuntimeData> States { get; } = new Dictionary<StateType, StateRuntimeData>();
     public int Shield { get; set; }
     public int Attack { get; set; }
     public int Defend { get; set; }

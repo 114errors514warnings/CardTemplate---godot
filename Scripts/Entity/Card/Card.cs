@@ -2,6 +2,7 @@
 using Godot;
 using CardSimulator;
 using System;
+using System.Collections.Generic;
 
 // 标记为可在编辑器中创建的资源
 [GlobalClass]
@@ -42,9 +43,9 @@ public partial class Card : Resource
 	
 	[Export]
 	public CardCategory Category { get; set; } // 卡牌种类（通过枚举限定）
-	
-	[Export]
-	public EffectType EffectType { get; set; } // 效果类型
+
+	// 效果类型列表，支持多效果（CSV中用"|"分隔）
+	public EffectType[] EffectTypes { get; set; } = Array.Empty<EffectType>();
 	
 	[Export(PropertyHint.MultilineText)]
 	public string EffectDescription { get; set; } = string.Empty; // 效果描述
@@ -52,26 +53,43 @@ public partial class Card : Resource
 	[Export]
 	public bool NeedTarget { get; set; } = false; // 是否需要目标
 
+	// 各效果对应的参数，Params[i][0] 固定表示目标类型，后续参数为该效果自身参数
+	public int[][] Params { get; set; } = Array.Empty<int[]>();
+
 	// 构造函数（Godot Resource需保留无参构造）
 	public Card() { }
 
-	// 带参数的构造函数（便于代码中快速创建卡牌）
-	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType effectType, string effectDesc, bool needTarget, string cardName = "")
+	// 带参数的构造函数，NeedTarget 自动从 cardParams 推导
+	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType[] effectTypes, string effectDesc, int[][] cardParams = null, string cardName = "")
 	{
 		CardId = cardId;
 		CardName = cardName;
 		UniqueInGameId = uniqueInGameId;
 		EnergyCost = energyCost;
 		Category = category;
-		EffectType = effectType;
+		EffectTypes = effectTypes ?? Array.Empty<EffectType>();
 		EffectDescription = effectDesc;
-		NeedTarget = needTarget;
+		Params = cardParams ?? Array.Empty<int[]>();
+		NeedTarget = DeriveNeedTarget(Params);
 	}
 
-	// 通用方法：获取卡牌基础信息（示例）
+	// 自动推导 NeedTarget：任意效果的 TargetType == SelectedTarget 则为 true
+	private static bool DeriveNeedTarget(int[][] cardParams)
+	{
+		if (cardParams == null) return false;
+		foreach (int[] p in cardParams)
+		{
+			if (p != null && p.Length > 0 && p[0] == (int)EffectTargetType.SelectedTarget)
+				return true;
+		}
+		return false;
+	}
+
+	// 通用方法：获取卡牌基础信息
 	public virtual string GetCardInfo()
 	{
-		return $"Card ID: {CardId}, Name: {CardName}, Energy: {EnergyCost}, Category: {Category}";
+		string effects = string.Join("|", EffectTypes);
+		return $"Card ID: {CardId}, Name: {CardName}, Energy: {EnergyCost}, Category: {Category}, Effects: {effects}";
 	}
 
 	public CardApplyResult Apply(IUnitInstance source, IUnitInstance target = null)
@@ -93,7 +111,7 @@ public partial class Card : Resource
 
 	public virtual Card CreateRuntimeInstance()
 	{
-		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectType, EffectDescription, NeedTarget, CardName);
+		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName);
 		card.GenerateUniqueInGameId();
 		return card;
 	}
@@ -107,17 +125,200 @@ public partial class Card : Resource
 
 	protected virtual CardApplyResult ApplyEffect(IUnitInstance source, IUnitInstance target)
 	{
-		switch (EffectType)
+		CardApplyResult lastResult = null;
+
+		for (int i = 0; i < EffectTypes.Length; i++)
 		{
-			case EffectType.Damage:
-				return new CardApplyResult(true, this, source, target, EffectSystem.ApplyAttack(source, target));
-			case EffectType.Shield:
-				return new CardApplyResult(true, this, source, target, EffectSystem.ApplyShield(source));
-			default:
-				string errorMessage = $"卡牌ID {CardId} 的效果类型 {EffectType} 暂未实现。";
+			int[] rawEffectParams = (Params != null && i < Params.Length) ? Params[i] : Array.Empty<int>();
+			EffectType effectType = EffectTypes[i];
+			EffectTargetType effectTargetType = ParseEffectTargetType(rawEffectParams);
+			int[] effectArgs = GetEffectArguments(rawEffectParams);
+			List<IUnitInstance> resolvedTargets = ResolveEffectTargets(source, target, effectTargetType);
+
+			if (resolvedTargets.Count == 0)
+			{
+				string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 未解析出有效目标，targetType={effectTargetType}。";
 				AppendConsoleError(errorMessage, true);
 				return new CardApplyResult(false, this, source, target, errorMessage: errorMessage);
+			}
+
+			CardApplyResult result;
+			switch (effectType)
+			{
+				case EffectType.Damage:
+					result = ApplyDamageEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.Shield:
+					result = ApplyShieldEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.AddState:
+					result = ApplyAddStateEffect(source, target, resolvedTargets, effectArgs);
+					break;
+				case EffectType.ClearState:
+					result = ApplyClearStateEffect(source, target, resolvedTargets, effectArgs);
+					break;
+				default:
+					string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 暂未实现。";
+					AppendConsoleError(errorMessage, true);
+					result = new CardApplyResult(false, this, source, target, errorMessage: errorMessage);
+					break;
+			}
+
+			if (!result.Success)
+				return result;
+
+			lastResult = result;
 		}
+
+		if (lastResult == null)
+		{
+			return new CardApplyResult(true, this, source, target);
+		}
+
+		return lastResult;
+	}
+
+	private CardApplyResult ApplyDamageEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		EffectResult lastEffectResult = null;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, effectArgs);
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private CardApplyResult ApplyShieldEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		EffectResult lastEffectResult = null;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			lastEffectResult = EffectSystem.ApplyShield(resolvedTarget, effectArgs);
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private CardApplyResult ApplyAddStateEffect(IUnitInstance source, IUnitInstance originalTarget, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		if (effectArgs.Length <= 0)
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 AddState 缺少参数，至少需要 stateType。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, originalTarget, errorMessage: errorMessage);
+		}
+
+		StateType stateType = (StateType)effectArgs[0];
+		if (!Enum.IsDefined(typeof(StateType), stateType) || stateType == StateType.None)
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 AddState 参数非法，stateType={effectArgs[0]}。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, originalTarget, errorMessage: errorMessage);
+		}
+
+		int stacks = effectArgs.Length > 1 ? effectArgs[1] : 1;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			StateSystem.AddOrUpdateState(resolvedTarget, stateType, stacks);
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private CardApplyResult ApplyClearStateEffect(IUnitInstance source, IUnitInstance originalTarget, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		if (effectArgs.Length <= 0)
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 ClearState 缺少参数，至少需要 stateType。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, originalTarget, errorMessage: errorMessage);
+		}
+
+		StateType stateType = (StateType)effectArgs[0];
+		if (!Enum.IsDefined(typeof(StateType), stateType) || stateType == StateType.None)
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 ClearState 参数非法，stateType={effectArgs[0]}。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, originalTarget, errorMessage: errorMessage);
+		}
+
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			StateSystem.RemoveState(resolvedTarget, stateType);
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private static EffectTargetType ParseEffectTargetType(int[] rawEffectParams)
+	{
+		if (rawEffectParams == null || rawEffectParams.Length == 0)
+		{
+			return EffectTargetType.Auto;
+		}
+
+		EffectTargetType parsed = (EffectTargetType)rawEffectParams[0];
+		return Enum.IsDefined(typeof(EffectTargetType), parsed) ? parsed : EffectTargetType.Auto;
+	}
+
+	private static int[] GetEffectArguments(int[] rawEffectParams)
+	{
+		if (rawEffectParams == null || rawEffectParams.Length <= 1)
+		{
+			return Array.Empty<int>();
+		}
+
+		int[] args = new int[rawEffectParams.Length - 1];
+		Array.Copy(rawEffectParams, 1, args, 0, args.Length);
+		return args;
+	}
+
+	private static List<IUnitInstance> ResolveEffectTargets(IUnitInstance source, IUnitInstance selectedTarget, EffectTargetType effectTargetType)
+	{
+		List<IUnitInstance> targets = new List<IUnitInstance>();
+		switch (effectTargetType)
+		{
+			case EffectTargetType.Self:
+				if (source != null)
+				{
+					targets.Add(source);
+				}
+				break;
+			case EffectTargetType.SelectedTarget:
+				if (selectedTarget != null)
+				{
+					targets.Add(selectedTarget);
+				}
+				break;
+			case EffectTargetType.AllEnemies:
+				targets.AddRange(BattleSytem.Current?.GetEnemyUnits(source) ?? new List<IUnitInstance>());
+				break;
+			case EffectTargetType.AllUnits:
+				targets.AddRange(BattleSytem.Current?.GetAllUnits() ?? new List<IUnitInstance>());
+				break;
+			case EffectTargetType.Auto:
+			default:
+				if (selectedTarget != null)
+				{
+					targets.Add(selectedTarget);
+				}
+				else if (source != null)
+				{
+					targets.Add(source);
+				}
+				break;
+		}
+
+		return targets;
 	}
 
 	protected static void AppendConsoleInfo(string message)

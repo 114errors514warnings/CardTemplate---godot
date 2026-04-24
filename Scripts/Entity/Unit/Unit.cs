@@ -1,7 +1,9 @@
 using System.Threading;
+using System.Collections.Generic;
 //using System.Collections.Generic;
 //using UnityEditor.Experimental.GraphView;
 //using UnityEngine;
+using CardSimulator;
 
 // Unit 类仅包含数据，不需要 Unity 相关引用。
 //作为所有游戏中出现单位的基类，不管是从配置中加载的还是在游戏中的实体
@@ -40,8 +42,7 @@ public interface IUnitInstance
 	int UniqueInGameId { get; set; }
 	int Max_HP { get; set; }
 	int HP { get; set; }
-	// State 类型在当前项目中未定义，已注释相关成员。
-	// List<State> states { get; set; }
+	Dictionary<StateType, StateRuntimeData> States { get; }
 	int Shield { get; set; }
 	int Attack { get; set; }
 	int Defend { get; set; }

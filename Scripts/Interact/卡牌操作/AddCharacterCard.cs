@@ -2,7 +2,7 @@ using Godot;
 
 public partial class AddCharacterCard : Button
 {
-	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用.csv";
+	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
 	private const string ParameterFormat = "卡牌ID [增加数量]";
 
 	public override void _Ready()

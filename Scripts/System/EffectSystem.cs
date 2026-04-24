@@ -78,15 +78,19 @@ public sealed class EffectContext
 {
     public IUnitInstance Source { get; }
     public IUnitInstance Target { get; }
-    public int ExtraAttack { get; }
-    public int ExtraShield { get; }
+    // 当前效果的参数数组，params[0]为第一个参数，依此类推
+    public int[] Params { get; }
 
-    public EffectContext(IUnitInstance source, IUnitInstance target = null, int extraAttack = 0, int extraShield = 0)
+    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
         Target = target;
-        ExtraAttack = extraAttack;
-        ExtraShield = extraShield;
+        Params = effectParams ?? Array.Empty<int>();
+    }
+
+    public int GetParam(int index, int defaultValue = 0)
+    {
+        return (Params != null && index < Params.Length) ? Params[index] : defaultValue;
     }
 }
 
@@ -112,7 +116,8 @@ public sealed class AttackEffect : IEffect
             throw new ArgumentException("Attack effect requires a target.", nameof(context));
         }
 
-        int damage = Math.Max(0, context.Source.Attack + context.ExtraAttack);
+        int damage = Math.Max(0, context.Source.Attack + context.GetParam(0));
+        damage = StateSystem.ModifyIncomingDamage(context.Source, context.Target, damage);
         int targetShieldBefore = context.Target.Shield;
         int targetHpBefore = context.Target.HP;
         if (damage == 0)
@@ -154,7 +159,7 @@ public sealed class ShieldEffect : IEffect
             throw new ArgumentNullException(nameof(context));
         }
 
-        int shieldGain = Math.Max(0, context.Source.Defend + context.ExtraShield);
+        int shieldGain = Math.Max(0, context.Source.Defend + context.GetParam(0));
         int sourceShieldBefore = context.Source.Shield;
         if (shieldGain == 0)
         {
@@ -188,13 +193,13 @@ public static class EffectSystem
         return effect.Apply(context);
     }
 
-    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int extraAttack = 0)
+    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null)
     {
-        return Apply(Attack, new EffectContext(source, target, extraAttack: extraAttack));
+        return Apply(Attack, new EffectContext(source, target, effectParams));
     }
 
-    public static EffectResult ApplyShield(IUnitInstance source, int extraShield = 0)
+    public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)
     {
-        return Apply(Shield, new EffectContext(source, extraShield: extraShield));
+        return Apply(Shield, new EffectContext(source, effectParams: effectParams));
     }
 }

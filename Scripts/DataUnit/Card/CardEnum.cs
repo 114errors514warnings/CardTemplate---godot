@@ -20,4 +20,23 @@ namespace CardSimulator
 		Heal,          // 治疗
 		DrawCard,      // 抽卡
 	}
+
+	// 状态类型枚举（可挂载到 UnitInstance）
+	public enum StateType
+	{
+		None = 0,
+		Vulnerable = 1, // 易伤：受到的伤害增加50%
+		Weak = 2,
+		Ignite = 3,
+	}
+
+	// 每个效果独立的目标选择方式
+	public enum EffectTargetType
+	{
+		Auto = 0,
+		Self = 1,
+		SelectedTarget = 2,
+		AllEnemies = 3,
+		AllUnits = 4,
+	}
 }

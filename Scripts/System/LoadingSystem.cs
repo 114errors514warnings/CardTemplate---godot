@@ -10,7 +10,7 @@ using System.Collections.Generic;
 [GlobalClass]
 public partial class LoadingSystem : Node
 {
-	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用.csv";
+	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
 
 	/// <summary>
 	/// 缓存已加载的卡牌数据，Key 为 CardId

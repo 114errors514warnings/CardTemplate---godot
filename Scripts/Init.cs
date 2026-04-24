@@ -16,7 +16,7 @@ public partial class Init : Control
         sb.AppendLine("Loading cards...");
 
         // 直接调用LoadCards
-        var cards = LoadingSystem.LoadCards("res://DataBase/Card/通用/通用.csv", true);
+        var cards = LoadingSystem.LoadCards("res://DataBase/Card/通用/通用Card.csv", true);
 
         sb.AppendLine($"Loaded {cards.Count} cards");
 

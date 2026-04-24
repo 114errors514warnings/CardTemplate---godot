@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CardSimulator;
 
 // 通过配置加载的人物
 public class Character : Unit
@@ -41,7 +42,7 @@ public class CharacterInstance : Character, IUnitInstance
     }
 
     public System.Action OnDead { get; set; }
-    // public List<State> states { get; set; }
+    public Dictionary<StateType, StateRuntimeData> States { get; } = new Dictionary<StateType, StateRuntimeData>();
     public int Shield { get; set; }
     public int Max_costs;
     public int costs;
