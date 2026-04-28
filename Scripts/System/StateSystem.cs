@@ -23,6 +23,8 @@ public static class StateSystem
 			case StateType.None:
 				return false;
 			case StateType.Vulnerable:
+			case StateType.Weak:
+			case StateType.CounterAttack:
 				return true;
 			default:
 				return false;
@@ -89,11 +91,28 @@ public static class StateSystem
 
 		if (TryGetStateStacks(target, StateType.Vulnerable, out int vulnerableStacks) && vulnerableStacks > 0)
 		{
-			// 易伤：受到伤害 +50%，按向上取整处理
-			damage = (damage * 3 + 1) / 2;
+			// 易伤：受到伤害 +50%，按统一规则向下取整
+			damage = FloorByRule(damage * 1.5d);
+		}
+
+		if (source != null && TryGetStateStacks(source, StateType.Weak, out int weakStacks) && weakStacks > 0)
+		{
+			// 虚弱：造成的攻击伤害 -25%，按统一规则向下取整
+			damage = FloorByRule(damage * 0.75d);
 		}
 
 		return damage;
+	}
+
+	private static int FloorByRule(double value)
+	{
+		if (value >= 0)
+		{
+			return (int)Math.Floor(value);
+		}
+
+		// 负数按绝对值向下取整后再恢复符号，避免 -1.2 被取整为 -2。
+		return -(int)Math.Floor(Math.Abs(value));
 	}
 
 	public static void OnTurnStart(IUnitInstance unit)

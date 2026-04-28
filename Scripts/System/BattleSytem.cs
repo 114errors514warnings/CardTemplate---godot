@@ -1230,7 +1230,7 @@ public partial class BattleSytem : Node
         RefreshBattleInfoDisplay();
     }
 
-    private void AppendPanelConsoleInfo(string message)
+    public void AppendPanelConsoleInfo(string message)
     {
         AppendPanelConsole("[信息] " + message);
     }
