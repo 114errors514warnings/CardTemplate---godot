@@ -5,11 +5,36 @@ using System.Text;
 
 public partial class BattleSytem : Node
 {
+    public static BattleSytem Current { get; private set; }
+
     private static readonly Random RandomGenerator = new Random();
+
+    private enum BattleInfoTab
+    {
+        Runtime,
+        DrawPile,
+        DiscardPile
+    }
+
+    private enum PileDisplayOrderMode
+    {
+        PileOrder,
+        IdOrder
+    }
 
     private const string DefaultCharacterCsvPath = "res://DataBase/Unit/Character.csv";
     private const string DefaultMonsterCsvPath = "res://DataBase/Unit/Monster.csv";
-    private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用.csv";
+    private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
+    private const string DefaultCharacterDeckCsvPath = "res://DataBase/Unit/Character/CharacterDefaultDeck.csv";
+
+    private const string BattleInfoLabelPath = "局内信息/对局信息显示";
+    private const string BattleInfoLabelPathInRoot = "UI_Main/局内信息/对局信息显示";
+    private const string RuntimeTabButtonPath = "局内信息/tab栏/局内";
+    private const string RuntimeTabButtonPathInRoot = "UI_Main/局内信息/tab栏/局内";
+    private const string DrawPileTabButtonPath = "局内信息/tab栏/抽牌堆详细";
+    private const string DrawPileTabButtonPathInRoot = "UI_Main/局内信息/tab栏/抽牌堆详细";
+    private const string DiscardPileTabButtonPath = "局内信息/tab栏/弃牌堆详细";
+    private const string DiscardPileTabButtonPathInRoot = "UI_Main/局内信息/tab栏/弃牌堆详细";
 
     [Export]
     public BattleSetupData SetupData;
@@ -26,6 +51,10 @@ public partial class BattleSytem : Node
     [Export]
     public bool IsPlayerTurn = false;
 
+    private BattleInfoTab CurrentBattleInfoTab = BattleInfoTab.Runtime;
+    private PileDisplayOrderMode CurrentPileDisplayOrderMode = PileDisplayOrderMode.PileOrder;
+    private string CachedRuntimeBattleInfo = string.Empty;
+
     // 玩家角色实例（唯一）
     public CharacterInstance Player;
 
@@ -35,6 +64,9 @@ public partial class BattleSytem : Node
     // Called when the node enters the scene tree for the first time.
     public override void _Ready()
     {
+        Current = this;
+        BindBattleInfoTabButtons();
+
         if (SetupData != null)
         {
             SelectedCharacterId = SetupData.CharacterId;
@@ -46,6 +78,70 @@ public partial class BattleSytem : Node
         }
 
         RefreshBattleInfoDisplay();
+    }
+
+    public override void _ExitTree()
+    {
+        if (ReferenceEquals(Current, this))
+        {
+            Current = null;
+        }
+    }
+
+    public List<IUnitInstance> GetEnemyUnits(IUnitInstance source)
+    {
+        List<IUnitInstance> result = new List<IUnitInstance>();
+        if (source == null)
+        {
+            return result;
+        }
+
+        if (source is CharacterInstance)
+        {
+            if (Monsters != null)
+            {
+                foreach (MonsterInstance monster in Monsters.Values)
+                {
+                    if (monster != null && monster.HP > 0)
+                    {
+                        result.Add(monster);
+                    }
+                }
+            }
+            return result;
+        }
+
+        if (source is MonsterInstance)
+        {
+            if (Player != null && Player.HP > 0)
+            {
+                result.Add(Player);
+            }
+        }
+
+        return result;
+    }
+
+    public List<IUnitInstance> GetAllUnits()
+    {
+        List<IUnitInstance> result = new List<IUnitInstance>();
+        if (Player != null && Player.HP > 0)
+        {
+            result.Add(Player);
+        }
+
+        if (Monsters != null)
+        {
+            foreach (MonsterInstance monster in Monsters.Values)
+            {
+                if (monster != null && monster.HP > 0)
+                {
+                    result.Add(monster);
+                }
+            }
+        }
+
+        return result;
     }
 
     public bool StartGameFromSetupData()
@@ -112,6 +208,8 @@ public partial class BattleSytem : Node
         InitializePlayer(characterId);
         InitializeMonsters(monsterIds);
 
+        CurrentPileDisplayOrderMode = PileDisplayOrderMode.PileOrder;
+
         InitializePlayerDrawPileFromCharacterCards();
 
         IsBattleStarted = true;
@@ -175,11 +273,7 @@ public partial class BattleSytem : Node
             return;
         }
 
-        Label battleInfoLabel = scene.GetNodeOrNull<Label>("局内信息/对局信息显示");
-        if (battleInfoLabel == null)
-        {
-            battleInfoLabel = scene.GetNodeOrNull<Label>("UI_Main/局内信息/对局信息显示");
-        }
+        Label battleInfoLabel = FindBattleInfoLabel(scene);
 
         if (battleInfoLabel == null)
         {
@@ -196,7 +290,221 @@ public partial class BattleSytem : Node
             BuildSetupBattleInfo(builder);
         }
 
-        battleInfoLabel.Text = builder.ToString();
+        CachedRuntimeBattleInfo = builder.ToString();
+        battleInfoLabel.Text = BuildCurrentBattleInfoDisplayText();
+        UpdateBattleInfoTabVisualState(scene);
+    }
+
+    private void BindBattleInfoTabButtons()
+    {
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return;
+        }
+
+        Button runtimeButton = FindBattleInfoButton(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot);
+        if (runtimeButton != null)
+        {
+            runtimeButton.Pressed -= OnRuntimeBattleInfoTabPressed;
+            runtimeButton.Pressed += OnRuntimeBattleInfoTabPressed;
+        }
+
+        Button drawPileButton = FindBattleInfoButton(scene, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot);
+        if (drawPileButton != null)
+        {
+            drawPileButton.Pressed -= OnDrawPileBattleInfoTabPressed;
+            drawPileButton.Pressed += OnDrawPileBattleInfoTabPressed;
+        }
+
+        Button discardPileButton = FindBattleInfoButton(scene, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot);
+        if (discardPileButton != null)
+        {
+            discardPileButton.Pressed -= OnDiscardPileBattleInfoTabPressed;
+            discardPileButton.Pressed += OnDiscardPileBattleInfoTabPressed;
+        }
+
+        UpdateBattleInfoTabVisualState(scene);
+    }
+
+    private void OnRuntimeBattleInfoTabPressed()
+    {
+        SwitchBattleInfoTab(BattleInfoTab.Runtime);
+    }
+
+    private void OnDrawPileBattleInfoTabPressed()
+    {
+        SwitchBattleInfoTab(BattleInfoTab.DrawPile);
+    }
+
+    private void OnDiscardPileBattleInfoTabPressed()
+    {
+        SwitchBattleInfoTab(BattleInfoTab.DiscardPile);
+    }
+
+    private void SwitchBattleInfoTab(BattleInfoTab tab)
+    {
+        CurrentBattleInfoTab = tab;
+
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return;
+        }
+
+        Label battleInfoLabel = FindBattleInfoLabel(scene);
+        if (battleInfoLabel != null)
+        {
+            battleInfoLabel.Text = BuildCurrentBattleInfoDisplayText();
+        }
+
+        UpdateBattleInfoTabVisualState(scene);
+    }
+
+    private Label FindBattleInfoLabel(Node scene)
+    {
+        Label battleInfoLabel = scene.GetNodeOrNull<Label>(BattleInfoLabelPath);
+        if (battleInfoLabel != null)
+        {
+            return battleInfoLabel;
+        }
+
+        return scene.GetNodeOrNull<Label>(BattleInfoLabelPathInRoot);
+    }
+
+    private Button FindBattleInfoButton(Node scene, string primaryPath, string fallbackPath)
+    {
+        Button button = scene.GetNodeOrNull<Button>(primaryPath);
+        if (button != null)
+        {
+            return button;
+        }
+
+        return scene.GetNodeOrNull<Button>(fallbackPath);
+    }
+
+    private string BuildCurrentBattleInfoDisplayText()
+    {
+        return CurrentBattleInfoTab switch
+        {
+            BattleInfoTab.DrawPile => BuildPileDetailText("抽牌堆", Player?.drawpile),
+            BattleInfoTab.DiscardPile => BuildPileDetailText("弃牌堆", Player?.discardpile),
+            _ => CachedRuntimeBattleInfo
+        };
+    }
+
+    private string BuildPileDetailText(string pileName, List<Card> cards)
+    {
+        StringBuilder builder = new StringBuilder();
+        string orderDescription = CurrentPileDisplayOrderMode == PileDisplayOrderMode.PileOrder
+            ? "牌堆顺序"
+            : "ID排序（CardId升序，UniqueInGameId升序）";
+        builder.AppendLine($"{pileName}（{orderDescription}）：");
+
+        if (!IsBattleStarted || Player == null)
+        {
+            builder.Append("当前未开始战斗，暂无牌堆详情。\n\n");
+            builder.Append(CachedRuntimeBattleInfo);
+            return builder.ToString();
+        }
+
+        if (cards == null || cards.Count == 0)
+        {
+            builder.Append("无");
+            return builder.ToString();
+        }
+
+        List<Card> cardsToDisplay = GetCardsForDisplay(cards);
+        for (int index = 0; index < cardsToDisplay.Count; index++)
+        {
+            Card card = cardsToDisplay[index];
+            string uniqueInGameId = string.IsNullOrWhiteSpace(card?.UniqueInGameId)
+                ? "未生成"
+                : card.UniqueInGameId;
+            builder.AppendLine($"{index + 1}、{GetCardDisplayName(card)} CardId={card?.CardId ?? 0} UniqueInGameId={uniqueInGameId}");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private List<Card> GetCardsForDisplay(List<Card> cards)
+    {
+        List<Card> result = cards == null ? new List<Card>() : new List<Card>(cards);
+        if (CurrentPileDisplayOrderMode == PileDisplayOrderMode.PileOrder)
+        {
+            return result;
+        }
+
+        result.Sort(CompareCardsByIdOrder);
+        return result;
+    }
+
+    private int CompareCardsByIdOrder(Card left, Card right)
+    {
+        int leftCardId = left?.CardId ?? int.MaxValue;
+        int rightCardId = right?.CardId ?? int.MaxValue;
+        int cardIdCompare = leftCardId.CompareTo(rightCardId);
+        if (cardIdCompare != 0)
+        {
+            return cardIdCompare;
+        }
+
+        int leftUniqueNumeric = ParseUniqueInGameIdNumericValue(left?.UniqueInGameId);
+        int rightUniqueNumeric = ParseUniqueInGameIdNumericValue(right?.UniqueInGameId);
+        int uniqueNumericCompare = leftUniqueNumeric.CompareTo(rightUniqueNumeric);
+        if (uniqueNumericCompare != 0)
+        {
+            return uniqueNumericCompare;
+        }
+
+        string leftUnique = left?.UniqueInGameId ?? string.Empty;
+        string rightUnique = right?.UniqueInGameId ?? string.Empty;
+        return string.Compare(leftUnique, rightUnique, StringComparison.Ordinal);
+    }
+
+    private int ParseUniqueInGameIdNumericValue(string uniqueInGameId)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueInGameId))
+        {
+            return int.MaxValue;
+        }
+
+        return int.TryParse(uniqueInGameId, out int parsed) ? parsed : int.MaxValue;
+    }
+
+    public bool TogglePileDisplayOrderMode()
+    {
+        CurrentPileDisplayOrderMode = CurrentPileDisplayOrderMode == PileDisplayOrderMode.PileOrder
+            ? PileDisplayOrderMode.IdOrder
+            : PileDisplayOrderMode.PileOrder;
+
+        if (CurrentBattleInfoTab == BattleInfoTab.DrawPile || CurrentBattleInfoTab == BattleInfoTab.DiscardPile)
+        {
+            SwitchBattleInfoTab(CurrentBattleInfoTab);
+        }
+
+        return CurrentPileDisplayOrderMode == PileDisplayOrderMode.PileOrder;
+    }
+
+    private void UpdateBattleInfoTabVisualState(Node scene)
+    {
+        Button runtimeButton = FindBattleInfoButton(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot);
+        Button drawPileButton = FindBattleInfoButton(scene, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot);
+        Button discardPileButton = FindBattleInfoButton(scene, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot);
+
+        UpdateBattleInfoButtonState(runtimeButton, CurrentBattleInfoTab == BattleInfoTab.Runtime);
+        UpdateBattleInfoButtonState(drawPileButton, CurrentBattleInfoTab == BattleInfoTab.DrawPile);
+        UpdateBattleInfoButtonState(discardPileButton, CurrentBattleInfoTab == BattleInfoTab.DiscardPile);
+    }
+
+    private void UpdateBattleInfoButtonState(Button button, bool isActive)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.Disabled = isActive;
     }
 
     private void BuildRuntimeBattleInfo(StringBuilder builder)
@@ -231,7 +539,7 @@ public partial class BattleSytem : Node
         foreach (int monsterKey in monsterKeys)
         {
             MonsterInstance monster = Monsters[monsterKey];
-            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend}");
+            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield}");
         }
     }
 
@@ -248,6 +556,30 @@ public partial class BattleSytem : Node
             ? character.Name
             : "未知";
         builder.AppendLine($"当前选中角色ID：{SelectedCharacterId} 名称：{characterName}");
+
+        builder.Append("角色已添加卡牌：");
+
+        Dictionary<int, int> cardCounts = GetConfiguredCharacterCardCounts();
+        if (cardCounts.Count == 0)
+        {
+            builder.AppendLine("无");
+        }
+        else
+        {
+            List<int> cardIds = new List<int>(cardCounts.Keys);
+            cardIds.Sort();
+            List<string> cardParts = new List<string>();
+            foreach (int cardId in cardIds)
+            {
+                string cardName = LoadingSystem.CardDictionary.TryGetValue(cardId, out Card cardTemplate)
+                    ? GetCardDisplayName(cardTemplate)
+                    : $"CardId={cardId}";
+                cardParts.Add($"{cardName}x{cardCounts[cardId]}");
+            }
+
+            builder.AppendLine(string.Join(" ", cardParts));
+        }
+
         builder.AppendLine("已存在敌人ID：");
 
         Dictionary<int, int> monsterCounts = GetConfiguredMonsterCounts();
@@ -323,6 +655,24 @@ public partial class BattleSytem : Node
         return monsterCounts;
     }
 
+    private Dictionary<int, int> GetConfiguredCharacterCardCounts()
+    {
+        Dictionary<int, int> cardCounts = new Dictionary<int, int>();
+
+        if (SetupData == null)
+        {
+            return cardCounts;
+        }
+
+        SetupData.EnsureCharacterCardDictionaryInitialized();
+        foreach (int cardId in SetupData.CharacterCardIds.Keys)
+        {
+            cardCounts[cardId] = SetupData.CharacterCardIds[cardId];
+        }
+
+        return cardCounts;
+    }
+
     /// <summary>
     /// 初始化玩家角色实例，根据指定的角色ID
     /// </summary>
@@ -333,6 +683,11 @@ public partial class BattleSytem : Node
         if (characters.TryGetValue(characterId, out var character))
         {
             Player = new CharacterInstance(character);
+            Player.OnDead = () =>
+            {
+                AppendPanelConsoleInfo("战斗结束：玩家已死亡。游戏结束。");
+                EndGame();
+            };
             AppendPanelConsoleInfo($"已创建角色 {Player.Name}（ID: {characterId}, UniqueInGameId: {Player.UniqueInGameId}）。");
         }
         else
@@ -354,6 +709,7 @@ public partial class BattleSytem : Node
             if (monsters.TryGetValue(id, out var monster))
             {
                 var monsterInstance = new MonsterInstance(monster);
+                monsterInstance.OnDead = CreateMonsterOnDeadCallback(monsterInstance);
                 Monsters[monsterInstance.UniqueInGameId] = monsterInstance;
                 AppendPanelConsoleInfo($"已创建怪物 {monsterInstance.Name}（模板ID: {id}, UniqueInGameId: {monsterInstance.UniqueInGameId}，字典key: {monsterInstance.UniqueInGameId}）。");
             }
@@ -404,6 +760,7 @@ public partial class BattleSytem : Node
                 instance = new MonsterInstance(template);
             }
 
+            instance.OnDead = CreateMonsterOnDeadCallback(instance);
             Monsters[instance.UniqueInGameId] = instance;
             added++;
 
@@ -582,7 +939,6 @@ public partial class BattleSytem : Node
             AppendPanelConsoleInfo($"卡牌结算：{applyResult.EffectResult.BuildSummary()}");
         }
 
-        RemoveDeadMonsters();
         RefreshBattleInfoDisplay();
         CheckBattleEndAndHandle();
 
@@ -621,6 +977,13 @@ public partial class BattleSytem : Node
         }
 
         IsPlayerTurn = true;
+        StateSystem.OnTurnStart(Player);
+        if (Player.Shield > 0)
+        {
+            AppendPanelConsoleInfo($"玩家回合开始：角色护盾清零（{Player.Shield}->0）。");
+            Player.Shield = 0;
+        }
+
         int drawCount = Player.drawCardNum > 0 ? Player.drawCardNum : 0;
         int drawn = DrawCardsToHand(drawCount);
         Player.costs = Player.Max_costs;
@@ -644,6 +1007,23 @@ public partial class BattleSytem : Node
         List<int> orderedKeys = Monsters == null ? new List<int>() : new List<int>(Monsters.Keys);
         orderedKeys.Sort();
 
+        for (int index = 0; index < orderedKeys.Count; index++)
+        {
+            int uniqueInGameId = orderedKeys[index];
+            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster))
+            {
+                continue;
+            }
+
+            StateSystem.OnTurnStart(monster);
+
+            if (monster.Shield > 0)
+            {
+                AppendPanelConsoleInfo($"怪物回合开始：{monster.Name}#{monster.UniqueInGameId} 护盾清零（{monster.Shield}->0）。");
+                monster.Shield = 0;
+            }
+        }
+
         AppendPanelConsoleInfo($"怪物回合开始：本轮行动怪物数量 {orderedKeys.Count}。");
 
         foreach (int uniqueInGameId in orderedKeys)
@@ -653,18 +1033,10 @@ public partial class BattleSytem : Node
                 continue;
             }
 
-            if (monster.HP <= 0)
-            {
-                continue;
-            }
-
-            int attackValue = monster.Attack > 0 ? monster.Attack : 0;
-            int shieldValue = monster.Defend > 0 ? monster.Defend : 0;
-
-            EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player, attackValue);
+            EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player);
             AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）攻击：{attackResult.BuildSummary()}");
 
-            EffectResult shieldResult = EffectSystem.ApplyShield(monster, shieldValue);
+            EffectResult shieldResult = EffectSystem.ApplyShield(monster);
             AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）护盾：{shieldResult.BuildSummary()}");
 
             if (CheckBattleEndAndHandle())
@@ -673,7 +1045,6 @@ public partial class BattleSytem : Node
             }
         }
 
-        RemoveDeadMonsters();
         RefreshBattleInfoDisplay();
         if (CheckBattleEndAndHandle())
         {
@@ -740,57 +1111,60 @@ public partial class BattleSytem : Node
         Player.drawpile.Clear();
         Player.discardpile.Clear();
 
-        if (Player.cards.Count == 0)
+        List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
+        if (configuredCardIds.Count > 0)
         {
-            List<int> cardIds = new List<int>(LoadingSystem.CardDictionary.Keys);
-            cardIds.Sort();
-            foreach (int cardId in cardIds)
+            for (int index = 0; index < configuredCardIds.Count; index++)
             {
-                Player.cards.Add(LoadingSystem.CardDictionary[cardId]);
-            }
-        }
+                int cardId = configuredCardIds[index];
+                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+                {
+                    AppendPanelConsoleError($"错误：配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
+                    continue;
+                }
 
-        foreach (Card baseCard in Player.cards)
-        {
-            if (baseCard == null)
-            {
-                continue;
+                Player.drawpile.Add(template.CreateRuntimeInstance());
             }
 
-            Player.drawpile.Add(baseCard.CreateRuntimeInstance());
-        }
+            ShuffleCards(Player.drawpile);
 
-        AppendPanelConsoleInfo($"角色初始卡组已复制到抽牌堆，共 {Player.drawpile.Count} 张。");
-    }
-
-    private void RemoveDeadMonsters()
-    {
-        if (Monsters == null || Monsters.Count == 0)
-        {
+            AppendPanelConsoleInfo($"角色配置卡组已实例化并洗牌后加入抽牌堆，共 {Player.drawpile.Count} 张。");
             return;
         }
 
-        List<int> deadIds = new List<int>();
-        foreach (KeyValuePair<int, MonsterInstance> pair in Monsters)
+        List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdList(Player.id, DefaultCharacterDeckCsvPath, true);
+        if (defaultCardIds.Count > 0)
         {
-            if (pair.Value == null || pair.Value.HP <= 0)
+            foreach (int cardId in defaultCardIds)
             {
-                deadIds.Add(pair.Key);
+                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+                {
+                    AppendPanelConsoleError($"错误：角色 {Player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
+                    continue;
+                }
+
+                Player.drawpile.Add(template.CreateRuntimeInstance());
             }
+
+            ShuffleCards(Player.drawpile);
+
+            AppendPanelConsoleInfo($"已从角色 {Player.id} 默认卡组配置初始化并洗牌抽牌堆，共 {Player.drawpile.Count} 张。");
+            return;
         }
 
-        deadIds.Sort();
-        foreach (int deadId in deadIds)
-        {
-            MonsterInstance dead = Monsters[deadId];
-            AppendPanelConsoleInfo($"怪物死亡：{dead.Name}（UniqueInGameId: {deadId}）。");
-            Monsters.Remove(deadId);
-        }
+        AppendPanelConsoleInfo($"角色 {Player.id} 无配置卡组也无默认卡组，抽牌堆为空。");
+    }
 
-        if (deadIds.Count > 0)
+    private System.Action CreateMonsterOnDeadCallback(MonsterInstance instance)
+    {
+        return () =>
         {
+            int id = instance.UniqueInGameId;
+            AppendPanelConsoleInfo($"怪物死亡：{instance.Name}（UniqueInGameId: {id}）。");
+            Monsters?.Remove(id);
             RefreshBattleInfoDisplay();
-        }
+            CheckBattleEndAndHandle();
+        };
     }
 
     private bool CheckBattleEndAndHandle()
@@ -802,8 +1176,6 @@ public partial class BattleSytem : Node
 
         if (Player == null || Player.HP <= 0)
         {
-            AppendPanelConsoleInfo("战斗结束：玩家已死亡。游戏结束。");
-            EndGame();
             return true;
         }
 
@@ -858,7 +1230,7 @@ public partial class BattleSytem : Node
         RefreshBattleInfoDisplay();
     }
 
-    private void AppendPanelConsoleInfo(string message)
+    public void AppendPanelConsoleInfo(string message)
     {
         AppendPanelConsole("[信息] " + message);
     }

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dsr4tt3oef7lk"
+
+[deps]
+
+files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation"]
+
+source_file="res://DataBase/Card/通用/通用Card.csv"
+dest_files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

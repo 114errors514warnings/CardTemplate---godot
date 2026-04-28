@@ -12,11 +12,18 @@ public partial class LoadCardCsv : Node
 	/// <summary>
 	/// CSV表头常量
 	/// </summary>
-	public static readonly string CSV_HEADER = "CardId,CardName,CardType,EnergyCost,EffectType,NeedTarget,EffectDesc,AttackDamage,ShieldValue,StateType";
+	public static readonly string CSV_HEADER = "CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params";
+
+	// 分隔符常量："|"分隔多个效果，";"分隔同一效果内的多个参数
+	private const char EFFECT_SEPARATOR = '|';
+	private const char PARAM_SEPARATOR = ';';
 
 	/// <summary>
 	/// 从CSV文件加载所有卡牌
-	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,NeedTarget,EffectDesc,AttackDamage,ShieldValue,StateType
+	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params
+	/// EffectType 支持"|"分隔多效果；Params 用"|"分隔每个效果的参数组，用";"分隔同一效果内的参数
+	/// Params[i][0] 固定表示 EffectTargetType，后续参数为该效果自身参数
+	/// NeedTarget 自动推导：任意效果TargetType为SelectedTarget则为true
 	/// </summary>
 	/// <param name="filePath">CSV文件路径</param>
 	/// <returns>卡牌数组</returns>
@@ -59,9 +66,9 @@ public partial class LoadCardCsv : Node
 		{
 			string[] fields = LoadCsv.ParseCSVFields(line);
 
-			if (fields.Length < 7)
+			if (fields.Length < 6)
 			{
-				GD.PrintErr($"Invalid card CSV format. Expected at least 7 fields, got {fields.Length}");
+				GD.PrintErr($"Invalid card CSV format. Expected at least 6 fields, got {fields.Length}");
 				return null;
 			}
 
@@ -71,15 +78,20 @@ public partial class LoadCardCsv : Node
 			string categoryStr = fields[2];
 			int energyCost = int.Parse(fields[3]);
 			string effectTypeStr = fields[4];
-			bool needTarget = bool.Parse(fields[5]);
-			string effectDescription = fields[6];
+			string effectDescription = fields[5];
+			string paramsStr = fields.Length > 6 ? fields[6] : string.Empty;
 
-			// 解析枚举值
+			// 解析 EffectTypes（"|"分隔多个效果）
+			EffectType[] effectTypes = ParseEffectTypes(effectTypeStr);
+
+			// 解析 Params（"|"分隔每个效果的参数，";"分隔同一组内的参数）
+			int[][] cardParams = ParseParams(paramsStr);
+
+			// 解析类别枚举
 			CardCategory category = (CardCategory)Enum.Parse(typeof(CardCategory), categoryStr, ignoreCase: true);
-			EffectType effectType = (EffectType)Enum.Parse(typeof(EffectType), effectTypeStr, ignoreCase: true);
 
-			// 根据类型创建相应的卡牌对象
-			return CreateCardByCategory(category, cardId, cardName, energyCost, effectType, effectDescription, needTarget, fields);
+			// NeedTarget 自动从 Params 中推导，无需CSV配置
+			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName);
 		}
 		catch (Exception ex)
 		{
@@ -89,28 +101,69 @@ public partial class LoadCardCsv : Node
 	}
 
 	/// <summary>
-	/// 根据卡牌类别创建相应的卡牌对象
+	/// 解析 EffectType 字段（支持"|"分隔的多效果）
 	/// </summary>
-	private static Card CreateCardByCategory(CardCategory category, int cardId, string cardName, int energyCost, EffectType effectType, string effectDescription, bool needTarget, string[] fields)
+	private static EffectType[] ParseEffectTypes(string effectTypeStr)
 	{
-		switch (category)
+		if (string.IsNullOrWhiteSpace(effectTypeStr))
+			return Array.Empty<EffectType>();
+
+		string[] parts = effectTypeStr.Split(EFFECT_SEPARATOR);
+		List<EffectType> types = new List<EffectType>(parts.Length);
+		foreach (string part in parts)
 		{
-			case CardCategory.Attack:
-				int extraAttack = fields.Length > 7 ? int.Parse(fields[7]) : 0;
-				int extraShield = fields.Length > 8 ? int.Parse(fields[8]) : 0;
-				return new AttackCard(cardId, string.Empty, energyCost, effectType, effectDescription, needTarget, extraAttack, extraShield, cardName);
-
-			case CardCategory.Skill:
-				int skillExtraShield = fields.Length > 8 ? int.Parse(fields[8]) : 0;
-				return new SkillCard(cardId, string.Empty, energyCost, effectType, effectDescription, needTarget, skillExtraShield, cardName);
-
-			case CardCategory.State:
-				return new StateCard(cardId, string.Empty, energyCost, effectType, effectDescription, needTarget, cardName);
-
-			default:
-				GD.PrintErr($"Unknown card category: {category}");
-				return null;
+			string trimmed = part.Trim();
+			if (!string.IsNullOrEmpty(trimmed))
+				types.Add((EffectType)Enum.Parse(typeof(EffectType), trimmed, ignoreCase: true));
 		}
+		return types.ToArray();
+	}
+
+	/// <summary>
+	/// 解析 Params 字段（"|"分隔效果，";"分隔同一效果内的参数）
+	/// 示例："5;10|3" => [[5,10],[3]]
+	/// </summary>
+	private static int[][] ParseParams(string paramsStr)
+	{
+		if (string.IsNullOrWhiteSpace(paramsStr))
+			return Array.Empty<int[]>();
+
+		string[] effectGroups = paramsStr.Split(EFFECT_SEPARATOR);
+		List<int[]> result = new List<int[]>(effectGroups.Length);
+		foreach (string group in effectGroups)
+		{
+			string trimmed = group.Trim();
+			if (string.IsNullOrEmpty(trimmed))
+			{
+				result.Add(Array.Empty<int>());
+				continue;
+			}
+			string[] paramParts = trimmed.Split(PARAM_SEPARATOR);
+			List<int> paramList = new List<int>(paramParts.Length);
+			foreach (string p in paramParts)
+			{
+				if (int.TryParse(p.Trim(), out int val))
+					paramList.Add(val);
+			}
+			result.Add(paramList.ToArray());
+		}
+		return result.ToArray();
+	}
+
+	/// <summary>
+	/// 将 Params 序列化为 CSV 字段字符串
+	/// </summary>
+	private static string SerializeParams(int[][] cardParams)
+	{
+		if (cardParams == null || cardParams.Length == 0)
+			return string.Empty;
+
+		List<string> groups = new List<string>(cardParams.Length);
+		foreach (int[] group in cardParams)
+		{
+			groups.Add(group != null && group.Length > 0 ? string.Join(PARAM_SEPARATOR.ToString(), group) : string.Empty);
+		}
+		return string.Join(EFFECT_SEPARATOR.ToString(), groups);
 	}
 
 	/// <summary>
@@ -148,20 +201,9 @@ public partial class LoadCardCsv : Node
 	/// </summary>
 	private static string CardToCSVLine(Card card)
 	{
-		string extraAttack = "";
-		string extraShield = "";
-
-		if (card is AttackCard attackCard)
-		{
-			extraAttack = attackCard.ExtraAttack.ToString();
-			extraShield = attackCard.ExtraShield.ToString();
-		}
-		else if (card is SkillCard skillCard)
-		{
-			extraShield = skillCard.ExtraShield.ToString();
-		}
-
-		return $"{card.CardId},{LoadCsv.EscapeCSVField(card.CardName)},{card.Category},{card.EnergyCost},{card.EffectType},{card.NeedTarget},{LoadCsv.EscapeCSVField(card.EffectDescription)},{extraAttack},{extraShield},None";
+		string effectTypesStr = card.EffectTypes != null ? string.Join(EFFECT_SEPARATOR.ToString(), card.EffectTypes) : string.Empty;
+		string paramsStr = SerializeParams(card.Params);
+		return $"{card.CardId},{LoadCsv.EscapeCSVField(card.CardName)},{card.Category},{card.EnergyCost},{effectTypesStr},{LoadCsv.EscapeCSVField(card.EffectDescription)},{paramsStr}";
 	}
 
 	/// <summary>

@@ -1,13 +1,15 @@
 [gd_scene format=3 uid="uid://b1r8c14vmcdai"]
 
-[ext_resource type="Script" uid="uid://dtdprpvr6yi6p" path="res://Scripts/Init.cs" id="1"]
-[ext_resource type="Script" uid="uid://dkxanmhdi8n3k" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
-[ext_resource type="Script" uid="uid://dx4ieog1lmfux" path="res://Scripts/System/BattleSytem.cs" id="3"]
-[ext_resource type="Script" uid="uid://wua77urdkkmd" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
-[ext_resource type="Script" uid="uid://c0ltvk8d1wsnv" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
-[ext_resource type="Script" uid="uid://d3dwqrovoe2a" path="res://Scripts/Interact/回合控制/PlayCard.cs" id="6"]
-[ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
-[ext_resource type="Script" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
+[ext_resource type="Script" uid="uid://qhaiv3wq5ko7" path="res://Scripts/Init.cs" id="1"]
+[ext_resource type="Script" uid="uid://4w4jrhlw24hr" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
+[ext_resource type="Script" uid="uid://0e25n2cl63xd" path="res://Scripts/System/BattleSytem.cs" id="3"]
+[ext_resource type="Script" uid="uid://cc48lqb2meqox" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
+[ext_resource type="Script" uid="uid://b8wg1ia7kcljp" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
+[ext_resource type="Script" uid="uid://cvnnfduqh2fm0" path="res://Scripts/Interact/回合控制/PlayCard.cs" id="6"]
+[ext_resource type="Script" uid="uid://xat7ixsvgmnk" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
+[ext_resource type="Script" uid="uid://bnol1e0f3poe8" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
+[ext_resource type="Script" uid="uid://42jtgjkrqmvl" path="res://Scripts/Interact/回合控制/AddCharacterCard.cs" id="9"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -66,8 +68,8 @@ anchors_preset = -1
 anchor_top = 0.1
 anchor_right = 1.0
 anchor_bottom = 1.0
-autowrap_mode = 3
 text = "文字示例"
+autowrap_mode = 3
 
 [node name="操作面板" type="Label" parent="." unique_id=1282936871]
 layout_mode = 1
@@ -105,6 +107,7 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "新增卡牌
 "
+script = ExtResource("9")
 
 [node name="出牌" type="Button" parent="操作面板/卡牌操作" unique_id=896988153]
 editor_description = "参数：手牌index、目标敌人UniqueInGameId（不需要目标时填-1）"
@@ -120,6 +123,14 @@ custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "销毁卡牌"
+
+[node name="切换牌堆顺序显示" type="Button" parent="操作面板/卡牌操作" unique_id=239836368]
+editor_description = "参数：无需参数，抽牌堆和弃牌堆切换是否顺序显示"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "切换牌堆顺序显示"
+script = ExtResource("10")
 
 [node name="回合控制" type="GridContainer" parent="操作面板" unique_id=1664858752]
 custom_minimum_size = Vector2(100, 40)

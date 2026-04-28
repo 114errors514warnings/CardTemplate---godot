@@ -15,9 +15,17 @@ public partial class BattleSetupData : Resource
     [Export]
     public Godot.Collections.Dictionary<int, int> MonsterIds { get; set; } = new Godot.Collections.Dictionary<int, int>();
 
+    [Export]
+    public Godot.Collections.Dictionary<int, int> CharacterCardIds { get; set; } = new Godot.Collections.Dictionary<int, int>();
+
     public void EnsureMonsterDictionaryInitialized()
     {
         MonsterIds ??= new Godot.Collections.Dictionary<int, int>();
+    }
+
+    public void EnsureCharacterCardDictionaryInitialized()
+    {
+        CharacterCardIds ??= new Godot.Collections.Dictionary<int, int>();
     }
 
     public int GetMonsterIdCount(int monsterId)
@@ -103,6 +111,81 @@ public partial class BattleSetupData : Resource
             for (int index = 0; index < count; index++)
             {
                 result.Add(monsterId);
+            }
+        }
+
+        return result;
+    }
+
+    public int GetCharacterCardIdCount(int cardId)
+    {
+        EnsureCharacterCardDictionaryInitialized();
+        return CharacterCardIds.TryGetValue(cardId, out int count) ? count : 0;
+    }
+
+    public int AddCharacterCardId(int cardId, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        EnsureCharacterCardDictionaryInitialized();
+        CharacterCardIds[cardId] = GetCharacterCardIdCount(cardId) + count;
+        return count;
+    }
+
+    public int RemoveCharacterCardId(int cardId, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        EnsureCharacterCardDictionaryInitialized();
+        if (!CharacterCardIds.TryGetValue(cardId, out int currentCount))
+        {
+            return 0;
+        }
+
+        int removedCount = count < currentCount ? count : currentCount;
+        int remainCount = currentCount - removedCount;
+        if (remainCount > 0)
+        {
+            CharacterCardIds[cardId] = remainCount;
+        }
+        else
+        {
+            CharacterCardIds.Remove(cardId);
+        }
+
+        return removedCount;
+    }
+
+    public int GetTotalCharacterCardCount()
+    {
+        EnsureCharacterCardDictionaryInitialized();
+
+        int totalCount = 0;
+        foreach (int cardId in CharacterCardIds.Keys)
+        {
+            totalCount += CharacterCardIds[cardId];
+        }
+
+        return totalCount;
+    }
+
+    public List<int> GetCharacterCardIdList()
+    {
+        EnsureCharacterCardDictionaryInitialized();
+
+        List<int> result = new List<int>();
+        foreach (int cardId in CharacterCardIds.Keys)
+        {
+            int count = CharacterCardIds[cardId];
+            for (int index = 0; index < count; index++)
+            {
+                result.Add(cardId);
             }
         }
 

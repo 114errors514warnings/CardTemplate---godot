@@ -1,4 +1,5 @@
 using System;
+using CardSimulator;
 
 public sealed class EffectResult
 {
@@ -78,15 +79,21 @@ public sealed class EffectContext
 {
     public IUnitInstance Source { get; }
     public IUnitInstance Target { get; }
-    public int ExtraAttack { get; }
-    public int ExtraShield { get; }
+    // 当前效果的参数数组，params[0]为第一个参数，依此类推
+    public int[] Params { get; }
+    public bool IsCounterAttack { get; }
 
-    public EffectContext(IUnitInstance source, IUnitInstance target = null, int extraAttack = 0, int extraShield = 0)
+    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null, bool isCounterAttack = false)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
         Target = target;
-        ExtraAttack = extraAttack;
-        ExtraShield = extraShield;
+        Params = effectParams ?? Array.Empty<int>();
+        IsCounterAttack = isCounterAttack;
+    }
+
+    public int GetParam(int index, int defaultValue = 0)
+    {
+        return (Params != null && index < Params.Length) ? Params[index] : defaultValue;
     }
 }
 
@@ -112,13 +119,10 @@ public sealed class AttackEffect : IEffect
             throw new ArgumentException("Attack effect requires a target.", nameof(context));
         }
 
-        int damage = Math.Max(0, context.Source.Attack + context.ExtraAttack);
+        int damage = Math.Max(0, context.Source.Attack + context.GetParam(0));
+        damage = StateSystem.ModifyIncomingDamage(context.Source, context.Target, damage);
         int targetShieldBefore = context.Target.Shield;
         int targetHpBefore = context.Target.HP;
-        if (damage == 0)
-        {
-            return new EffectResult(Name, context.Source, context.Target, targetShieldBefore: targetShieldBefore, targetShieldAfter: context.Target.Shield, targetHpBefore: targetHpBefore, targetHpAfter: context.Target.HP);
-        }
 
         int absorbedByShield = Math.Min(context.Target.Shield, damage);
         context.Target.Shield -= absorbedByShield;
@@ -128,6 +132,8 @@ public sealed class AttackEffect : IEffect
         {
             context.Target.HP = Math.Max(0, context.Target.HP - hpDamage);
         }
+
+        TryTriggerCounterAttack(context);
 
         return new EffectResult(
             Name,
@@ -140,6 +146,63 @@ public sealed class AttackEffect : IEffect
             targetShieldAfter: context.Target.Shield,
             targetHpBefore: targetHpBefore,
             targetHpAfter: context.Target.HP);
+    }
+
+    private static void TryTriggerCounterAttack(EffectContext context)
+    {
+        if (context == null || context.IsCounterAttack)
+        {
+            return;
+        }
+
+        if (context.Source == null || context.Target == null)
+        {
+            return;
+        }
+
+        if (context.Source.UniqueInGameId == context.Target.UniqueInGameId)
+        {
+            return;
+        }
+
+        if (context.Source.HP <= 0 || context.Target.HP <= 0)
+        {
+            return;
+        }
+
+        if (!StateSystem.TryGetStateStacks(context.Target, StateType.CounterAttack, out int counterStacks) || counterStacks <= 0)
+        {
+            return;
+        }
+
+        if (!IsOutOfTurn(context.Target))
+        {
+            return;
+        }
+
+        EffectResult counterAttackResult = EffectSystem.ApplyAttack(context.Target, context.Source, isCounterAttack: true);
+        BattleSytem.Current?.AppendPanelConsoleInfo($"反击触发：{counterAttackResult.BuildSummary()}");
+    }
+
+    private static bool IsOutOfTurn(IUnitInstance unit)
+    {
+        BattleSytem battle = BattleSytem.Current;
+        if (battle == null || !battle.IsBattleStarted)
+        {
+            return false;
+        }
+
+        if (unit is CharacterInstance)
+        {
+            return !battle.IsPlayerTurn;
+        }
+
+        if (unit is MonsterInstance)
+        {
+            return battle.IsPlayerTurn;
+        }
+
+        return false;
     }
 }
 
@@ -154,7 +217,7 @@ public sealed class ShieldEffect : IEffect
             throw new ArgumentNullException(nameof(context));
         }
 
-        int shieldGain = Math.Max(0, context.Source.Defend + context.ExtraShield);
+        int shieldGain = Math.Max(0, context.Source.Defend + context.GetParam(0));
         int sourceShieldBefore = context.Source.Shield;
         if (shieldGain == 0)
         {
@@ -188,13 +251,13 @@ public static class EffectSystem
         return effect.Apply(context);
     }
 
-    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int extraAttack = 0)
+    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null, bool isCounterAttack = false)
     {
-        return Apply(Attack, new EffectContext(source, target, extraAttack: extraAttack));
+        return Apply(Attack, new EffectContext(source, target, effectParams, isCounterAttack));
     }
 
-    public static EffectResult ApplyShield(IUnitInstance source, int extraShield = 0)
+    public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)
     {
-        return Apply(Shield, new EffectContext(source, extraShield: extraShield));
+        return Apply(Shield, new EffectContext(source, effectParams: effectParams));
     }
 }
