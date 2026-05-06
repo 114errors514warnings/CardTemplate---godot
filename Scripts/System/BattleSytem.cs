@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using CardSimulator;
 
 public partial class BattleSytem : Node
 {
@@ -27,8 +28,8 @@ public partial class BattleSytem : Node
     private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
     private const string DefaultCharacterDeckCsvPath = "res://DataBase/Unit/Character/CharacterDefaultDeck.csv";
 
-    private const string BattleInfoLabelPath = "局内信息/对局信息显示";
-    private const string BattleInfoLabelPathInRoot = "UI_Main/局内信息/对局信息显示";
+    private const string BattleInfoLabelPath = "局内信息/对局信息滚动/对局信息显示";
+    private const string BattleInfoLabelPathInRoot = "UI_Main/局内信息/对局信息滚动/对局信息显示";
     private const string RuntimeTabButtonPath = "局内信息/tab栏/局内";
     private const string RuntimeTabButtonPathInRoot = "UI_Main/局内信息/tab栏/局内";
     private const string DrawPileTabButtonPath = "局内信息/tab栏/抽牌堆详细";
@@ -211,6 +212,7 @@ public partial class BattleSytem : Node
         CurrentPileDisplayOrderMode = PileDisplayOrderMode.PileOrder;
 
         InitializePlayerDrawPileFromCharacterCards();
+        SelectIntentionsForAllMonsters();
 
         IsBattleStarted = true;
         IsPlayerTurn = false;
@@ -273,7 +275,7 @@ public partial class BattleSytem : Node
             return;
         }
 
-        Label battleInfoLabel = FindBattleInfoLabel(scene);
+        RichTextLabel battleInfoLabel = FindBattleInfoLabel(scene);
 
         if (battleInfoLabel == null)
         {
@@ -306,21 +308,18 @@ public partial class BattleSytem : Node
         Button runtimeButton = FindBattleInfoButton(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot);
         if (runtimeButton != null)
         {
-            runtimeButton.Pressed -= OnRuntimeBattleInfoTabPressed;
             runtimeButton.Pressed += OnRuntimeBattleInfoTabPressed;
         }
 
         Button drawPileButton = FindBattleInfoButton(scene, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot);
         if (drawPileButton != null)
         {
-            drawPileButton.Pressed -= OnDrawPileBattleInfoTabPressed;
             drawPileButton.Pressed += OnDrawPileBattleInfoTabPressed;
         }
 
         Button discardPileButton = FindBattleInfoButton(scene, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot);
         if (discardPileButton != null)
         {
-            discardPileButton.Pressed -= OnDiscardPileBattleInfoTabPressed;
             discardPileButton.Pressed += OnDiscardPileBattleInfoTabPressed;
         }
 
@@ -352,7 +351,7 @@ public partial class BattleSytem : Node
             return;
         }
 
-        Label battleInfoLabel = FindBattleInfoLabel(scene);
+        RichTextLabel battleInfoLabel = FindBattleInfoLabel(scene);
         if (battleInfoLabel != null)
         {
             battleInfoLabel.Text = BuildCurrentBattleInfoDisplayText();
@@ -361,15 +360,15 @@ public partial class BattleSytem : Node
         UpdateBattleInfoTabVisualState(scene);
     }
 
-    private Label FindBattleInfoLabel(Node scene)
+    private RichTextLabel FindBattleInfoLabel(Node scene)
     {
-        Label battleInfoLabel = scene.GetNodeOrNull<Label>(BattleInfoLabelPath);
+        RichTextLabel battleInfoLabel = scene.GetNodeOrNull<RichTextLabel>(BattleInfoLabelPath);
         if (battleInfoLabel != null)
         {
             return battleInfoLabel;
         }
 
-        return scene.GetNodeOrNull<Label>(BattleInfoLabelPathInRoot);
+        return scene.GetNodeOrNull<RichTextLabel>(BattleInfoLabelPathInRoot);
     }
 
     private Button FindBattleInfoButton(Node scene, string primaryPath, string fallbackPath)
@@ -509,7 +508,7 @@ public partial class BattleSytem : Node
 
     private void BuildRuntimeBattleInfo(StringBuilder builder)
     {
-        builder.AppendLine($"角色ID：{Player.id} 名称：{Player.Name} UniqueInGameID：{FormatUniqueInGameId(Player.UniqueInGameId)} HP：{Player.HP}/{Player.Max_HP}（当前/最大） Atk：{Player.Attack} Def：{Player.Defend} Costs：{Player.costs}");
+           builder.AppendLine($"角色ID：{Player.id} 名称：{Player.Name} UniqueInGameID：{FormatUniqueInGameId(Player.UniqueInGameId)} HP：{Player.HP}/{Player.Max_HP}（当前/最大） Atk：{Player.Attack} Def：{Player.Defend} Costs：{Player.costs} Shield：{Player.Shield}");
         builder.AppendLine("手牌：");
 
         if (Player.handcards == null || Player.handcards.Count == 0)
@@ -539,7 +538,7 @@ public partial class BattleSytem : Node
         foreach (int monsterKey in monsterKeys)
         {
             MonsterInstance monster = Monsters[monsterKey];
-            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield}");
+            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield} 当前意图：{FormatSelectedMonsterIntention(monster)}");
         }
     }
 
@@ -769,6 +768,11 @@ public partial class BattleSytem : Node
 
         if (added > 0)
         {
+            if (IsBattleStarted && IsPlayerTurn)
+            {
+                SelectIntentionsForAllMonsters();
+            }
+
             AppendPanelConsoleInfo($"战斗中怪物总数：{Monsters.Count}/{BattleSetupData.MaxMonsterCapacity}。");
             RefreshBattleInfoDisplay();
         }
@@ -1033,11 +1037,7 @@ public partial class BattleSytem : Node
                 continue;
             }
 
-            EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player);
-            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）攻击：{attackResult.BuildSummary()}");
-
-            EffectResult shieldResult = EffectSystem.ApplyShield(monster);
-            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）护盾：{shieldResult.BuildSummary()}");
+            ExecuteMonsterIntention(monster);
 
             if (CheckBattleEndAndHandle())
             {
@@ -1045,6 +1045,7 @@ public partial class BattleSytem : Node
             }
         }
 
+        SelectIntentionsForAllMonsters();
         RefreshBattleInfoDisplay();
         if (CheckBattleEndAndHandle())
         {
@@ -1052,6 +1053,252 @@ public partial class BattleSytem : Node
         }
 
         StartPlayerTurn();
+    }
+
+    private void SelectIntentionsForAllMonsters()
+    {
+        if (Monsters == null || Monsters.Count == 0)
+        {
+            return;
+        }
+
+        foreach (MonsterInstance monster in Monsters.Values)
+        {
+            SelectIntentionForMonster(monster);
+        }
+    }
+
+    private void SelectIntentionForMonster(MonsterInstance monster)
+    {
+        if (monster == null || monster.HP <= 0)
+        {
+            return;
+        }
+
+        if (monster.Table == null || monster.Table.Length == 0)
+        {
+            monster.ClearSelectedIntention();
+            return;
+        }
+
+        List<int> availableIndices = new List<int>();
+        for (int index = 0; index < monster.Table.Length; index++)
+        {
+            int[][] intention = monster.Table[index];
+            if (intention != null && intention.Length > 0)
+            {
+                availableIndices.Add(index);
+            }
+        }
+
+        if (availableIndices.Count == 0)
+        {
+            monster.ClearSelectedIntention();
+            return;
+        }
+
+        int randomPosition = RandomGenerator.Next(availableIndices.Count);
+        int selectedIndex = availableIndices[randomPosition];
+        monster.SetSelectedIntention(selectedIndex, monster.Table[selectedIndex]);
+    }
+
+    public bool TrySwitchMonsterIntention(int monsterUniqueInGameId, int intentionIndex, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (!IsBattleStarted)
+        {
+            resultMessage = "当前不在战斗中，无法修改怪物意图。";
+            return false;
+        }
+
+        if (Monsters == null || Monsters.Count == 0)
+        {
+            resultMessage = "当前没有已实例化怪物，无法修改意图。";
+            return false;
+        }
+
+        if (!Monsters.TryGetValue(monsterUniqueInGameId, out MonsterInstance monster) || monster == null)
+        {
+            resultMessage = $"未找到怪物UniqueInGameID={monsterUniqueInGameId}。";
+            return false;
+        }
+
+        if (monster.HP <= 0)
+        {
+            resultMessage = $"怪物UniqueInGameID={monsterUniqueInGameId} 已死亡，无法修改意图。";
+            return false;
+        }
+
+        if (intentionIndex <= 0)
+        {
+            resultMessage = $"意图index={intentionIndex} 非法，意图序号从1开始。";
+            return false;
+        }
+
+        if (monster.Table == null || monster.Table.Length == 0)
+        {
+            resultMessage = $"怪物 {monster.Name} 未配置任何意图。";
+            return false;
+        }
+
+        int targetIndex = intentionIndex - 1;
+        if (targetIndex >= monster.Table.Length)
+        {
+            resultMessage = $"怪物 {monster.Name} 的意图index={intentionIndex} 超出范围，当前共 {monster.Table.Length} 种意图。";
+            return false;
+        }
+
+        int[][] targetIntention = monster.Table[targetIndex];
+        if (targetIntention == null || targetIntention.Length == 0)
+        {
+            resultMessage = $"怪物 {monster.Name} 的第 {intentionIndex} 种意图为空，无法切换。";
+            return false;
+        }
+
+        monster.SetSelectedIntention(targetIndex, targetIntention);
+        RefreshBattleInfoDisplay();
+        resultMessage = $"已将怪物 {monster.Name}#{monster.UniqueInGameId} 切换到第 {intentionIndex} 种意图：{FormatSelectedMonsterIntention(monster)}";
+        return true;
+    }
+
+    private void ExecuteMonsterIntention(MonsterInstance monster)
+    {
+        if (monster == null || monster.HP <= 0)
+        {
+            return;
+        }
+
+        if (monster.SelectedIntention == null || monster.SelectedIntention.Length == 0)
+        {
+            SelectIntentionForMonster(monster);
+        }
+
+        if (monster.SelectedIntention == null || monster.SelectedIntention.Length == 0)
+        {
+            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）跳过：未配置可执行意图。");
+            return;
+        }
+
+        AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）执行意图：{FormatSelectedMonsterIntention(monster)}");
+
+        foreach (int[] effectConfig in monster.SelectedIntention)
+        {
+            if (!TryExecuteMonsterEffect(monster, effectConfig, out string resultSummary))
+            {
+                continue;
+            }
+
+            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）{resultSummary}");
+        }
+    }
+
+    private bool TryExecuteMonsterEffect(MonsterInstance monster, int[] effectConfig, out string resultSummary)
+    {
+        resultSummary = string.Empty;
+
+        if (monster == null || effectConfig == null || effectConfig.Length == 0)
+        {
+            return false;
+        }
+
+        EffectType effectType = (EffectType)effectConfig[0];
+        int[] effectArgs = GetMonsterEffectArguments(effectConfig);
+
+        switch (effectType)
+        {
+            case EffectType.Damage:
+                if (Player == null || Player.HP <= 0)
+                {
+                    resultSummary = "伤害效果跳过：玩家目标不存在。";
+                    return true;
+                }
+
+                EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player, effectArgs);
+                resultSummary = $"Damage：{attackResult.BuildSummary()}";
+                return true;
+
+            case EffectType.Shield:
+                EffectResult shieldResult = EffectSystem.ApplyShield(monster, effectArgs);
+                resultSummary = $"Shield：{shieldResult.BuildSummary()}";
+                return true;
+
+            default:
+                AppendPanelConsoleError($"错误：怪物意图暂不支持效果类型 {effectType}。当前仅支持 Damage 与 Shield。");
+                return false;
+        }
+    }
+
+    private static int[] GetMonsterEffectArguments(int[] effectConfig)
+    {
+        if (effectConfig == null || effectConfig.Length <= 1)
+        {
+            return Array.Empty<int>();
+        }
+
+        int[] args = new int[effectConfig.Length - 1];
+        Array.Copy(effectConfig, 1, args, 0, args.Length);
+        return args;
+    }
+
+    private string FormatSelectedMonsterIntention(MonsterInstance monster)
+    {
+        if (monster == null || monster.SelectedIntention == null || monster.SelectedIntention.Length == 0)
+        {
+            return "无";
+        }
+
+        List<string> effectParts = new List<string>();
+        foreach (int[] effectConfig in monster.SelectedIntention)
+        {
+            string effectText = FormatMonsterEffectPreview(monster, effectConfig);
+            if (!string.IsNullOrWhiteSpace(effectText))
+            {
+                effectParts.Add(effectText);
+            }
+        }
+
+        return effectParts.Count == 0 ? "无" : string.Join(" | ", effectParts);
+    }
+
+    private string FormatMonsterEffectPreview(MonsterInstance monster, int[] effectConfig)
+    {
+        if (monster == null || effectConfig == null || effectConfig.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        EffectType effectType = (EffectType)effectConfig[0];
+        int[] effectArgs = GetMonsterEffectArguments(effectConfig);
+
+        switch (effectType)
+        {
+            case EffectType.Damage:
+                return $"{effectType}+{Math.Max(0, monster.Attack + GetEffectArgument(effectArgs, 0))}";
+
+            case EffectType.Shield:
+                return $"{effectType}+{Math.Max(0, monster.Defend + GetEffectArgument(effectArgs, 0))}";
+
+            case EffectType.AddState:
+                return effectArgs.Length == 0
+                    ? effectType.ToString()
+                    : $"{effectType}+{GetEffectArgument(effectArgs, 1, 1)}({(StateType)GetEffectArgument(effectArgs, 0)})";
+
+            case EffectType.ClearState:
+                return effectArgs.Length == 0
+                    ? effectType.ToString()
+                    : $"{effectType}({(StateType)GetEffectArgument(effectArgs, 0)})";
+
+            default:
+                return effectType.ToString();
+        }
+    }
+
+    private static int GetEffectArgument(int[] effectArgs, int index, int defaultValue = 0)
+    {
+        return effectArgs != null && index >= 0 && index < effectArgs.Length
+            ? effectArgs[index]
+            : defaultValue;
     }
 
     private int DrawCardsToHand(int count)

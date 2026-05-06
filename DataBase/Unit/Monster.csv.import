@@ -6,10 +6,10 @@ uid="uid://dkqxqmmn7j0il"
 
 [deps]
 
-files=["res://DataBase/Unit/Monster.Name.translation", "res://DataBase/Unit/Monster.MAX_HP.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.MaxActionTime.translation"]
+files=["res://DataBase/Unit/Monster.Name.translation", "res://DataBase/Unit/Monster.MAX_HP.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.MaxActionTime.translation", "res://DataBase/Unit/Monster.Intention1.translation", "res://DataBase/Unit/Monster.Intention2.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation"]
 
 source_file="res://DataBase/Unit/Monster.csv"
-dest_files=["res://DataBase/Unit/Monster.Name.translation", "res://DataBase/Unit/Monster.MAX_HP.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.MaxActionTime.translation"]
+dest_files=["res://DataBase/Unit/Monster.Name.translation", "res://DataBase/Unit/Monster.MAX_HP.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.Ini.translation", "res://DataBase/Unit/Monster.MaxActionTime.translation", "res://DataBase/Unit/Monster.Intention1.translation", "res://DataBase/Unit/Monster.Intention2.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation", "res://DataBase/Unit/Monster.en.translation"]
 
 [params]
 

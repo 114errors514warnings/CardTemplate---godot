@@ -1,3 +1,3 @@
 id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum
-1001,勇士,120,15,10,5
-1002,法师,80,8,5,4
+1001,勇士,40,3,3,5
+1002,重剑手,30,3,3,5

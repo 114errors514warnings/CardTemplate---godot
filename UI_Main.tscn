@@ -1,15 +1,16 @@
 [gd_scene format=3 uid="uid://b1r8c14vmcdai"]
 
-[ext_resource type="Script" uid="uid://qhaiv3wq5ko7" path="res://Scripts/Init.cs" id="1"]
-[ext_resource type="Script" uid="uid://4w4jrhlw24hr" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
-[ext_resource type="Script" uid="uid://0e25n2cl63xd" path="res://Scripts/System/BattleSytem.cs" id="3"]
-[ext_resource type="Script" uid="uid://cc48lqb2meqox" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
-[ext_resource type="Script" uid="uid://b8wg1ia7kcljp" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
-[ext_resource type="Script" uid="uid://cvnnfduqh2fm0" path="res://Scripts/Interact/回合控制/PlayCard.cs" id="6"]
-[ext_resource type="Script" uid="uid://xat7ixsvgmnk" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
-[ext_resource type="Script" uid="uid://bnol1e0f3poe8" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
-[ext_resource type="Script" uid="uid://42jtgjkrqmvl" path="res://Scripts/Interact/回合控制/AddCharacterCard.cs" id="9"]
-[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
+[ext_resource type="Script" uid="uid://dtdprpvr6yi6p" path="res://Scripts/Init.cs" id="1"]
+[ext_resource type="Script" uid="uid://dkxanmhdi8n3k" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
+[ext_resource type="Script" uid="uid://dx4ieog1lmfux" path="res://Scripts/System/BattleSytem.cs" id="3"]
+[ext_resource type="Script" uid="uid://wua77urdkkmd" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
+[ext_resource type="Script" uid="uid://c0ltvk8d1wsnv" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
+[ext_resource type="Script" uid="uid://cwby5o1hx2mvx" path="res://Scripts/Interact/卡牌操作/PlayCard.cs" id="6"]
+[ext_resource type="Script" uid="uid://clljbe3siea6x" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
+[ext_resource type="Script" uid="uid://byuxj2w20g4l0" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
+[ext_resource type="Script" uid="uid://vjajksmqd4mx" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="9"]
+[ext_resource type="Script" uid="uid://bfccequ6evgaj" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -62,13 +63,20 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "弃牌堆详细"
 
-[node name="对局信息显示" type="Label" parent="局内信息" unique_id=1859807431]
+[node name="对局信息滚动" type="ScrollContainer" parent="局内信息" unique_id=1859807431]
 layout_mode = 1
 anchors_preset = -1
 anchor_top = 0.1
 anchor_right = 1.0
 anchor_bottom = 1.0
+
+[node name="对局信息显示" type="RichTextLabel" parent="局内信息/对局信息滚动" unique_id=1275098432]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 text = "文字示例"
+fit_content = true
+scroll_following = true
 autowrap_mode = 3
 
 [node name="操作面板" type="Label" parent="." unique_id=1282936871]
@@ -110,7 +118,7 @@ text = "新增卡牌
 script = ExtResource("9")
 
 [node name="出牌" type="Button" parent="操作面板/卡牌操作" unique_id=896988153]
-editor_description = "参数：手牌index、目标敌人UniqueInGameId（不需要目标时填-1）"
+editor_description = "参数：手牌顺序（从1开始）、目标敌人UniqueInGameId（不需要目标时填-1）"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
@@ -168,11 +176,12 @@ text = "新增敌人"
 script = ExtResource("4")
 
 [node name="修改意图" type="Button" parent="操作面板/回合控制" unique_id=413725015]
-editor_description = "参数：仅填写意图序号（攻击防御debuffbuff等，取决于怪物种类）"
+editor_description = "参数：怪物UniqueInGameID、意图index（从1开始）"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "修改意图"
+script = ExtResource("11")
 
 [node name="选择角色" type="Button" parent="操作面板/回合控制" unique_id=15859348]
 editor_description = "输入角色id，不输则默认第一个

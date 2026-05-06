@@ -1,3 +1,4 @@
-id,Name,MAX_HP,Ini_Attack,Ini_Defend,MaxActionTime
-3001,骷髅战士,90,12,8,2
-3002,火焰元素,70,18,4,3
+id,Name,MAX_HP,Ini_Attack,Ini_Defend,MaxActionTime,Intention1,Intention2,Intention3,Intention4,Intention5,Intention6,Intention7,Intention8,Intention9,Intention10
+3001,堕魔兽,5,1,1,1,1,2,,,,,,,,
+3002,法师学徒,15,2,2,2,1|1,2|2,,,,,,,,
+3003,堕魔守卫,30,3,3,3,1|1|1,2|2|2,,,,,,,,

@@ -119,22 +119,6 @@ public partial class LoadingSystem : Node
 	}
 
 	/// <summary>
-	/// 保存卡牌数据
-	/// </summary>
-	public static bool SaveCards(Dictionary<int, Card> cards, string filePath)
-	{
-		Card[] cardArray = new List<Card>(cards.Values).ToArray();
-		bool success = LoadCardCsv.SaveCardsToCSV(cardArray, filePath);
-
-		if (success)
-		{
-			cardCache = new Dictionary<int, Card>(cards);
-		}
-
-		return success;
-	}
-
-	/// <summary>
 	/// 清空卡牌缓存
 	/// </summary>
 	public static void ClearCardCache(string filePath = null)

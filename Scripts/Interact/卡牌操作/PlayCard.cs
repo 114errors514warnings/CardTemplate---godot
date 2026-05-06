@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 public partial class PlayCard : Button
 {
-	private const string ParameterFormat = "手牌index [目标敌人UniqueInGameId]";
+	private const string ParameterFormat = "手牌顺序 [目标敌人UniqueInGameId]";
 	private const string MonsterKeyDescription = "目标敌人参数当前对应 BattleSytem.Monsters 的 key，即怪物实例的 UniqueInGameId。";
 
 	public override void _Ready()
@@ -45,11 +45,13 @@ public partial class PlayCard : Button
 			return;
 		}
 
-		if (!int.TryParse(arguments[0], out int handIndex) || handIndex < 0)
+		if (!int.TryParse(arguments[0], out int handOrder) || handOrder <= 0)
 		{
-			AppendConsoleError($"错误：手牌index '{arguments[0]}' 不是大于等于0的合法数字。", true);
+			AppendConsoleError($"错误：手牌顺序 '{arguments[0]}' 不是大于0的合法数字。", true);
 			return;
 		}
+
+		int handIndex = handOrder - 1;
 
 		if (battleSytem.Player == null)
 		{
@@ -59,7 +61,7 @@ public partial class PlayCard : Button
 
 		if (handIndex >= battleSytem.Player.handcards.Count)
 		{
-			AppendConsoleError($"错误：手牌index {handIndex} 超出范围，当前手牌数量为 {battleSytem.Player.handcards.Count}。", true);
+			AppendConsoleError($"错误：手牌顺序 {handOrder} 超出范围，当前手牌数量为 {battleSytem.Player.handcards.Count}。", true);
 			return;
 		}
 
@@ -77,7 +79,7 @@ public partial class PlayCard : Button
 
 		if (selectedCard.NeedTarget && targetMonsterUniqueInGameId < 0)
 		{
-			AppendConsoleError($"错误：手牌index={handIndex} 的卡牌需要目标，请提供目标敌人UniqueInGameId。", true);
+			AppendConsoleError($"错误：手牌顺序={handOrder} 的卡牌需要目标，请提供目标敌人UniqueInGameId。", true);
 			AppendConsoleInfo(MonsterKeyDescription);
 			AppendConsoleInfo(GetMonsterKeyHint(battleSytem));
 			return;
@@ -96,7 +98,7 @@ public partial class PlayCard : Button
 			target = monster;
 		}
 
-		AppendConsoleInfo($"出牌 参数解析：手牌index={handIndex}，目标敌人UniqueInGameId={targetMonsterUniqueInGameId}");
+		AppendConsoleInfo($"出牌 参数解析：手牌顺序={handOrder}，内部index={handIndex}，目标敌人UniqueInGameId={targetMonsterUniqueInGameId}");
 		bool played = battleSytem.PlayHandCard(handIndex, target);
 		if (played)
 		{

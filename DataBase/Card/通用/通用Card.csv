@@ -7,3 +7,4 @@ CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params
 30000002,易伤,State,1,AddState,赋予2层易伤,2;1;2
 30000003,虚弱,State,1,AddState,赋予2层虚弱,2;2;2
 30000004,反击,State,1,AddState,添加状态反击：回合外受到攻击时，反击目标来源,1;4;1
+31002001,反攻号角,State,1,AddState,2回合内获得反击,1;4;2

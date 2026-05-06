@@ -9,11 +9,6 @@ using System.Collections.Generic;
 public partial class LoadCharacterCsv : Node
 {
 	/// <summary>
-	/// CSV表头常量
-	/// </summary>
-	public static readonly string CSV_HEADER = "id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum";
-
-	/// <summary>
 	/// 从CSV文件加载所有角色
 	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum
 	/// </summary>

@@ -9,10 +9,6 @@ using System.Collections.Generic;
 [GlobalClass]
 public partial class LoadCardCsv : Node
 {
-	/// <summary>
-	/// CSV表头常量
-	/// </summary>
-	public static readonly string CSV_HEADER = "CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params";
 
 	// 分隔符常量："|"分隔多个效果，";"分隔同一效果内的多个参数
 	private const char EFFECT_SEPARATOR = '|';
@@ -148,62 +144,6 @@ public partial class LoadCardCsv : Node
 			result.Add(paramList.ToArray());
 		}
 		return result.ToArray();
-	}
-
-	/// <summary>
-	/// 将 Params 序列化为 CSV 字段字符串
-	/// </summary>
-	private static string SerializeParams(int[][] cardParams)
-	{
-		if (cardParams == null || cardParams.Length == 0)
-			return string.Empty;
-
-		List<string> groups = new List<string>(cardParams.Length);
-		foreach (int[] group in cardParams)
-		{
-			groups.Add(group != null && group.Length > 0 ? string.Join(PARAM_SEPARATOR.ToString(), group) : string.Empty);
-		}
-		return string.Join(EFFECT_SEPARATOR.ToString(), groups);
-	}
-
-	/// <summary>
-	/// 将卡牌数组保存到CSV文件
-	/// </summary>
-	/// <param name="cards">卡牌数组</param>
-	/// <param name="filePath">保存路径</param>
-	/// <returns>是否成功保存</returns>
-	public static bool SaveCardsToCSV(Card[] cards, string filePath)
-	{
-		List<string> lines = new List<string>();
-
-		// 添加表头
-		lines.Add(CSV_HEADER);
-
-		// 添加每张卡牌
-		foreach (Card card in cards)
-		{
-			string line = CardToCSVLine(card);
-			lines.Add(line);
-		}
-
-		bool success = LoadCsv.SaveCSVLinesStream(filePath, lines.ToArray());
-
-		if (success)
-		{
-			GD.Print($"Successfully saved {cards.Length} cards to {filePath}");
-		}
-
-		return success;
-	}
-
-	/// <summary>
-	/// 将单个卡牌转换为CSV行
-	/// </summary>
-	private static string CardToCSVLine(Card card)
-	{
-		string effectTypesStr = card.EffectTypes != null ? string.Join(EFFECT_SEPARATOR.ToString(), card.EffectTypes) : string.Empty;
-		string paramsStr = SerializeParams(card.Params);
-		return $"{card.CardId},{LoadCsv.EscapeCSVField(card.CardName)},{card.Category},{card.EnergyCost},{effectTypesStr},{LoadCsv.EscapeCSVField(card.EffectDescription)},{paramsStr}";
 	}
 
 	/// <summary>
