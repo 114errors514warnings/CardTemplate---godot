@@ -2,10 +2,25 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Linq;
 using CardSimulator;
 
 public partial class BattleSytem : Node
 {
+    private sealed class StateCardApplication
+    {
+        public IUnitInstance TargetUnit { get; }
+        public StateType StateType { get; }
+        public int Stacks { get; }
+
+        public StateCardApplication(IUnitInstance targetUnit, StateType stateType, int stacks)
+        {
+            TargetUnit = targetUnit;
+            StateType = stateType;
+            Stacks = stacks;
+        }
+    }
+
     public static BattleSytem Current { get; private set; }
 
     private static readonly Random RandomGenerator = new Random();
@@ -26,6 +41,7 @@ public partial class BattleSytem : Node
     private const string DefaultCharacterCsvPath = "res://DataBase/Unit/Character.csv";
     private const string DefaultMonsterCsvPath = "res://DataBase/Unit/Monster.csv";
     private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
+    private const string DefaultStateCsvPath = "res://DataBase/State/通用State.csv";
     private const string DefaultCharacterDeckCsvPath = "res://DataBase/Unit/Character/CharacterDefaultDeck.csv";
 
     private const string BattleInfoLabelPath = "局内信息/对局信息滚动/对局信息显示";
@@ -55,6 +71,9 @@ public partial class BattleSytem : Node
     private BattleInfoTab CurrentBattleInfoTab = BattleInfoTab.Runtime;
     private PileDisplayOrderMode CurrentPileDisplayOrderMode = PileDisplayOrderMode.PileOrder;
     private string CachedRuntimeBattleInfo = string.Empty;
+    private int OrderedCombatLogDepth = 0;
+    private readonly Queue<string> DeferredCombatInfoMessages = new Queue<string>();
+    private readonly Queue<System.Action> DeferredDeathActions = new Queue<System.Action>();
 
     // 玩家角色实例（唯一）
     public CharacterInstance Player;
@@ -508,7 +527,8 @@ public partial class BattleSytem : Node
 
     private void BuildRuntimeBattleInfo(StringBuilder builder)
     {
-           builder.AppendLine($"角色ID：{Player.id} 名称：{Player.Name} UniqueInGameID：{FormatUniqueInGameId(Player.UniqueInGameId)} HP：{Player.HP}/{Player.Max_HP}（当前/最大） Atk：{Player.Attack} Def：{Player.Defend} Costs：{Player.costs} Shield：{Player.Shield}");
+              builder.AppendLine($"角色ID：{Player.id} 名称：{Player.Name} UniqueInGameID：{FormatUniqueInGameId(Player.UniqueInGameId)} HP：{Player.HP}/{Player.Max_HP}（当前/最大） Atk：{Player.Attack} Def：{Player.Defend} Costs：{Player.costs} Shield：{Player.Shield}");
+          builder.AppendLine($"当前状态：{FormatUnitStates(Player)}");
         builder.AppendLine("手牌：");
 
         if (Player.handcards == null || Player.handcards.Count == 0)
@@ -539,7 +559,38 @@ public partial class BattleSytem : Node
         {
             MonsterInstance monster = Monsters[monsterKey];
             builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield} 当前意图：{FormatSelectedMonsterIntention(monster)}");
+            builder.AppendLine($"当前状态：{FormatUnitStates(monster)}");
         }
+    }
+
+    private string FormatUnitStates(IUnitInstance unit)
+    {
+        if (unit == null || unit.States == null || unit.States.Count == 0)
+        {
+            return "无";
+        }
+
+        EnsureUnitCachesLoaded();
+
+        List<StateType> stateTypes = new List<StateType>(unit.States.Keys);
+        stateTypes.Sort();
+
+        List<string> stateParts = new List<string>();
+        for (int index = 0; index < stateTypes.Count; index++)
+        {
+            StateType stateType = stateTypes[index];
+            if (!unit.States.TryGetValue(stateType, out StateRuntimeData stateData) || stateData == null || stateData.Stacks <= 0)
+            {
+                continue;
+            }
+
+            string stateName = LoadingSystem.StateDictionary.TryGetValue(stateType, out StateDefinition definition) && !string.IsNullOrWhiteSpace(definition.Name)
+                ? definition.Name
+                : stateType.ToString();
+            stateParts.Add($"{index + 1}、{stateName}({stateData.Stacks})");
+        }
+
+        return stateParts.Count == 0 ? "无" : string.Join(" ", stateParts);
     }
 
     private string FormatUniqueInGameId(int uniqueInGameId)
@@ -682,6 +733,7 @@ public partial class BattleSytem : Node
         if (characters.TryGetValue(characterId, out var character))
         {
             Player = new CharacterInstance(character);
+            Player.OnStateEnded = CreateStateEndedCallback(Player);
             Player.OnDead = () =>
             {
                 AppendPanelConsoleInfo("战斗结束：玩家已死亡。游戏结束。");
@@ -708,6 +760,7 @@ public partial class BattleSytem : Node
             if (monsters.TryGetValue(id, out var monster))
             {
                 var monsterInstance = new MonsterInstance(monster);
+                monsterInstance.OnStateEnded = CreateStateEndedCallback(monsterInstance);
                 monsterInstance.OnDead = CreateMonsterOnDeadCallback(monsterInstance);
                 Monsters[monsterInstance.UniqueInGameId] = monsterInstance;
                 AppendPanelConsoleInfo($"已创建怪物 {monsterInstance.Name}（模板ID: {id}, UniqueInGameId: {monsterInstance.UniqueInGameId}，字典key: {monsterInstance.UniqueInGameId}）。");
@@ -759,6 +812,7 @@ public partial class BattleSytem : Node
                 instance = new MonsterInstance(template);
             }
 
+            instance.OnStateEnded = CreateStateEndedCallback(instance);
             instance.OnDead = CreateMonsterOnDeadCallback(instance);
             Monsters[instance.UniqueInGameId] = instance;
             added++;
@@ -799,6 +853,11 @@ public partial class BattleSytem : Node
         {
             LoadingSystem.LoadMonsters(DefaultMonsterCsvPath, true);
         }
+
+		if (LoadingSystem.StateDictionary.Count == 0)
+		{
+			LoadingSystem.LoadStates(DefaultStateCsvPath, true);
+		}
     }
 
     /// <summary>
@@ -932,11 +991,32 @@ public partial class BattleSytem : Node
             return false;
         }
 
+        List<StateCardApplication> stateCardApplications = null;
+        IUnitInstance statePileTarget = null;
+        if (card.Category == CardCategory.State)
+        {
+            if (!TryResolveStateCardApplications(card, Player, target, out stateCardApplications, out string stateCardError))
+            {
+                AppendPanelConsoleError(stateCardError);
+                return false;
+            }
+
+            statePileTarget = stateCardApplications[0].TargetUnit;
+        }
+
         Player.costs -= card.EnergyCost;
         Player.handcards.RemoveAt(handIndex);
-        Player.discardpile.Add(card);
-
-        AppendPanelConsoleInfo($"玩家打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {Player.costs}。卡牌已移入弃牌堆。手牌剩余 {Player.handcards.Count} 张，弃牌堆当前 {Player.discardpile.Count} 张。");
+        if (statePileTarget != null)
+        {
+            statePileTarget.StatePile.Add(card);
+            RegisterStateCardEndCallbacks(stateCardApplications, card, Player);
+            AppendPanelConsoleInfo($"玩家打出状态牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {Player.costs}。卡牌已移入 {BuildUnitLabel(statePileTarget)} 的状态牌堆。手牌剩余 {Player.handcards.Count} 张。目标状态牌堆当前 {statePileTarget.StatePile.Count} 张。");
+        }
+        else
+        {
+            Player.discardpile.Add(card);
+            AppendPanelConsoleInfo($"玩家打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {Player.costs}。卡牌已移入弃牌堆。手牌剩余 {Player.handcards.Count} 张，弃牌堆当前 {Player.discardpile.Count} 张。");
+        }
 
         if (applyResult.EffectResult != null)
         {
@@ -1189,7 +1269,10 @@ public partial class BattleSytem : Node
                 continue;
             }
 
-            AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）{resultSummary}");
+            if (!string.IsNullOrWhiteSpace(resultSummary))
+            {
+                AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）{resultSummary}");
+            }
         }
     }
 
@@ -1214,8 +1297,18 @@ public partial class BattleSytem : Node
                     return true;
                 }
 
-                EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player, effectArgs);
-                resultSummary = $"Damage：{attackResult.BuildSummary()}";
+                BeginOrderedCombatLog();
+                try
+                {
+                    EffectResult attackResult = EffectSystem.ApplyAttack(monster, Player, effectArgs);
+                    AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）Damage：{attackResult.BuildSummary()}");
+                    FlushDeferredCombatResolution();
+                }
+                finally
+                {
+                    EndOrderedCombatLog();
+                }
+
                 return true;
 
             case EffectType.Shield:
@@ -1226,6 +1319,65 @@ public partial class BattleSytem : Node
             default:
                 AppendPanelConsoleError($"错误：怪物意图暂不支持效果类型 {effectType}。当前仅支持 Damage 与 Shield。");
                 return false;
+        }
+    }
+
+    public void BeginOrderedCombatLog()
+    {
+        OrderedCombatLogDepth++;
+    }
+
+    public void EndOrderedCombatLog()
+    {
+        if (OrderedCombatLogDepth > 0)
+        {
+            OrderedCombatLogDepth--;
+        }
+    }
+
+    public void EnqueueDeferredCombatInfo(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (OrderedCombatLogDepth > 0)
+        {
+            DeferredCombatInfoMessages.Enqueue(message);
+            return;
+        }
+
+        AppendPanelConsoleInfo(message);
+    }
+
+    public void HandleUnitDeath(System.Action onDead)
+    {
+        if (onDead == null)
+        {
+            return;
+        }
+
+        if (OrderedCombatLogDepth > 0)
+        {
+            DeferredDeathActions.Enqueue(onDead);
+            return;
+        }
+
+        onDead.Invoke();
+    }
+
+    private void FlushDeferredCombatResolution()
+    {
+        while (DeferredCombatInfoMessages.Count > 0)
+        {
+            AppendPanelConsoleInfo(DeferredCombatInfoMessages.Dequeue());
+        }
+
+        while (DeferredDeathActions.Count > 0)
+        {
+            System.Action onDead = DeferredDeathActions.Dequeue();
+            onDead?.Invoke();
         }
     }
 
@@ -1414,6 +1566,64 @@ public partial class BattleSytem : Node
         };
     }
 
+    private System.Action<StateEndedContext> CreateStateEndedCallback(IUnitInstance targetUnit)
+    {
+        return context =>
+        {
+            if (context == null || !context.NeedCallback)
+            {
+                return;
+            }
+
+            IUnitInstance actualTarget = context.TargetUnit ?? targetUnit;
+            string targetLabel = BuildUnitLabel(actualTarget);
+            string ownerLabel = BuildUnitLabel(context.OwnerUnit);
+            string cardUniqueInGameId = string.IsNullOrWhiteSpace(context.StateCardUniqueInGameId) ? "无" : context.StateCardUniqueInGameId;
+
+            Card stateCard = FindAndRemoveCardFromStatePile(actualTarget, context.StateCardUniqueInGameId);
+            if (stateCard == null)
+            {
+                AppendPanelConsoleError($"错误：状态结束回调未在 {targetLabel} 的状态牌堆中找到 UniqueInGameId={cardUniqueInGameId} 的状态牌。状态={context.StateType}。");
+                return;
+            }
+
+            if (context.OwnerUnit == null || context.OwnerUnit.HP <= 0)
+            {
+                AppendPanelConsoleInfo($"状态结束：{targetLabel} 的状态 {context.StateType} 已结束，对应状态牌 {BuildCardLabel(stateCard)} 未回收，因为所属单位已不存在或已死亡。原因={context.EndReason}。");
+                RefreshBattleInfoDisplay();
+                return;
+            }
+
+            context.OwnerUnit.DiscardPile.Add(stateCard);
+            AppendPanelConsoleInfo($"状态结束：{targetLabel} 的状态 {context.StateType} 已结束，对应状态牌 {BuildCardLabel(stateCard)} 已移入 {ownerLabel} 的弃牌堆。原因={context.EndReason}。");
+            RefreshBattleInfoDisplay();
+        };
+    }
+
+    private string BuildUnitLabel(IUnitInstance unit)
+    {
+        if (unit == null)
+        {
+            return "无";
+        }
+
+        Unit typedUnit = unit as Unit;
+        string name = typedUnit?.Name ?? unit.GetType().Name;
+        return $"{name}(UniqueInGameId={unit.UniqueInGameId})";
+    }
+
+    private string BuildCardLabel(Card card)
+    {
+        if (card == null)
+        {
+            return "无";
+        }
+
+        string cardName = string.IsNullOrWhiteSpace(card.CardName) ? $"CardId={card.CardId}" : card.CardName;
+        string uniqueInGameId = string.IsNullOrWhiteSpace(card.UniqueInGameId) ? "未生成" : card.UniqueInGameId;
+        return $"{cardName}(CardId={card.CardId}, UniqueInGameId={uniqueInGameId})";
+    }
+
     private bool CheckBattleEndAndHandle()
     {
         if (!IsBattleStarted)
@@ -1461,6 +1671,7 @@ public partial class BattleSytem : Node
             Player.handcards?.Clear();
             Player.drawpile?.Clear();
             Player.discardpile?.Clear();
+            Player.StatePile?.Clear();
             Player = null;
         }
 
@@ -1512,5 +1723,172 @@ public partial class BattleSytem : Node
         }
 
         console.Text += message;
+    }
+
+    private void RegisterStateCardEndCallbacks(List<StateCardApplication> applications, Card sourceCard, IUnitInstance ownerUnit)
+    {
+        if (applications == null || applications.Count == 0)
+        {
+            return;
+        }
+
+        foreach (StateCardApplication application in applications)
+        {
+            if (application?.TargetUnit == null)
+            {
+                continue;
+            }
+
+            StateSystem.RegisterStateEndCallback(application.TargetUnit, application.StateType, application.Stacks, sourceCard?.UniqueInGameId, ownerUnit);
+        }
+    }
+
+    private Card FindAndRemoveCardFromStatePile(IUnitInstance targetUnit, string stateCardUniqueInGameId)
+    {
+        if (targetUnit?.StatePile == null || string.IsNullOrWhiteSpace(stateCardUniqueInGameId))
+        {
+            return null;
+        }
+
+        for (int index = 0; index < targetUnit.StatePile.Count; index++)
+        {
+            Card stateCard = targetUnit.StatePile[index];
+            if (stateCard == null || !string.Equals(stateCard.UniqueInGameId, stateCardUniqueInGameId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            targetUnit.StatePile.RemoveAt(index);
+            return stateCard;
+        }
+
+        return null;
+    }
+
+    private bool TryResolveStateCardApplications(Card card, IUnitInstance source, IUnitInstance selectedTarget, out List<StateCardApplication> applications, out string errorMessage)
+    {
+        applications = new List<StateCardApplication>();
+        errorMessage = string.Empty;
+
+        if (card == null)
+        {
+            errorMessage = "错误：状态牌为空，无法解析状态牌堆目标。";
+            return false;
+        }
+
+        for (int effectIndex = 0; effectIndex < card.EffectTypes.Length; effectIndex++)
+        {
+            if (card.EffectTypes[effectIndex] != EffectType.AddState)
+            {
+                continue;
+            }
+
+            int[] rawEffectParams = (card.Params != null && effectIndex < card.Params.Length) ? card.Params[effectIndex] : Array.Empty<int>();
+            EffectTargetType effectTargetType = ParseEffectTargetType(rawEffectParams);
+            int[] effectArgs = GetEffectArguments(rawEffectParams);
+            List<IUnitInstance> resolvedTargets = ResolveEffectTargets(source, selectedTarget, effectTargetType);
+
+            if (effectArgs.Length <= 0)
+            {
+                errorMessage = $"错误：状态牌 CardId={card.CardId} 的 AddState 缺少 stateType 参数。";
+                return false;
+            }
+
+            StateType stateType = (StateType)effectArgs[0];
+            if (!Enum.IsDefined(typeof(StateType), stateType) || stateType == StateType.None)
+            {
+                errorMessage = $"错误：状态牌 CardId={card.CardId} 的 AddState 参数非法，stateType={effectArgs[0]}。";
+                return false;
+            }
+
+            int stacks = effectArgs.Length > 1 ? effectArgs[1] : 1;
+            foreach (IUnitInstance resolvedTarget in resolvedTargets)
+            {
+                applications.Add(new StateCardApplication(resolvedTarget, stateType, stacks));
+            }
+        }
+
+        if (applications.Count == 0)
+        {
+            errorMessage = $"错误：状态牌 CardId={card.CardId} 未配置 AddState，无法放入目标状态牌堆。";
+            return false;
+        }
+
+        IUnitInstance uniqueTarget = applications[0].TargetUnit;
+        if (uniqueTarget == null)
+        {
+            errorMessage = $"错误：状态牌 CardId={card.CardId} 未解析出有效状态目标。";
+            return false;
+        }
+
+        if (applications.Any(current => current.TargetUnit == null || current.TargetUnit.UniqueInGameId != uniqueTarget.UniqueInGameId))
+        {
+            errorMessage = $"错误：状态牌 CardId={card.CardId} 当前不支持同时作用于多个不同单位，因为同一张牌无法同时进入多个状态牌堆。";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static EffectTargetType ParseEffectTargetType(int[] rawEffectParams)
+    {
+        if (rawEffectParams == null || rawEffectParams.Length == 0)
+        {
+            return EffectTargetType.Auto;
+        }
+
+        EffectTargetType parsed = (EffectTargetType)rawEffectParams[0];
+        return Enum.IsDefined(typeof(EffectTargetType), parsed) ? parsed : EffectTargetType.Auto;
+    }
+
+    private static int[] GetEffectArguments(int[] rawEffectParams)
+    {
+        if (rawEffectParams == null || rawEffectParams.Length <= 1)
+        {
+            return Array.Empty<int>();
+        }
+
+        int[] args = new int[rawEffectParams.Length - 1];
+        Array.Copy(rawEffectParams, 1, args, 0, args.Length);
+        return args;
+    }
+
+    private List<IUnitInstance> ResolveEffectTargets(IUnitInstance source, IUnitInstance selectedTarget, EffectTargetType effectTargetType)
+    {
+        List<IUnitInstance> targets = new List<IUnitInstance>();
+        switch (effectTargetType)
+        {
+            case EffectTargetType.Self:
+                if (source != null)
+                {
+                    targets.Add(source);
+                }
+                break;
+            case EffectTargetType.SelectedTarget:
+                if (selectedTarget != null)
+                {
+                    targets.Add(selectedTarget);
+                }
+                break;
+            case EffectTargetType.AllEnemies:
+                targets.AddRange(GetEnemyUnits(source) ?? new List<IUnitInstance>());
+                break;
+            case EffectTargetType.AllUnits:
+                targets.AddRange(GetAllUnits() ?? new List<IUnitInstance>());
+                break;
+            case EffectTargetType.Auto:
+            default:
+                if (selectedTarget != null)
+                {
+                    targets.Add(selectedTarget);
+                }
+                else if (source != null)
+                {
+                    targets.Add(source);
+                }
+                break;
+        }
+
+        return targets;
     }
 }

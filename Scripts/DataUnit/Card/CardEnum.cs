@@ -29,6 +29,7 @@ namespace CardSimulator
 		Weak = 2,       // 虚弱：造成的攻击伤害降低25%
 		Ignite = 3,
 		CounterAttack = 4, // 反击：回合外受到攻击时，对来源进行一次反击（反击不会触发反击）
+		WhirlwindSlash = 5, // 旋风斩：回合外的攻击作用于所有敌人
 	}
 
 	// 每个效果独立的目标选择方式

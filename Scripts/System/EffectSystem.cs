@@ -6,6 +6,7 @@ public sealed class EffectResult
     public string EffectName { get; }
     public IUnitInstance Source { get; }
     public IUnitInstance Target { get; }
+    public string SummaryOverride { get; }
     public int TotalValue { get; }
     public int ShieldAbsorbed { get; }
     public int HpDamage { get; }
@@ -21,6 +22,7 @@ public sealed class EffectResult
         string effectName,
         IUnitInstance source,
         IUnitInstance target,
+        string summaryOverride = null,
         int totalValue = 0,
         int shieldAbsorbed = 0,
         int hpDamage = 0,
@@ -35,6 +37,7 @@ public sealed class EffectResult
         EffectName = effectName;
         Source = source;
         Target = target;
+        SummaryOverride = summaryOverride ?? string.Empty;
         TotalValue = totalValue;
         ShieldAbsorbed = shieldAbsorbed;
         HpDamage = hpDamage;
@@ -49,6 +52,11 @@ public sealed class EffectResult
 
     public string BuildSummary()
     {
+        if (!string.IsNullOrWhiteSpace(SummaryOverride))
+        {
+            return SummaryOverride;
+        }
+
         if (string.Equals(EffectName, "Attack", StringComparison.OrdinalIgnoreCase))
         {
             return $"来源={BuildUnitLabel(Source)}，目标={BuildUnitLabel(Target)}，总伤害={TotalValue}，护盾抵扣={ShieldAbsorbed}，HP伤害={HpDamage}，目标护盾 {TargetShieldBefore}->{TargetShieldAfter}，目标HP {TargetHpBefore}->{TargetHpAfter}";
@@ -82,13 +90,15 @@ public sealed class EffectContext
     // 当前效果的参数数组，params[0]为第一个参数，依此类推
     public int[] Params { get; }
     public bool IsCounterAttack { get; }
+    public bool SkipOutOfTurnMultiTarget { get; }
 
-    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null, bool isCounterAttack = false)
+    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
         Target = target;
         Params = effectParams ?? Array.Empty<int>();
         IsCounterAttack = isCounterAttack;
+        SkipOutOfTurnMultiTarget = skipOutOfTurnMultiTarget;
     }
 
     public int GetParam(int index, int defaultValue = 0)
@@ -112,6 +122,11 @@ public sealed class AttackEffect : IEffect
         if (context == null)
         {
             throw new ArgumentNullException(nameof(context));
+        }
+
+        if (ShouldHitAllEnemies(context))
+        {
+            return ApplyAttackToAllEnemies(context);
         }
 
         if (context.Target == null)
@@ -148,6 +163,63 @@ public sealed class AttackEffect : IEffect
             targetHpAfter: context.Target.HP);
     }
 
+    private static bool ShouldHitAllEnemies(EffectContext context)
+    {
+        if (context == null || context.SkipOutOfTurnMultiTarget)
+        {
+            return false;
+        }
+
+        if (context.Source == null || !IsOutOfTurn(context.Source))
+        {
+            return false;
+        }
+
+        return StateSystem.TryGetStateStacks(context.Source, StateType.WhirlwindSlash, out int stacks) && stacks > 0;
+    }
+
+    private static EffectResult ApplyAttackToAllEnemies(EffectContext context)
+    {
+        var battle = BattleSytem.Current;
+        var enemies = battle?.GetEnemyUnits(context.Source) ?? new System.Collections.Generic.List<IUnitInstance>();
+        if (enemies.Count == 0)
+        {
+            return new EffectResult("Attack", context.Source, context.Target, summaryOverride: $"来源={BuildUnitLabel(context.Source)}，目标=全体敌人，未命中任何有效目标。");
+        }
+
+        int totalDamage = 0;
+        int totalShieldAbsorbed = 0;
+        int totalHpDamage = 0;
+        foreach (IUnitInstance enemy in enemies)
+        {
+            EffectResult singleResult = EffectSystem.ApplyAttack(context.Source, enemy, context.Params, context.IsCounterAttack, true);
+            totalDamage += singleResult.TotalValue;
+            totalShieldAbsorbed += singleResult.ShieldAbsorbed;
+            totalHpDamage += singleResult.HpDamage;
+        }
+
+        return new EffectResult(
+            "Attack",
+            context.Source,
+            null,
+            summaryOverride: $"来源={BuildUnitLabel(context.Source)}，目标=全体敌人，共{enemies.Count}个，总伤害={totalDamage}，护盾抵扣={totalShieldAbsorbed}，HP伤害={totalHpDamage}",
+            totalValue: totalDamage,
+            shieldAbsorbed: totalShieldAbsorbed,
+            hpDamage: totalHpDamage);
+    }
+
+    private static string BuildUnitLabel(IUnitInstance unit)
+    {
+        if (unit == null)
+        {
+            return "无";
+        }
+
+        Unit typedUnit = unit as Unit;
+        string name = typedUnit?.Name ?? unit.GetType().Name;
+        return $"{name}(UniqueInGameId={unit.UniqueInGameId})";
+    }
+
     private static void TryTriggerCounterAttack(EffectContext context)
     {
         if (context == null || context.IsCounterAttack)
@@ -181,7 +253,7 @@ public sealed class AttackEffect : IEffect
         }
 
         EffectResult counterAttackResult = EffectSystem.ApplyAttack(context.Target, context.Source, isCounterAttack: true);
-        BattleSytem.Current?.AppendPanelConsoleInfo($"反击触发：{counterAttackResult.BuildSummary()}");
+        BattleSytem.Current?.EnqueueDeferredCombatInfo($"反击触发：{counterAttackResult.BuildSummary()}");
     }
 
     private static bool IsOutOfTurn(IUnitInstance unit)
@@ -251,9 +323,9 @@ public static class EffectSystem
         return effect.Apply(context);
     }
 
-    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null, bool isCounterAttack = false)
+    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false)
     {
-        return Apply(Attack, new EffectContext(source, target, effectParams, isCounterAttack));
+        return Apply(Attack, new EffectContext(source, target, effectParams, isCounterAttack, skipOutOfTurnMultiTarget));
     }
 
     public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)

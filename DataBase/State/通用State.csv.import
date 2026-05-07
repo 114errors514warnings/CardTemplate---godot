@@ -6,7 +6,10 @@ uid="uid://d0rqtkl1mcc3m"
 
 [deps]
 
+files=["res://DataBase/State/通用State.Name.translation", "res://DataBase/State/通用State.IsStackable.translation", "res://DataBase/State/通用State.IsPermanent.translation", "res://DataBase/State/通用State.TurnStartDecayAmount.translation"]
+
 source_file="res://DataBase/State/通用State.csv"
+dest_files=["res://DataBase/State/通用State.Name.translation", "res://DataBase/State/通用State.IsStackable.translation", "res://DataBase/State/通用State.IsPermanent.translation", "res://DataBase/State/通用State.TurnStartDecayAmount.translation"]
 
 [params]
 

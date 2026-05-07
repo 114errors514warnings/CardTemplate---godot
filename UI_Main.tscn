@@ -11,6 +11,7 @@
 [ext_resource type="Script" uid="uid://vjajksmqd4mx" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="9"]
 [ext_resource type="Script" uid="uid://bfccequ6evgaj" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -85,13 +86,12 @@ anchors_preset = -1
 anchor_right = 0.5
 anchor_bottom = 0.8
 
-[node name="卡牌操作" type="GridContainer" parent="操作面板" unique_id=212513424]
+[node name="卡牌操作" type="HFlowContainer" parent="操作面板" unique_id=212513424]
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 1
 anchors_preset = -1
 anchor_right = 1.0
 anchor_bottom = 0.3
-columns = 3
 
 [node name="抽牌" type="Button" parent="操作面板/卡牌操作" unique_id=191082677]
 editor_description = "参数为抽牌数，不填默认1
@@ -140,14 +140,13 @@ size_flags_vertical = 4
 text = "切换牌堆顺序显示"
 script = ExtResource("10")
 
-[node name="回合控制" type="GridContainer" parent="操作面板" unique_id=1664858752]
+[node name="回合控制" type="HFlowContainer" parent="操作面板" unique_id=1664858752]
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 1
 anchors_preset = -1
 anchor_top = 0.3
 anchor_right = 1.0
 anchor_bottom = 0.6
-columns = 3
 
 [node name="开始游戏" type="Button" parent="操作面板/回合控制" unique_id=1725832303]
 editor_description = "无需参数
@@ -201,14 +200,21 @@ size_flags_vertical = 4
 text = "删除敌人"
 script = ExtResource("5")
 
-[node name="修改属性" type="GridContainer" parent="操作面板" unique_id=1261323471]
+[node name="结束游戏" type="Button" parent="操作面板/回合控制" unique_id=1823456701]
+editor_description = "参数：必须输入0才执行强制结束游戏"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "结束游戏"
+script = ExtResource("12")
+
+[node name="修改属性" type="HFlowContainer" parent="操作面板" unique_id=1261323471]
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 1
 anchors_preset = -1
 anchor_top = 0.6
 anchor_right = 1.0
 anchor_bottom = 0.9
-columns = 3
 
 [node name="生命" type="Button" parent="操作面板/修改属性" unique_id=1965584985]
 editor_description = "只填一个默认当前，/XX当作上限"

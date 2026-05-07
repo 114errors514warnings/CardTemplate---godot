@@ -43,16 +43,47 @@ public interface IUnitInstance
 	int Max_HP { get; set; }
 	int HP { get; set; }
 	Dictionary<StateType, StateRuntimeData> States { get; }
+	List<Card> StatePile { get; }
+	List<Card> DiscardPile { get; }
 	int Shield { get; set; }
 	int Attack { get; set; }
 	int Defend { get; set; }
 	float posx { get; set; }
 	float posy { get; set; }
+	System.Action<StateEndedContext> OnStateEnded { get; set; }
 
 	/// <summary>
 	/// HP 从正值降至 0 或以下时触发一次，由 BattleSystem 在创建实例时注入。
 	/// </summary>
 	System.Action OnDead { get; set; }
+}
+
+public enum StateEndReason
+{
+	Expired = 0,
+	Cleared = 1,
+}
+
+public sealed class StateEndedContext
+{
+	public IUnitInstance TargetUnit { get; }
+	public StateType StateType { get; }
+	public string StateCardUniqueInGameId { get; }
+	public IUnitInstance OwnerUnit { get; }
+	public StateEndReason EndReason { get; }
+	public bool NeedCallback { get; }
+
+	public StateEndedContext(IUnitInstance targetUnit, StateType stateType, string stateCardUniqueInGameId, IUnitInstance ownerUnit, StateEndReason endReason, bool needCallback)
+	{
+		TargetUnit = targetUnit;
+		StateType = stateType;
+		StateCardUniqueInGameId = stateCardUniqueInGameId ?? string.Empty;
+		OwnerUnit = ownerUnit;
+		EndReason = endReason;
+		NeedCallback = needCallback;
+	}
+
+	public bool HasStateCardUniqueInGameId => !string.IsNullOrWhiteSpace(StateCardUniqueInGameId);
 }
 
 /// <summary>

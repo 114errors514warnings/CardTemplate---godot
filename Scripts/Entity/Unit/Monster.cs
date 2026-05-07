@@ -81,13 +81,23 @@ public class MonsterInstance : Monster, IUnitInstance
             _hp = value;
             if (wasAlive && _hp <= 0)
             {
+                BattleSytem battle = BattleSytem.Current;
+                if (battle != null)
+                {
+                    battle.HandleUnitDeath(OnDead);
+                    return;
+                }
+
                 OnDead?.Invoke();
             }
         }
     }
 
     public System.Action OnDead { get; set; }
+    public System.Action<StateEndedContext> OnStateEnded { get; set; }
     public Dictionary<StateType, StateRuntimeData> States { get; } = new Dictionary<StateType, StateRuntimeData>();
+    public List<Card> StatePile { get; } = new List<Card>();
+    public List<Card> DiscardPile { get; } = new List<Card>();
     public int Shield { get; set; }
     public int Attack { get; set; }
     public int Defend { get; set; }

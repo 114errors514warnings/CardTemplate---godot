@@ -11,6 +11,7 @@ using System.Collections.Generic;
 public partial class LoadingSystem : Node
 {
 	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
+	private const string DefaultStateCsvPath = "res://DataBase/State/通用State.csv";
 
 	/// <summary>
 	/// 缓存已加载的卡牌数据，Key 为 CardId
@@ -31,6 +32,11 @@ public partial class LoadingSystem : Node
 	/// 缓存角色默认卡组，Key 为角色ID，Value 为卡牌ID→数量字典
 	/// </summary>
 	private static Dictionary<int, Dictionary<int, int>> characterDefaultDeckCache = new Dictionary<int, Dictionary<int, int>>();
+
+	/// <summary>
+	/// 缓存状态配置，Key 为 StateType
+	/// </summary>
+	private static Dictionary<StateType, StateDefinition> stateCache = new Dictionary<StateType, StateDefinition>();
 
 	/// <summary>
 	/// 公开的卡牌字典访问器
@@ -64,6 +70,11 @@ public partial class LoadingSystem : Node
 		get { return characterDefaultDeckCache; }
 	}
 
+	public static Dictionary<StateType, StateDefinition> StateDictionary
+	{
+		get { return stateCache; }
+	}
+
 	public override void _Ready()
 	{
 		OnInit();
@@ -75,6 +86,7 @@ public partial class LoadingSystem : Node
 	public void OnInit()
 	{
 		Dictionary<int, Card> cards = LoadCards(DefaultCardCsvPath, true);
+		Dictionary<StateType, StateDefinition> states = LoadStates(DefaultStateCsvPath, true);
 
 		// 移除打印，由调用者处理
 	}
@@ -125,6 +137,40 @@ public partial class LoadingSystem : Node
 	{
 		cardCache.Clear();
 		GD.Print("Cleared card cache");
+	}
+
+	public static Dictionary<StateType, StateDefinition> LoadStates(string filePath, bool useCache = true)
+	{
+		if (useCache && stateCache.Count > 0)
+		{
+			return stateCache;
+		}
+
+		StateDefinition[] states = LoadStateCsv.LoadStatesFromCSV(filePath);
+		Dictionary<StateType, StateDefinition> stateDict = new Dictionary<StateType, StateDefinition>();
+		foreach (StateDefinition state in states)
+		{
+			if (state == null)
+			{
+				continue;
+			}
+
+			if (!stateDict.ContainsKey(state.Type))
+			{
+				stateDict[state.Type] = state;
+			}
+			else
+			{
+				GD.PrintErr($"Duplicate StateType detected while loading states: {state.Type}. Ignoring later entry.");
+			}
+		}
+
+		if (useCache)
+		{
+			stateCache = stateDict;
+		}
+
+		return stateDict;
 	}
 
 	/// <summary>
