@@ -9,6 +9,13 @@ namespace CardSimulator
 		State     // 状态卡牌
 	}
 
+	[System.Flags]
+	public enum CardKeyWord
+	{
+		None = 0,
+		Retain = 1 << 0, // 保留：回合结束时不弃置
+	}
+
 	// 效果类型枚举（示例，你可根据需求扩展）
 	public enum EffectType
 	{
@@ -19,6 +26,9 @@ namespace CardSimulator
 		ClearState,
 		Heal,          // 治疗
 		DrawCard,      // 抽卡
+		AddCost,       // 增加能量
+		ClearAllStates,// 清除所有状态
+		ShieldSlam,    // 护盾冲撞：额外造成等同自身护盾值的伤害
 	}
 
 	// 状态类型枚举（可挂载到 UnitInstance）

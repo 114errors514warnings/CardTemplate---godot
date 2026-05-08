@@ -16,8 +16,9 @@ public partial class LoadCardCsv : Node
 
 	/// <summary>
 	/// 从CSV文件加载所有卡牌
-	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params
+	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
 	/// EffectType 支持"|"分隔多效果；Params 用"|"分隔每个效果的参数组，用";"分隔同一效果内的参数
+	/// CardKeyWord 支持"|"分隔多个关键词；为兼容旧配置，true 视为 Retain
 	/// Params[i][0] 固定表示 EffectTargetType，后续参数为该效果自身参数
 	/// NeedTarget 自动推导：任意效果TargetType为SelectedTarget则为true
 	/// </summary>
@@ -77,6 +78,8 @@ public partial class LoadCardCsv : Node
 			string effectDescription = fields[5];
 			string paramsStr = fields.Length > 6 ? fields[6] : string.Empty;
 
+			CardKeyWord cardKeyWord = fields.Length > 7 ? ParseCardKeyWord(fields[7]) : CardKeyWord.None;
+
 			// 解析 EffectTypes（"|"分隔多个效果）
 			EffectType[] effectTypes = ParseEffectTypes(effectTypeStr);
 
@@ -87,7 +90,7 @@ public partial class LoadCardCsv : Node
 			CardCategory category = (CardCategory)Enum.Parse(typeof(CardCategory), categoryStr, ignoreCase: true);
 
 			// NeedTarget 自动从 Params 中推导，无需CSV配置
-			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName);
+			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName, cardKeyWord);
 		}
 		catch (Exception ex)
 		{
@@ -113,6 +116,29 @@ public partial class LoadCardCsv : Node
 				types.Add((EffectType)Enum.Parse(typeof(EffectType), trimmed, ignoreCase: true));
 		}
 		return types.ToArray();
+	}
+
+	private static CardKeyWord ParseCardKeyWord(string cardKeyWordStr)
+	{
+		if (string.IsNullOrWhiteSpace(cardKeyWordStr))
+			return CardKeyWord.None;
+
+		string trimmed = cardKeyWordStr.Trim();
+		if (trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
+			return CardKeyWord.Retain;
+
+		string[] parts = trimmed.Split(new char[] { EFFECT_SEPARATOR, ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries);
+		CardKeyWord result = CardKeyWord.None;
+		foreach (string part in parts)
+		{
+			string keyWordText = part.Trim();
+			if (string.IsNullOrEmpty(keyWordText))
+				continue;
+
+			result |= (CardKeyWord)Enum.Parse(typeof(CardKeyWord), keyWordText, ignoreCase: true);
+		}
+
+		return result;
 	}
 
 	/// <summary>

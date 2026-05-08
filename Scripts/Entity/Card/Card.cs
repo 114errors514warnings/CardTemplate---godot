@@ -53,6 +53,9 @@ public partial class Card : Resource
 	[Export]
 	public bool NeedTarget { get; set; } = false; // 是否需要目标
 
+	[Export]
+	public CardKeyWord CardKeyWord { get; set; } = CardKeyWord.None; // 卡牌关键词
+
 	// 各效果对应的参数，Params[i][0] 固定表示目标类型，后续参数为该效果自身参数
 	public int[][] Params { get; set; } = Array.Empty<int[]>();
 
@@ -60,7 +63,7 @@ public partial class Card : Resource
 	public Card() { }
 
 	// 带参数的构造函数，NeedTarget 自动从 cardParams 推导
-	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType[] effectTypes, string effectDesc, int[][] cardParams = null, string cardName = "")
+	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType[] effectTypes, string effectDesc, int[][] cardParams = null, string cardName = "", CardKeyWord cardKeyWord = CardKeyWord.None)
 	{
 		CardId = cardId;
 		CardName = cardName;
@@ -71,6 +74,12 @@ public partial class Card : Resource
 		EffectDescription = effectDesc;
 		Params = cardParams ?? Array.Empty<int[]>();
 		NeedTarget = DeriveNeedTarget(Params);
+		CardKeyWord = cardKeyWord;
+	}
+
+	public bool HasKeyWord(CardKeyWord keyWord)
+	{
+		return (CardKeyWord & keyWord) == keyWord;
 	}
 
 	// 自动推导 NeedTarget：任意效果的 TargetType == SelectedTarget 则为 true
@@ -111,7 +120,7 @@ public partial class Card : Resource
 
 	public virtual Card CreateRuntimeInstance()
 	{
-		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName);
+		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName, CardKeyWord);
 		card.GenerateUniqueInGameId();
 		return card;
 	}
@@ -156,6 +165,21 @@ public partial class Card : Resource
 					break;
 				case EffectType.ClearState:
 					result = ApplyClearStateEffect(source, target, resolvedTargets, effectArgs);
+					break;
+				case EffectType.Heal:
+					result = ApplyHealEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.DrawCard:
+					result = ApplyDrawCardEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.AddCost:
+					result = ApplyAddCostEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.ClearAllStates:
+					result = ApplyClearAllStatesEffect(source, resolvedTargets);
+					break;
+				case EffectType.ShieldSlam:
+					result = ApplyShieldSlamEffect(source, resolvedTargets, effectArgs);
 					break;
 				default:
 					string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 暂未实现。";
@@ -257,6 +281,147 @@ public partial class Card : Resource
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private CardApplyResult ApplyHealEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int healAmount = effectArgs.Length > 0 ? effectArgs[0] : 0;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			int hpBefore = resolvedTarget.HP;
+			resolvedTarget.HP = Math.Min(resolvedTarget.Max_HP, resolvedTarget.HP + healAmount);
+			AppendConsoleInfo($"{GetUnitLabel(resolvedTarget)} 治疗 {healAmount}，HP {hpBefore}->{resolvedTarget.HP}");
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private CardApplyResult ApplyDrawCardEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int drawCount = effectArgs.Length > 0 ? effectArgs[0] : 0;
+		IUnitInstance lastTarget = null;
+
+		// DrawCard 效果作用于 source（抽牌者），而不是 resolvedTargets
+		if (source is CharacterInstance character)
+		{
+			lastTarget = source;
+			int drawn = 0;
+			for (int i = 0; i < drawCount; i++)
+			{
+				if (character.drawpile.Count == 0)
+				{
+					if (character.discardpile.Count == 0)
+					{
+						break;
+					}
+
+					// 将弃牌堆洗入抽牌堆
+					character.drawpile.AddRange(character.discardpile);
+					character.discardpile.Clear();
+					ShuffleList(character.drawpile);
+					AppendConsoleInfo("抽牌堆为空：已将弃牌堆随机洗牌后放回抽牌堆。");
+				}
+
+				character.handcards.Add(character.drawpile[0]);
+				character.drawpile.RemoveAt(0);
+				drawn++;
+			}
+
+			AppendConsoleInfo($"{GetUnitLabel(source)} 抽取 {drawn} 张牌");
+		}
+		else
+		{
+			AppendConsoleInfo($"抽牌效果仅对角色有效");
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private static void ShuffleList(List<Card> cards)
+	{
+		if (cards == null || cards.Count <= 1)
+		{
+			return;
+		}
+
+		System.Random rng = new System.Random();
+		for (int index = cards.Count - 1; index > 0; index--)
+		{
+			int swapIndex = rng.Next(index + 1);
+			(cards[index], cards[swapIndex]) = (cards[swapIndex], cards[index]);
+		}
+	}
+
+	private CardApplyResult ApplyAddCostEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int energyAmount = effectArgs.Length > 0 ? effectArgs[0] : 0;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			int energyBefore = resolvedTarget.Energy;
+			EffectResult effectResult = EffectSystem.ApplyAddCost(resolvedTarget, new int[] { energyAmount });
+			if (effectResult != null)
+			{
+				AppendConsoleInfo(effectResult.BuildSummary());
+			}
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private CardApplyResult ApplyShieldSlamEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		EffectResult lastEffectResult = null;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			lastEffectResult = EffectSystem.ApplyShieldSlam(source, resolvedTarget, effectArgs);
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private CardApplyResult ApplyClearAllStatesEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets)
+	{
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			
+			// 移动所有状态牌到弃牌堆
+			if (resolvedTarget.StatePile.Count > 0)
+			{
+				resolvedTarget.DiscardPile.AddRange(resolvedTarget.StatePile);
+				resolvedTarget.StatePile.Clear();
+			}
+
+			// 清除所有状态
+			var statesToRemove = new System.Collections.Generic.List<StateType>(resolvedTarget.States.Keys);
+			foreach (StateType stateType in statesToRemove)
+			{
+				StateSystem.RemoveState(resolvedTarget, stateType);
+			}
+
+			AppendConsoleInfo($"{GetUnitLabel(resolvedTarget)} 移除所有状态");
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private static string GetUnitLabel(IUnitInstance unit)
+	{
+		if (unit == null)
+		{
+			return "未知单位";
+		}
+
+		Unit typedUnit = unit as Unit;
+		string name = typedUnit?.Name ?? unit.GetType().Name;
+		return $"{name}(ID={unit.UniqueInGameId})";
 	}
 
 	private static EffectTargetType ParseEffectTargetType(int[] rawEffectParams)

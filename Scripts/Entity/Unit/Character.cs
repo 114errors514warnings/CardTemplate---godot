@@ -54,6 +54,11 @@ public class CharacterInstance : Character, IUnitInstance
     public List<Card> StatePile { get; } = new List<Card>();
     public List<Card> DiscardPile => discardpile;
     public int Shield { get; set; }
+    public int Energy
+    {
+        get => costs;
+        set => costs = value;
+    }
     public int Max_costs;
     public int costs;
     public int Attack { get; set; }

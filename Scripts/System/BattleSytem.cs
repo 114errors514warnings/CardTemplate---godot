@@ -1044,6 +1044,21 @@ public partial class BattleSytem : Node
         }
 
         IsPlayerTurn = false;
+
+        // 弃置手牌
+        if (Player != null && Player.handcards.Count > 0)
+        {
+            var toDiscard = Player.handcards.FindAll(c => !c.HasKeyWord(CardKeyWord.Retain));
+            var toKeep = Player.handcards.FindAll(c => c.HasKeyWord(CardKeyWord.Retain));
+            Player.discardpile.AddRange(toDiscard);
+            Player.handcards.Clear();
+            Player.handcards.AddRange(toKeep);
+            if (toDiscard.Count > 0)
+                AppendPanelConsoleInfo($"玩家回合结束：弃置手牌 {toDiscard.Count} 张{(toKeep.Count > 0 ? $"，保留 {toKeep.Count} 张" : string.Empty)}。");
+            else if (toKeep.Count > 0)
+                AppendPanelConsoleInfo($"玩家回合结束：所有手牌（{toKeep.Count} 张）均为保留牌，不弃置。");
+        }
+
         AppendPanelConsoleInfo("玩家回合结束。进入怪物回合。");
         StartMonsterTurn();
     }
@@ -1510,48 +1525,43 @@ public partial class BattleSytem : Node
         Player.drawpile.Clear();
         Player.discardpile.Clear();
 
-        List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
-        if (configuredCardIds.Count > 0)
-        {
-            for (int index = 0; index < configuredCardIds.Count; index++)
-            {
-                int cardId = configuredCardIds[index];
-                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
-                {
-                    AppendPanelConsoleError($"错误：配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
-                    continue;
-                }
-
-                Player.drawpile.Add(template.CreateRuntimeInstance());
-            }
-
-            ShuffleCards(Player.drawpile);
-
-            AppendPanelConsoleInfo($"角色配置卡组已实例化并洗牌后加入抽牌堆，共 {Player.drawpile.Count} 张。");
-            return;
-        }
-
         List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdList(Player.id, DefaultCharacterDeckCsvPath, true);
-        if (defaultCardIds.Count > 0)
+        int defaultAddedCount = 0;
+        foreach (int cardId in defaultCardIds)
         {
-            foreach (int cardId in defaultCardIds)
+            if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
             {
-                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
-                {
-                    AppendPanelConsoleError($"错误：角色 {Player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
-                    continue;
-                }
-
-                Player.drawpile.Add(template.CreateRuntimeInstance());
+                AppendPanelConsoleError($"错误：角色 {Player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
+                continue;
             }
 
-            ShuffleCards(Player.drawpile);
+            Player.drawpile.Add(template.CreateRuntimeInstance());
+            defaultAddedCount++;
+        }
 
-            AppendPanelConsoleInfo($"已从角色 {Player.id} 默认卡组配置初始化并洗牌抽牌堆，共 {Player.drawpile.Count} 张。");
+        List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
+        int configuredAddedCount = 0;
+        for (int index = 0; index < configuredCardIds.Count; index++)
+        {
+            int cardId = configuredCardIds[index];
+            if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+            {
+                AppendPanelConsoleError($"错误：新增配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
+                continue;
+            }
+
+            Player.drawpile.Add(template.CreateRuntimeInstance());
+            configuredAddedCount++;
+        }
+
+        if (Player.drawpile.Count > 0)
+        {
+            ShuffleCards(Player.drawpile);
+            AppendPanelConsoleInfo($"角色 {Player.id} 抽牌堆初始化完成：默认卡组 {defaultAddedCount} 张 + 新增卡牌 {configuredAddedCount} 张，共 {Player.drawpile.Count} 张（已洗牌）。");
             return;
         }
 
-        AppendPanelConsoleInfo($"角色 {Player.id} 无配置卡组也无默认卡组，抽牌堆为空。");
+        AppendPanelConsoleInfo($"角色 {Player.id} 无默认卡组且未配置新增卡牌，抽牌堆为空。");
     }
 
     private System.Action CreateMonsterOnDeadCallback(MonsterInstance instance)

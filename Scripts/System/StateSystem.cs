@@ -62,6 +62,11 @@ public sealed class StateRuntimeData
 		return remaining == 0;
 	}
 
+	public void AddCallbackOnlySegment(string stateCardUniqueInGameId, IUnitInstance ownerUnit)
+	{
+		StackSegments.Add(new StateStackSegment(0, true, stateCardUniqueInGameId, ownerUnit));
+	}
+
 	public StateEndedContext ConsumeOneStack(IUnitInstance targetUnit, StateEndReason endReason)
 	{
 		if (Stacks <= 0 || StackSegments.Count == 0)
@@ -163,8 +168,9 @@ public static class StateSystem
 			else
 			{
 				existing.Stacks = 1;
-				existing.StackSegments.Clear();
-				existing.StackSegments.Add(new StateStackSegment(1));
+				// 不可叠层状态重复添加时，保留历史回调段，避免旧状态牌丢失回收机会。
+				existing.StackSegments.RemoveAll(segment => segment != null && segment.RemainingStacks > 0 && !segment.NeedCallback);
+				existing.StackSegments.Insert(0, new StateStackSegment(1));
 			}
 			return;
 		}
@@ -183,6 +189,13 @@ public static class StateSystem
 		if (!unit.States.TryGetValue(type, out StateRuntimeData stateData) || stateData == null)
 		{
 			return false;
+		}
+
+		if (!IsStackable(type) && HasAnyBoundCallback(stateData))
+		{
+			// 不可叠层状态再次打出时，补充额外回调绑定，状态结束时回收所有对应状态牌。
+			stateData.AddCallbackOnlySegment(stateCardUniqueInGameId, ownerUnit);
+			return true;
 		}
 
 		return stateData.RegisterEndCallbackForLatestStacks(stacks, stateCardUniqueInGameId, ownerUnit);
@@ -233,6 +246,36 @@ public static class StateSystem
 		return damage;
 	}
 
+	public static int ModifyAddedEnergy(IUnitInstance source, int baseEnergy)
+	{
+		if (source == null)
+		{
+			throw new ArgumentNullException(nameof(source));
+		}
+
+		int energy = Math.Max(0, baseEnergy);
+		if (energy == 0)
+		{
+			return 0;
+		}
+
+		// 后续可在此添加其他能量修改状态：
+		// - 加法修改（固定提升）
+		// - 乘法修改（百分比提升）
+		// 示例：
+		// if (TryGetStateStacks(source, StateType.Charged, out int chargedStacks) && chargedStacks > 0)
+		// {
+		//     energy += chargedStacks * 2;  // 每层固定+2点能量
+		// }
+		//
+		// if (TryGetStateStacks(source, StateType.EnergyAmplify, out int amplifyStacks) && amplifyStacks > 0)
+		// {
+		//     energy = FloorByRule(energy * (1.0 + amplifyStacks * 0.1));  // 每层+10%
+		// }
+
+		return energy;
+	}
+
 	private static int FloorByRule(double value)
 	{
 		if (value >= 0)
@@ -277,6 +320,7 @@ public static class StateSystem
 
 			if (pair.Value.Stacks <= 0)
 			{
+				callbacks.AddRange(pair.Value.ConsumeAllCallbacks(unit, StateEndReason.Expired));
 				toRemove.Add(pair.Key);
 			}
 		}
@@ -287,6 +331,25 @@ public static class StateSystem
 		}
 
 		InvokeStateEndedCallbacks(unit, callbacks);
+	}
+
+	private static bool HasAnyBoundCallback(StateRuntimeData stateData)
+	{
+		if (stateData == null || stateData.StackSegments == null || stateData.StackSegments.Count == 0)
+		{
+			return false;
+		}
+
+		for (int index = 0; index < stateData.StackSegments.Count; index++)
+		{
+			StateStackSegment segment = stateData.StackSegments[index];
+			if (segment != null && segment.NeedCallback)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static void InvokeStateEndedCallbacks(IUnitInstance unit, List<StateEndedContext> callbacks)

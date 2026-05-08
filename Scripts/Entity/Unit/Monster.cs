@@ -99,6 +99,7 @@ public class MonsterInstance : Monster, IUnitInstance
     public List<Card> StatePile { get; } = new List<Card>();
     public List<Card> DiscardPile { get; } = new List<Card>();
     public int Shield { get; set; }
+    public int Energy { get; set; }
     public int Attack { get; set; }
     public int Defend { get; set; }
     public float posx { get; set; }

@@ -46,6 +46,7 @@ public interface IUnitInstance
 	List<Card> StatePile { get; }
 	List<Card> DiscardPile { get; }
 	int Shield { get; set; }
+	int Energy { get; set; }
 	int Attack { get; set; }
 	int Defend { get; set; }
 	float posx { get; set; }

@@ -308,10 +308,100 @@ public sealed class ShieldEffect : IEffect
     }
 }
 
+public sealed class AddCostEffect : IEffect
+{
+    public string Name => "AddCost";
+
+    public EffectResult Apply(EffectContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+
+        int baseEnergy = context.GetParam(0, 0);
+        if (baseEnergy <= 0)
+        {
+            return new EffectResult(Name, context.Source, context.Target, summaryOverride: $"来源={BuildUnitLabel(context.Source)}，增加能量=0");
+        }
+
+        int modifiedEnergy = StateSystem.ModifyAddedEnergy(context.Source, baseEnergy);
+        int sourceCostBefore = context.Source.Energy;
+        context.Source.Energy += modifiedEnergy;
+        int sourceCostAfter = context.Source.Energy;
+
+        return new EffectResult(
+            Name,
+            context.Source,
+            context.Target,
+            summaryOverride: $"来源={BuildUnitLabel(context.Source)}，增加能量={modifiedEnergy}（基础={baseEnergy}），能量 {sourceCostBefore}->{sourceCostAfter}",
+            totalValue: modifiedEnergy);
+    }
+
+    private static string BuildUnitLabel(IUnitInstance unit)
+    {
+        if (unit == null)
+        {
+            return "无";
+        }
+
+        Unit typedUnit = unit as Unit;
+        string name = typedUnit?.Name ?? unit.GetType().Name;
+        return $"{name}(UniqueInGameId={unit.UniqueInGameId})";
+    }
+}
+
+public sealed class ShieldSlamEffect : IEffect
+{
+    public string Name => "ShieldSlam";
+
+    public EffectResult Apply(EffectContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+
+        if (context.Target == null)
+        {
+            throw new ArgumentException("ShieldSlam effect requires a target.", nameof(context));
+        }
+
+        int damage = Math.Max(0, context.Source.Attack + context.Source.Shield + context.GetParam(0));
+        damage = StateSystem.ModifyIncomingDamage(context.Source, context.Target, damage);
+
+        int targetShieldBefore = context.Target.Shield;
+        int targetHpBefore = context.Target.HP;
+
+        int absorbedByShield = Math.Min(context.Target.Shield, damage);
+        context.Target.Shield -= absorbedByShield;
+
+        int hpDamage = damage - absorbedByShield;
+        if (hpDamage > 0)
+        {
+            context.Target.HP = Math.Max(0, context.Target.HP - hpDamage);
+        }
+
+        return new EffectResult(
+            Name,
+            context.Source,
+            context.Target,
+            totalValue: damage,
+            shieldAbsorbed: absorbedByShield,
+            hpDamage: hpDamage,
+            targetShieldBefore: targetShieldBefore,
+            targetShieldAfter: context.Target.Shield,
+            targetHpBefore: targetHpBefore,
+            targetHpAfter: context.Target.HP);
+    }
+}
+
 public static class EffectSystem
 {
     public static readonly IEffect Attack = new AttackEffect();
     public static readonly IEffect Shield = new ShieldEffect();
+    public static readonly IEffect AddCost = new AddCostEffect();
+    public static readonly IEffect ShieldSlam = new ShieldSlamEffect();
 
     public static EffectResult Apply(IEffect effect, EffectContext context)
     {
@@ -331,5 +421,15 @@ public static class EffectSystem
     public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)
     {
         return Apply(Shield, new EffectContext(source, effectParams: effectParams));
+    }
+
+    public static EffectResult ApplyAddCost(IUnitInstance source, int[] effectParams = null)
+    {
+        return Apply(AddCost, new EffectContext(source, effectParams: effectParams));
+    }
+
+    public static EffectResult ApplyShieldSlam(IUnitInstance source, IUnitInstance target, int[] effectParams = null)
+    {
+        return Apply(ShieldSlam, new EffectContext(source, target, effectParams));
     }
 }

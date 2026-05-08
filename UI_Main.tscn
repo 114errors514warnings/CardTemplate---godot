@@ -10,8 +10,9 @@
 [ext_resource type="Script" uid="uid://byuxj2w20g4l0" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
 [ext_resource type="Script" uid="uid://vjajksmqd4mx" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="9"]
 [ext_resource type="Script" uid="uid://bfccequ6evgaj" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
-[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
-[ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
+[ext_resource type="Script" uid="uid://dyh0karbgbmt4" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
+[ext_resource type="Script" uid="uid://b7x68xl30nf58" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/RemoveCharacterCard.cs" id="13"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -78,7 +79,6 @@ size_flags_vertical = 3
 text = "文字示例"
 fit_content = true
 scroll_following = true
-autowrap_mode = 3
 
 [node name="操作面板" type="Label" parent="." unique_id=1282936871]
 layout_mode = 1
@@ -125,12 +125,13 @@ size_flags_vertical = 4
 text = "出牌"
 script = ExtResource("6")
 
-[node name="销毁卡牌" type="Button" parent="操作面板/卡牌操作" unique_id=1253564499]
-editor_description = "参数：手牌index（强制需要参数）"
+[node name="删除卡牌" type="Button" parent="操作面板/卡牌操作" unique_id=1253564499]
+editor_description = "参数：卡牌ID [删除数量]"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
-text = "销毁卡牌"
+text = "删除卡牌"
+script = ExtResource("13")
 
 [node name="切换牌堆顺序显示" type="Button" parent="操作面板/卡牌操作" unique_id=239836368]
 editor_description = "参数：无需参数，抽牌堆和弃牌堆切换是否顺序显示"
