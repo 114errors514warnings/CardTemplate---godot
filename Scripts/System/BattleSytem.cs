@@ -1257,6 +1257,151 @@ public partial class BattleSytem : Node
         return true;
     }
 
+    public bool TryDrawCardsByCommand(int count, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法抽牌。";
+            return false;
+        }
+
+        if (count <= 0)
+        {
+            resultMessage = $"抽牌数={count} 非法，需大于0。";
+            return false;
+        }
+
+        int drawn = DrawCardsToHand(count);
+        RefreshBattleInfoDisplay();
+        resultMessage = $"抽牌完成：{drawn}/{count}。当前手牌 {Player.handcards.Count} 张，抽牌堆 {Player.drawpile.Count} 张，弃牌堆 {Player.discardpile.Count} 张。";
+        return true;
+    }
+
+    public bool TrySetPlayerHealth(int hp, int maxHp, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法设置生命。";
+            return false;
+        }
+
+        if (maxHp <= 0)
+        {
+            resultMessage = $"最大生命值={maxHp} 非法，必须大于0。";
+            return false;
+        }
+
+        if (hp < 0)
+        {
+            resultMessage = $"当前生命值={hp} 非法，不能小于0。";
+            return false;
+        }
+
+        int oldHp = Player.HP;
+        int oldMaxHp = Player.Max_HP;
+
+        Player.Max_HP = maxHp;
+        Player.HP = hp > maxHp ? maxHp : hp;
+
+        RefreshBattleInfoDisplay();
+        resultMessage = $"生命已设置：HP {oldHp}->{Player.HP}，MaxHP {oldMaxHp}->{Player.Max_HP}。";
+        return true;
+    }
+
+    public bool TrySetPlayerAttack(int attack, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法设置攻击。";
+            return false;
+        }
+
+        int oldAttack = Player.Attack;
+        Player.Attack = attack;
+
+        RefreshBattleInfoDisplay();
+        resultMessage = $"攻击已设置：{oldAttack}->{Player.Attack}。";
+        return true;
+    }
+
+    public bool TrySetPlayerDefend(int defend, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法设置防御。";
+            return false;
+        }
+
+        int oldDefend = Player.Defend;
+        Player.Defend = defend;
+
+        RefreshBattleInfoDisplay();
+        resultMessage = $"防御已设置：{oldDefend}->{Player.Defend}。";
+        return true;
+    }
+
+    public bool TrySetPlayerMaxEnergy(int maxEnergy, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法设置能量上限。";
+            return false;
+        }
+
+        if (maxEnergy < 1)
+        {
+            resultMessage = $"能量上限={maxEnergy} 非法，不能小于1。";
+            return false;
+        }
+
+        int oldMaxEnergy = Player.Max_costs;
+        int oldEnergy = Player.costs;
+
+        Player.Max_costs = maxEnergy;
+        if (Player.costs > Player.Max_costs)
+        {
+            Player.costs = Player.Max_costs;
+        }
+
+        RefreshBattleInfoDisplay();
+        resultMessage = $"能量上限已设置：{oldMaxEnergy}->{Player.Max_costs}，当前能量 {oldEnergy}->{Player.costs}。";
+        return true;
+    }
+
+    public bool TryAddPlayerEnergyRaw(int addEnergy, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (Player == null)
+        {
+            resultMessage = "玩家角色尚未初始化，无法增加能量。";
+            return false;
+        }
+
+        if (addEnergy <= 0)
+        {
+            resultMessage = $"增加能量值={addEnergy} 非法，需大于0。";
+            return false;
+        }
+
+        int oldEnergy = Player.costs;
+        Player.costs += addEnergy;
+
+        RefreshBattleInfoDisplay();
+        resultMessage = $"增加能量（跳过状态修正）：{oldEnergy}->{Player.costs}（+{addEnergy}）。";
+        return true;
+    }
+
     private void ExecuteMonsterIntention(MonsterInstance monster)
     {
         if (monster == null || monster.HP <= 0)

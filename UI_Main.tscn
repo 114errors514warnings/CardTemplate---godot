@@ -13,6 +13,12 @@
 [ext_resource type="Script" uid="uid://dyh0karbgbmt4" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
 [ext_resource type="Script" uid="uid://b7x68xl30nf58" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
 [ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/RemoveCharacterCard.cs" id="13"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/DrawCardCommand.cs" id="14"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerHealth.cs" id="15"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerDefend.cs" id="16"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerAttack.cs" id="17"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/AddPlayerEnergyRaw.cs" id="18"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerMaxEnergy.cs" id="19"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -94,12 +100,12 @@ anchor_right = 1.0
 anchor_bottom = 0.3
 
 [node name="抽牌" type="Button" parent="操作面板/卡牌操作" unique_id=191082677]
-editor_description = "参数为抽牌数，不填默认1
-"
+editor_description = "参数：抽牌数（不填默认1）"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "抽牌"
+script = ExtResource("14")
 
 [node name="弃牌" type="Button" parent="操作面板/卡牌操作" unique_id=850997975]
 editor_description = "参数想要弃牌的顺序（从1开始），强制需要参数"
@@ -218,39 +224,44 @@ anchor_right = 1.0
 anchor_bottom = 0.9
 
 [node name="生命" type="Button" parent="操作面板/修改属性" unique_id=1965584985]
-editor_description = "只填一个默认当前，/XX当作上限"
+editor_description = "参数：当前生命值 最大生命值"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "生命值（当前/最大）"
+script = ExtResource("15")
 
 [node name="防御" type="Button" parent="操作面板/修改属性" unique_id=214657802]
-editor_description = "强制需要参数"
+editor_description = "参数：防御值"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "防御"
+script = ExtResource("16")
 
 [node name="攻击" type="Button" parent="操作面板/修改属性" unique_id=1818566060]
-editor_description = "强制需要参数"
+editor_description = "参数：攻击值"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "攻击"
+script = ExtResource("17")
 
 [node name="+能量" type="Button" parent="操作面板/修改属性" unique_id=1924740906]
-editor_description = "不填参数默认加到上限为止"
+editor_description = "参数：增加能量值（跳过状态修正）"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "+能量"
+script = ExtResource("18")
 
 [node name="能量上限" type="Button" parent="操作面板/修改属性" unique_id=1866877204]
-editor_description = "强制需要参数，不得小于1"
+editor_description = "参数：能量上限（>=1）"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "能量上限"
+script = ExtResource("19")
 
 [node name="参数框" type="HBoxContainer" parent="操作面板" unique_id=710620316]
 custom_minimum_size = Vector2(100, 40)
