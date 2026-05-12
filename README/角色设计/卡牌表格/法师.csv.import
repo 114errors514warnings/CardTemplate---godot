@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://8m2dmahh25g3"
+
+[deps]
+
+files=["res://README/角色设计/卡牌表格/法师.费用.translation", "res://README/角色设计/卡牌表格/法师.类型.translation", "res://README/角色设计/卡牌表格/法师.等级.translation", "res://README/角色设计/卡牌表格/法师.en.translation", "res://README/角色设计/卡牌表格/法师.en.translation", "res://README/角色设计/卡牌表格/法师.效果.translation", "res://README/角色设计/卡牌表格/法师.en.translation"]
+
+source_file="res://README/角色设计/卡牌表格/法师.csv"
+dest_files=["res://README/角色设计/卡牌表格/法师.费用.translation", "res://README/角色设计/卡牌表格/法师.类型.translation", "res://README/角色设计/卡牌表格/法师.等级.translation", "res://README/角色设计/卡牌表格/法师.en.translation", "res://README/角色设计/卡牌表格/法师.en.translation", "res://README/角色设计/卡牌表格/法师.效果.translation", "res://README/角色设计/卡牌表格/法师.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

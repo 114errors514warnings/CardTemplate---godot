@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b3sm653gcftu0"
+
+[deps]
+
+files=["res://README/角色设计/卡牌表格/通用卡牌.费用.translation", "res://README/角色设计/卡牌表格/通用卡牌.类型.translation", "res://README/角色设计/卡牌表格/通用卡牌.等级.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation", "res://README/角色设计/卡牌表格/通用卡牌.效果.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation"]
+
+source_file="res://README/角色设计/卡牌表格/通用卡牌.csv"
+dest_files=["res://README/角色设计/卡牌表格/通用卡牌.费用.translation", "res://README/角色设计/卡牌表格/通用卡牌.类型.translation", "res://README/角色设计/卡牌表格/通用卡牌.等级.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation", "res://README/角色设计/卡牌表格/通用卡牌.效果.translation", "res://README/角色设计/卡牌表格/通用卡牌.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
