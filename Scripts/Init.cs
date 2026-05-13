@@ -16,7 +16,7 @@ public partial class Init : Control
         sb.AppendLine("Loading cards...");
 
         // 直接调用LoadCards
-        var cards = LoadingSystem.LoadCards("res://DataBase/Card/通用/通用Card.csv", true);
+        var cards = LoadingSystem.LoadCardsByKey(LoadingSystem.CardCsvPathKey, true);
 
         sb.AppendLine($"Loaded {cards.Count} cards");
 
@@ -29,7 +29,7 @@ public partial class Init : Control
         sb.AppendLine("Loading characters...");
 
         // 调用LoadCharacters
-        var characters = LoadingSystem.LoadCharacters("res://DataBase/Unit/Character.csv", true);
+        var characters = LoadingSystem.LoadCharactersByKey(LoadingSystem.CharacterCsvPathKey, true);
 
         sb.AppendLine($"Loaded {characters.Count} characters");
 
@@ -42,14 +42,14 @@ public partial class Init : Control
         sb.AppendLine("Loading monsters...");
 
         // 调用LoadMonsters
-        var monsters = LoadingSystem.LoadMonsters("res://DataBase/Unit/Monster.csv", true);
+        var monsters = LoadingSystem.LoadMonstersByKey(LoadingSystem.MonsterCsvPathKey, true);
 
         sb.AppendLine($"Loaded {monsters.Count} monsters");
 
         // 遍历并打印每个怪物信息
         foreach (var kvp in monsters)
         {
-            sb.AppendLine($"id:{kvp.Key}, name:{kvp.Value.Name}, MAX_HP:{kvp.Value.MAX_HP}, MaxActionTime:{kvp.Value.MaxActionTime}");
+            sb.AppendLine($"id:{kvp.Key}, name:{kvp.Value.Name}, MAX_HP:{kvp.Value.MAX_HP}, Ini_Attack:{kvp.Value.Ini_Attack}, Ini_Defend:{kvp.Value.Ini_Defend}");
         }
 
         // 设置Console的文本

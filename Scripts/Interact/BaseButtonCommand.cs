@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 /// <summary>
 /// 按钮命令基类 - 提供所有按钮脚本共用的错误检查和辅助方法
@@ -78,6 +79,91 @@ public abstract partial class BaseButtonCommand : Button
 	protected string[] ParseArguments(string raw)
 	{
 		return raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+	}
+
+	/// <summary>
+	/// 解析“[玩家UniqueInGameId] 值...”格式；仅传值时默认使用第一个可用玩家。
+	/// </summary>
+	protected bool TryResolvePlayerScopedArguments(BattleSytem battleSytem, string raw, int valueCount, out int playerUniqueInGameId, out string[] valueArgs, out string errorMessage)
+	{
+		playerUniqueInGameId = -1;
+		valueArgs = System.Array.Empty<string>();
+		errorMessage = string.Empty;
+
+		if (battleSytem == null)
+		{
+			errorMessage = "未找到 BattleSytem 节点。";
+			return false;
+		}
+
+		string[] args = ParseArguments(raw ?? string.Empty);
+		if (args.Length < valueCount)
+		{
+			errorMessage = $"参数不足，需要至少 {valueCount} 个数值参数。";
+			return false;
+		}
+
+		if (args.Length == valueCount)
+		{
+			CharacterInstance defaultPlayer = battleSytem.Player;
+			if (defaultPlayer == null)
+			{
+				errorMessage = "当前没有可用玩家。";
+				return false;
+			}
+
+			playerUniqueInGameId = defaultPlayer.UniqueInGameId;
+			valueArgs = args;
+			return true;
+		}
+
+		if (!int.TryParse(args[0], out playerUniqueInGameId))
+		{
+			errorMessage = $"玩家UniqueInGameId '{args[0]}' 不是合法数字。";
+			return false;
+		}
+
+		if (!battleSytem.TryGetPlayerByUniqueId(playerUniqueInGameId, out _))
+		{
+			errorMessage = $"未找到玩家UniqueInGameId={playerUniqueInGameId}。";
+			return false;
+		}
+
+		valueArgs = new string[args.Length - 1];
+		for (int index = 1; index < args.Length; index++)
+		{
+			valueArgs[index - 1] = args[index];
+		}
+
+		if (valueArgs.Length < valueCount)
+		{
+			errorMessage = $"参数不足，需要至少 {valueCount} 个数值参数。";
+			return false;
+		}
+
+		return true;
+	}
+
+	protected string BuildPlayerHint(BattleSytem battleSytem)
+	{
+		if (battleSytem == null)
+		{
+			return "当前没有可用玩家UniqueInGameId。";
+		}
+
+		List<CharacterInstance> players = battleSytem.GetAlivePlayers();
+		if (players.Count == 0)
+		{
+			return "当前没有可用玩家UniqueInGameId。";
+		}
+
+		List<string> parts = new List<string>();
+		foreach (CharacterInstance player in players)
+		{
+			parts.Add($"{player.UniqueInGameId}({player.Name})");
+		}
+
+		return "当前可用玩家UniqueInGameId：" + string.Join(", ", parts);
 	}
 
 	/// <summary>

@@ -2,7 +2,6 @@ using Godot;
 
 public partial class AddMonster : Button
 {
-	private const string DefaultMonsterCsvPath = "res://DataBase/Unit/Monster.csv";
 	private const string ParameterFormat = "怪物ID [增加数量]";
 
 	public override void _Ready()
@@ -120,7 +119,7 @@ public partial class AddMonster : Button
 	{
 		if (LoadingSystem.MonsterDictionary.Count == 0)
 		{
-			LoadingSystem.LoadMonsters(DefaultMonsterCsvPath, true);
+			LoadingSystem.LoadMonstersByKey(LoadingSystem.MonsterCsvPathKey, true);
 		}
 	}
 

@@ -8,9 +8,16 @@ using System.Collections.Generic;
 public partial class BattleSetupData : Resource
 {
     public const int MaxMonsterCapacity = 10;
+    public const int MaxCharacterCapacity = 3;
 
     [Export]
     public int CharacterId { get; set; } = 1001;
+
+    [Export]
+    public Godot.Collections.Array<int> CharacterOrder { get; set; } = new Godot.Collections.Array<int>();
+
+    [Export]
+    public Godot.Collections.Dictionary<int, int> CharacterIds { get; set; } = new Godot.Collections.Dictionary<int, int>();
 
     [Export]
     public Godot.Collections.Dictionary<int, int> MonsterIds { get; set; } = new Godot.Collections.Dictionary<int, int>();
@@ -23,9 +30,202 @@ public partial class BattleSetupData : Resource
         MonsterIds ??= new Godot.Collections.Dictionary<int, int>();
     }
 
+    public void EnsureCharacterDictionaryInitialized()
+    {
+        CharacterIds ??= new Godot.Collections.Dictionary<int, int>();
+    }
+
+    public void EnsureCharacterOrderInitialized()
+    {
+        CharacterOrder ??= new Godot.Collections.Array<int>();
+        EnsureCharacterDictionaryInitialized();
+
+        if (CharacterOrder.Count > 0)
+        {
+            SyncCharacterDictionaryFromOrder();
+            return;
+        }
+
+        foreach (int characterId in CharacterIds.Keys)
+        {
+            int count = CharacterIds[characterId];
+            for (int index = 0; index < count; index++)
+            {
+                CharacterOrder.Add(characterId);
+            }
+        }
+
+        if (CharacterOrder.Count == 0 && CharacterId > 0)
+        {
+            CharacterOrder.Add(CharacterId);
+        }
+
+        SyncCharacterDictionaryFromOrder();
+    }
+
+    private void SyncCharacterDictionaryFromOrder()
+    {
+        EnsureCharacterDictionaryInitialized();
+        CharacterIds.Clear();
+
+        for (int index = 0; index < CharacterOrder.Count; index++)
+        {
+            int characterId = CharacterOrder[index];
+            CharacterIds[characterId] = CharacterIds.TryGetValue(characterId, out int count) ? count + 1 : 1;
+        }
+
+        CharacterId = CharacterOrder.Count > 0 ? CharacterOrder[0] : 0;
+    }
+
     public void EnsureCharacterCardDictionaryInitialized()
     {
         CharacterCardIds ??= new Godot.Collections.Dictionary<int, int>();
+    }
+
+    public int GetCharacterIdCount(int characterId)
+    {
+        EnsureCharacterOrderInitialized();
+        return CharacterIds.TryGetValue(characterId, out int count) ? count : 0;
+    }
+
+    public int GetRemainingCharacterCapacity()
+    {
+        int remaining = MaxCharacterCapacity - GetTotalCharacterCount();
+        return remaining > 0 ? remaining : 0;
+    }
+
+    public int AddCharacterId(int characterId, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        EnsureCharacterOrderInitialized();
+
+        int remainingCapacity = GetRemainingCharacterCapacity();
+        if (remainingCapacity <= 0)
+        {
+            return 0;
+        }
+
+        int addCount = count < remainingCapacity ? count : remainingCapacity;
+        for (int index = 0; index < addCount; index++)
+        {
+            CharacterOrder.Add(characterId);
+        }
+
+        SyncCharacterDictionaryFromOrder();
+        return addCount;
+    }
+
+    public int RemoveCharacterId(int characterId, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        EnsureCharacterOrderInitialized();
+        int currentCount = GetCharacterIdCount(characterId);
+        if (currentCount <= 0)
+        {
+            return 0;
+        }
+
+        int removedCount = count < currentCount ? count : currentCount;
+        int remainToRemove = removedCount;
+        for (int index = CharacterOrder.Count - 1; index >= 0 && remainToRemove > 0; index--)
+        {
+            if (CharacterOrder[index] != characterId)
+            {
+                continue;
+            }
+
+            CharacterOrder.RemoveAt(index);
+            remainToRemove--;
+        }
+
+        SyncCharacterDictionaryFromOrder();
+        return removedCount;
+    }
+
+    public bool SetCharacterIdAt(int index, int characterId)
+    {
+        EnsureCharacterOrderInitialized();
+        if (index < 0 || index >= MaxCharacterCapacity)
+        {
+            return false;
+        }
+
+        while (CharacterOrder.Count <= index)
+        {
+            CharacterOrder.Add(0);
+        }
+
+        CharacterOrder[index] = characterId;
+        for (int currentIndex = CharacterOrder.Count - 1; currentIndex >= 0; currentIndex--)
+        {
+            if (CharacterOrder[currentIndex] > 0)
+            {
+                break;
+            }
+
+            CharacterOrder.RemoveAt(currentIndex);
+        }
+
+        SyncCharacterDictionaryFromOrder();
+        return true;
+    }
+
+    public bool TryGetCharacterIdAt(int index, out int characterId)
+    {
+        EnsureCharacterOrderInitialized();
+        characterId = 0;
+        if (index < 0 || index >= CharacterOrder.Count)
+        {
+            return false;
+        }
+
+        characterId = CharacterOrder[index];
+        return characterId > 0;
+    }
+
+    public int RemoveLastCharacter()
+    {
+        EnsureCharacterOrderInitialized();
+        if (CharacterOrder.Count == 0)
+        {
+            return 0;
+        }
+
+        int removedCharacterId = CharacterOrder[CharacterOrder.Count - 1];
+        CharacterOrder.RemoveAt(CharacterOrder.Count - 1);
+        SyncCharacterDictionaryFromOrder();
+        return removedCharacterId;
+    }
+
+    public int GetTotalCharacterCount()
+    {
+        EnsureCharacterOrderInitialized();
+        return CharacterOrder.Count;
+    }
+
+    public List<int> GetCharacterIdList()
+    {
+        EnsureCharacterOrderInitialized();
+
+        List<int> result = new List<int>();
+        for (int index = 0; index < CharacterOrder.Count; index++)
+        {
+            int characterId = CharacterOrder[index];
+            if (characterId > 0)
+            {
+                result.Add(characterId);
+            }
+        }
+
+        return result;
     }
 
     public int GetMonsterIdCount(int monsterId)

@@ -132,8 +132,6 @@ public sealed class StateStackSegment
 
 public static class StateSystem
 {
-	private const string DefaultStateCsvPath = "res://DataBase/State/通用State.csv";
-
 	public static bool IsStackable(StateType type)
 	{
 		StateDefinition definition = GetStateDefinition(type);
@@ -241,6 +239,11 @@ public static class StateSystem
 		{
 			// 虚弱：造成的攻击伤害 -25%，按统一规则向下取整
 			damage = FloorByRule(damage * 0.75d);
+		}
+
+		if (source != null && TryGetStateStacks(source, StateType.AddAttack, out int AddAttackStacks) && AddAttackStacks > 0)
+		{
+			damage += AddAttackStacks;
 		}
 
 		return damage;
@@ -414,6 +417,6 @@ public static class StateSystem
 			return;
 		}
 
-		LoadingSystem.LoadStates(DefaultStateCsvPath, true);
+		LoadingSystem.LoadStatesByKey(LoadingSystem.StateCsvPathKey, true);
 	}
 }

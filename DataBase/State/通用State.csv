@@ -5,3 +5,4 @@ StateType,Name,IsStackable,IsPermanent,TurnStartDecayAmount
 3,Ignite,FALSE,TRUE,0
 4,CounterAttack,TRUE,FALSE,1
 5,WhirlwindSlash,FALSE,TRUE,0
+6,AddAttack,TRUE,TRUE,0

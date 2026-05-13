@@ -2,7 +2,7 @@ using Godot;
 
 public partial class SetPlayerHealth : BaseButtonCommand
 {
-	protected override string ParameterFormat => "当前生命值 最大生命值";
+	protected override string ParameterFormat => "[玩家UniqueInGameId] 当前生命值 最大生命值";
 
 	public override void _Ready()
 	{
@@ -22,19 +22,7 @@ public partial class SetPlayerHealth : BaseButtonCommand
 		if (string.IsNullOrEmpty(raw))
 		{
 			AppendConsoleInfo($"生命 参数格式：{ParameterFormat}");
-			return;
-		}
-
-		string[] args = ParseArguments(raw);
-		if (args.Length < 2)
-		{
-			AppendConsoleError($"错误：参数不足。参数格式：{ParameterFormat}");
-			return;
-		}
-
-		if (!int.TryParse(args[0], out int hp) || !int.TryParse(args[1], out int maxHp))
-		{
-			AppendConsoleError($"错误：参数必须为整数。参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(FindBattleSystem()));
 			return;
 		}
 
@@ -45,7 +33,20 @@ public partial class SetPlayerHealth : BaseButtonCommand
 			return;
 		}
 
-		if (!battleSytem.TrySetPlayerHealth(hp, maxHp, out string resultMessage))
+		if (!TryResolvePlayerScopedArguments(battleSytem, raw, 2, out int playerUniqueInGameId, out string[] valueArgs, out string resolveError))
+		{
+			AppendConsoleError($"错误：{resolveError} 参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(battleSytem));
+			return;
+		}
+
+		if (!int.TryParse(valueArgs[0], out int hp) || !int.TryParse(valueArgs[1], out int maxHp))
+		{
+			AppendConsoleError($"错误：参数必须为整数。参数格式：{ParameterFormat}");
+			return;
+		}
+
+		if (!battleSytem.TrySetPlayerHealth(playerUniqueInGameId, hp, maxHp, out string resultMessage))
 		{
 			AppendConsoleError(resultMessage);
 			return;

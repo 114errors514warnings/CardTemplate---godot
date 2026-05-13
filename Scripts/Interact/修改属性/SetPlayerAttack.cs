@@ -2,7 +2,7 @@ using Godot;
 
 public partial class SetPlayerAttack : BaseButtonCommand
 {
-	protected override string ParameterFormat => "攻击值";
+	protected override string ParameterFormat => "[玩家UniqueInGameId] 攻击值";
 
 	public override void _Ready()
 	{
@@ -19,9 +19,10 @@ public partial class SetPlayerAttack : BaseButtonCommand
 		}
 
 		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
-		if (!int.TryParse(raw, out int attack))
+		if (string.IsNullOrEmpty(raw))
 		{
-			AppendConsoleError($"错误：参数不是合法数字。参数格式：{ParameterFormat}");
+			AppendConsoleInfo($"攻击 参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(FindBattleSystem()));
 			return;
 		}
 
@@ -32,7 +33,20 @@ public partial class SetPlayerAttack : BaseButtonCommand
 			return;
 		}
 
-		if (!battleSytem.TrySetPlayerAttack(attack, out string resultMessage))
+		if (!TryResolvePlayerScopedArguments(battleSytem, raw, 1, out int playerUniqueInGameId, out string[] valueArgs, out string resolveError))
+		{
+			AppendConsoleError($"错误：{resolveError} 参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(battleSytem));
+			return;
+		}
+
+		if (!int.TryParse(valueArgs[0], out int attack))
+		{
+			AppendConsoleError($"错误：参数不是合法数字。参数格式：{ParameterFormat}");
+			return;
+		}
+
+		if (!battleSytem.TrySetPlayerAttack(playerUniqueInGameId, attack, out string resultMessage))
 		{
 			AppendConsoleError(resultMessage);
 			return;

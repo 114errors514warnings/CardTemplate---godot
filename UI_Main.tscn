@@ -19,6 +19,8 @@
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerAttack.cs" id="17"]
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/AddPlayerEnergyRaw.cs" id="18"]
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerMaxEnergy.cs" id="19"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddCharacter.cs" id="20"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteCharacter.cs" id="21"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -190,14 +192,32 @@ text = "修改意图"
 script = ExtResource("11")
 
 [node name="选择角色" type="Button" parent="操作面板/回合控制" unique_id=15859348]
-editor_description = "输入角色id，不输则默认第一个
-仅在非战斗状态下可以切换角色
-切换角色后会重置角色卡牌"
+editor_description = "参数：角色ID [index]
+index从1开始，不填默认修改第1个角色
+仅在战斗开始前生效"
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "选择角色"
 script = ExtResource("2")
+
+[node name="新增角色" type="Button" parent="操作面板/回合控制" unique_id=1300145201]
+editor_description = "参数：角色ID
+仅在战斗开始前生效"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增角色"
+script = ExtResource("20")
+
+[node name="删除角色" type="Button" parent="操作面板/回合控制" unique_id=1330600042]
+editor_description = "无需参数，默认删除最后一个角色
+仅在战斗开始前生效"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除角色"
+script = ExtResource("21")
 
 [node name="删除敌人" type="Button" parent="操作面板/回合控制" unique_id=773515993]
 editor_description = "参数：怪物ID、删除数量（不填默认为1）"

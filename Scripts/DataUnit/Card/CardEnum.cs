@@ -40,6 +40,7 @@ namespace CardSimulator
 		Ignite = 3,
 		CounterAttack = 4, // 反击：回合外受到攻击时，对来源进行一次反击（反击不会触发反击）
 		WhirlwindSlash = 5, // 旋风斩：回合外的攻击作用于所有敌人
+		AddAttack = 6, // 增加攻击力
 	}
 
 	// 每个效果独立的目标选择方式
@@ -50,5 +51,13 @@ namespace CardSimulator
 		SelectedTarget = 2,
 		AllEnemies = 3,
 		AllUnits = 4,
+	}
+
+	// 怪物 Damage 意图的目标模式。
+	// 注意：枚举值从 1 开始，便于在怪物意图参数中显式书写。
+	public enum MonsterDamageTargetMode
+	{
+		RandomPerHit = 1,
+		RandomSameTargetWithinIntention = 2,
 	}
 }

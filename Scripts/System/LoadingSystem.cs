@@ -10,8 +10,15 @@ using System.Collections.Generic;
 [GlobalClass]
 public partial class LoadingSystem : Node
 {
-	private const string DefaultCardCsvPath = "res://DataBase/Card/通用/通用Card.csv";
-	private const string DefaultStateCsvPath = "res://DataBase/State/通用State.csv";
+	private const string DefaultFilePathRegistryCsvPath = "res://DataBase/FilePathRegistry.csv";
+
+	public const string CardCsvPathKey = "Data.Card.Common";
+	public const string StateCsvPathKey = "Data.State.Common";
+	public const string CharacterCsvPathKey = "Data.Unit.Character";
+	public const string MonsterCsvPathKey = "Data.Unit.Monster";
+	public const string CharacterDefaultDeckCsvPathKey = "Data.Unit.CharacterDefaultDeck";
+
+	private static Dictionary<string, string> filePathRegistryCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
 	/// 缓存已加载的卡牌数据，Key 为 CardId
@@ -37,6 +44,11 @@ public partial class LoadingSystem : Node
 	/// 缓存状态配置，Key 为 StateType
 	/// </summary>
 	private static Dictionary<StateType, StateDefinition> stateCache = new Dictionary<StateType, StateDefinition>();
+
+	public static Dictionary<string, string> FilePathRegistry
+	{
+		get { return filePathRegistryCache; }
+	}
 
 	/// <summary>
 	/// 公开的卡牌字典访问器
@@ -85,10 +97,112 @@ public partial class LoadingSystem : Node
 	/// </summary>
 	public void OnInit()
 	{
-		Dictionary<int, Card> cards = LoadCards(DefaultCardCsvPath, true);
-		Dictionary<StateType, StateDefinition> states = LoadStates(DefaultStateCsvPath, true);
+		EnsureFilePathRegistryLoaded();
+		Dictionary<int, Card> cards = LoadCardsByKey(CardCsvPathKey, true);
+		Dictionary<StateType, StateDefinition> states = LoadStatesByKey(StateCsvPathKey, true);
 
 		// 移除打印，由调用者处理
+	}
+
+	private static void EnsureFilePathRegistryLoaded()
+	{
+		if (filePathRegistryCache.Count > 0)
+		{
+			return;
+		}
+
+		LoadFilePathRegistry(DefaultFilePathRegistryCsvPath, true);
+	}
+
+	public static Dictionary<string, string> LoadFilePathRegistry(string filePath, bool useCache = true)
+	{
+		if (useCache && filePathRegistryCache.Count > 0)
+		{
+			return filePathRegistryCache;
+		}
+
+		string[] dataLines = LoadCsv.LoadCSVDataLines(filePath);
+		Dictionary<string, string> pathDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+		foreach (string line in dataLines)
+		{
+			if (string.IsNullOrWhiteSpace(line))
+			{
+				continue;
+			}
+
+			string[] fields = LoadCsv.ParseCSVFields(line);
+			if (fields.Length < 2)
+			{
+				GD.PrintErr($"文件路径注册表CSV格式错误，期望至少2列，实际 {fields.Length} 列：{line}");
+				continue;
+			}
+
+			string key = fields[0]?.Trim() ?? string.Empty;
+			string path = fields[1]?.Trim() ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(path))
+			{
+				GD.PrintErr($"文件路径注册表CSV行缺少有效 key 或 path：{line}");
+				continue;
+			}
+
+			pathDict[key] = path;
+		}
+
+		if (useCache)
+		{
+			filePathRegistryCache = pathDict;
+		}
+
+		return pathDict;
+	}
+
+	public static string GetFilePathByKey(string key)
+	{
+		EnsureFilePathRegistryLoaded();
+		if (string.IsNullOrWhiteSpace(key))
+		{
+			GD.PrintErr("文件路径 key 为空。") ;
+			return string.Empty;
+		}
+
+		if (!filePathRegistryCache.TryGetValue(key, out string filePath) || string.IsNullOrWhiteSpace(filePath))
+		{
+			GD.PrintErr($"未在文件路径注册表中找到 key={key} 对应的路径。") ;
+			return string.Empty;
+		}
+
+		return filePath;
+	}
+
+	public static Dictionary<int, Card> LoadCardsByKey(string pathKey = CardCsvPathKey, bool useCache = true)
+	{
+		return LoadCards(GetFilePathByKey(pathKey), useCache);
+	}
+
+	public static Dictionary<StateType, StateDefinition> LoadStatesByKey(string pathKey = StateCsvPathKey, bool useCache = true)
+	{
+		return LoadStates(GetFilePathByKey(pathKey), useCache);
+	}
+
+	public static Dictionary<int, Character> LoadCharactersByKey(string pathKey = CharacterCsvPathKey, bool useCache = true)
+	{
+		return LoadCharacters(GetFilePathByKey(pathKey), useCache);
+	}
+
+	public static Dictionary<int, Monster> LoadMonstersByKey(string pathKey = MonsterCsvPathKey, bool useCache = true)
+	{
+		return LoadMonsters(GetFilePathByKey(pathKey), useCache);
+	}
+
+	public static Dictionary<int, Dictionary<int, int>> LoadCharacterDefaultDecksByKey(string pathKey = CharacterDefaultDeckCsvPathKey, bool useCache = true)
+	{
+		return LoadCharacterDefaultDecks(GetFilePathByKey(pathKey), useCache);
+	}
+
+	public static List<int> GetCharacterDefaultCardIdListByKey(int characterId, string pathKey = CharacterDefaultDeckCsvPathKey, bool useCache = true)
+	{
+		return GetCharacterDefaultCardIdList(characterId, GetFilePathByKey(pathKey), useCache);
 	}
 
 	/// <summary>

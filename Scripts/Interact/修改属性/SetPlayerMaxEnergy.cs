@@ -2,7 +2,7 @@ using Godot;
 
 public partial class SetPlayerMaxEnergy : BaseButtonCommand
 {
-	protected override string ParameterFormat => "能量上限";
+	protected override string ParameterFormat => "[玩家UniqueInGameId] 能量上限";
 
 	public override void _Ready()
 	{
@@ -19,9 +19,10 @@ public partial class SetPlayerMaxEnergy : BaseButtonCommand
 		}
 
 		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
-		if (!int.TryParse(raw, out int maxEnergy))
+		if (string.IsNullOrEmpty(raw))
 		{
-			AppendConsoleError($"错误：参数不是合法数字。参数格式：{ParameterFormat}");
+			AppendConsoleInfo($"能量上限 参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(FindBattleSystem()));
 			return;
 		}
 
@@ -32,7 +33,20 @@ public partial class SetPlayerMaxEnergy : BaseButtonCommand
 			return;
 		}
 
-		if (!battleSytem.TrySetPlayerMaxEnergy(maxEnergy, out string resultMessage))
+		if (!TryResolvePlayerScopedArguments(battleSytem, raw, 1, out int playerUniqueInGameId, out string[] valueArgs, out string resolveError))
+		{
+			AppendConsoleError($"错误：{resolveError} 参数格式：{ParameterFormat}");
+			AppendConsoleInfo(BuildPlayerHint(battleSytem));
+			return;
+		}
+
+		if (!int.TryParse(valueArgs[0], out int maxEnergy))
+		{
+			AppendConsoleError($"错误：参数不是合法数字。参数格式：{ParameterFormat}");
+			return;
+		}
+
+		if (!battleSytem.TrySetPlayerMaxEnergy(playerUniqueInGameId, maxEnergy, out string resultMessage))
 		{
 			AppendConsoleError(resultMessage);
 			return;

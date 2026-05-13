@@ -3,8 +3,8 @@ using System.Collections.Generic;
 
 public partial class PlayCard : Button
 {
-	private const string ParameterFormat = "手牌顺序 [目标敌人UniqueInGameId]";
-	private const string MonsterKeyDescription = "目标敌人参数当前对应 BattleSytem.Monsters 的 key，即怪物实例的 UniqueInGameId。";
+	private const string ParameterFormat = "[操作者玩家UniqueInGameId] 手牌顺序 [目标UniqueInGameId]";
+	private const string TargetDescription = "目标参数当前对应任意单位的 UniqueInGameId；若卡牌不需要目标，可省略。";
 
 	public override void _Ready()
 	{
@@ -31,9 +31,10 @@ public partial class PlayCard : Button
 		if (string.IsNullOrEmpty(raw))
 		{
 			AppendConsoleInfo($"出牌 参数格式：{ParameterFormat}");
-			AppendConsoleInfo(MonsterKeyDescription);
+			AppendConsoleInfo(TargetDescription);
 			AppendConsoleInfo("如果卡牌不需要目标，可将目标敌人UniqueInGameId填写为 -1。");
-			AppendConsoleInfo(GetMonsterKeyHint(battleSytem));
+			AppendConsoleInfo(GetPlayerKeyHint(battleSytem));
+			AppendConsoleInfo(GetUnitKeyHint(battleSytem));
 			return;
 		}
 
@@ -41,68 +42,103 @@ public partial class PlayCard : Button
 		if (arguments.Length < 1)
 		{
 			AppendConsoleError($"错误：参数不足。参数格式：{ParameterFormat}", true);
-			AppendConsoleInfo(MonsterKeyDescription);
+			AppendConsoleInfo(TargetDescription);
 			return;
 		}
 
-		if (!int.TryParse(arguments[0], out int handOrder) || handOrder <= 0)
+		int playerUniqueInGameId;
+		int handOrder;
+		int targetUniqueInGameId = -1;
+
+		if (arguments.Length >= 3)
 		{
-			AppendConsoleError($"错误：手牌顺序 '{arguments[0]}' 不是大于0的合法数字。", true);
-			return;
+			if (!int.TryParse(arguments[0], out playerUniqueInGameId))
+			{
+				AppendConsoleError($"错误：操作者玩家UniqueInGameId '{arguments[0]}' 不是合法数字。", true);
+				return;
+			}
+
+			if (!int.TryParse(arguments[1], out handOrder) || handOrder <= 0)
+			{
+				AppendConsoleError($"错误：手牌顺序 '{arguments[1]}' 不是大于0的合法数字。", true);
+				return;
+			}
+
+			if (!int.TryParse(arguments[2], out targetUniqueInGameId))
+			{
+				AppendConsoleError($"错误：目标UniqueInGameId '{arguments[2]}' 不是合法数字。", true);
+				return;
+			}
+		}
+		else
+		{
+			if (!int.TryParse(arguments[0], out handOrder) || handOrder <= 0)
+			{
+				AppendConsoleError($"错误：手牌顺序 '{arguments[0]}' 不是大于0的合法数字。", true);
+				return;
+			}
+
+			playerUniqueInGameId = battleSytem.Player?.UniqueInGameId ?? -1;
+			if (arguments.Length >= 2)
+			{
+				if (!int.TryParse(arguments[1], out targetUniqueInGameId))
+				{
+					AppendConsoleError($"错误：目标UniqueInGameId '{arguments[1]}' 不是合法数字。", true);
+					return;
+				}
+			}
 		}
 
 		int handIndex = handOrder - 1;
 
-		if (battleSytem.Player == null)
+		if (!battleSytem.TryGetPlayerByUniqueId(playerUniqueInGameId, out CharacterInstance player))
 		{
 			AppendConsoleError("错误：玩家角色尚未初始化，无法执行出牌。", true);
+			AppendConsoleInfo(GetPlayerKeyHint(battleSytem));
 			return;
 		}
 
-		if (handIndex >= battleSytem.Player.handcards.Count)
+		if (handIndex >= player.handcards.Count)
 		{
-			AppendConsoleError($"错误：手牌顺序 {handOrder} 超出范围，当前手牌数量为 {battleSytem.Player.handcards.Count}。", true);
+			AppendConsoleError($"错误：手牌顺序 {handOrder} 超出范围，当前手牌数量为 {player.handcards.Count}。", true);
 			return;
 		}
 
-		Card selectedCard = battleSytem.Player.handcards[handIndex];
-		int targetMonsterUniqueInGameId = -1;
-		if (arguments.Length >= 2)
-		{
-			if (!int.TryParse(arguments[1], out targetMonsterUniqueInGameId))
-			{
-				AppendConsoleError($"错误：目标敌人UniqueInGameId '{arguments[1]}' 不是合法数字。", true);
-				AppendConsoleInfo(MonsterKeyDescription);
-				return;
-			}
-		}
+		Card selectedCard = player.handcards[handIndex];
 
-		if (selectedCard.NeedTarget && targetMonsterUniqueInGameId < 0)
+		if (selectedCard.NeedTarget && targetUniqueInGameId < 0)
 		{
 			AppendConsoleError($"错误：手牌顺序={handOrder} 的卡牌需要目标，请提供目标敌人UniqueInGameId。", true);
-			AppendConsoleInfo(MonsterKeyDescription);
-			AppendConsoleInfo(GetMonsterKeyHint(battleSytem));
+			AppendConsoleInfo(TargetDescription);
+			AppendConsoleInfo(GetUnitKeyHint(battleSytem));
 			return;
 		}
 
 		IUnitInstance target = null;
-		if (targetMonsterUniqueInGameId >= 0)
+		if (targetUniqueInGameId >= 0)
 		{
-			if (battleSytem.Monsters == null || !battleSytem.Monsters.TryGetValue(targetMonsterUniqueInGameId, out MonsterInstance monster))
+			foreach (IUnitInstance unit in battleSytem.GetAllUnits())
 			{
-				AppendConsoleError($"错误：未找到目标敌人UniqueInGameId={targetMonsterUniqueInGameId}。{GetMonsterKeyHint(battleSytem)}", true);
-				AppendConsoleInfo(MonsterKeyDescription);
-				return;
+				if (unit != null && unit.UniqueInGameId == targetUniqueInGameId)
+				{
+					target = unit;
+					break;
+				}
 			}
 
-			target = monster;
+			if (target == null)
+			{
+				AppendConsoleError($"错误：未找到目标UniqueInGameId={targetUniqueInGameId}。{GetUnitKeyHint(battleSytem)}", true);
+				AppendConsoleInfo(TargetDescription);
+				return;
+			}
 		}
 
-		AppendConsoleInfo($"出牌 参数解析：手牌顺序={handOrder}，内部index={handIndex}，目标敌人UniqueInGameId={targetMonsterUniqueInGameId}");
-		bool played = battleSytem.PlayHandCard(handIndex, target);
+		AppendConsoleInfo($"出牌 参数解析：操作者玩家UniqueInGameId={playerUniqueInGameId}，手牌顺序={handOrder}，内部index={handIndex}，目标UniqueInGameId={targetUniqueInGameId}");
+		bool played = battleSytem.PlayHandCard(playerUniqueInGameId, handIndex, target);
 		if (played)
 		{
-			AppendConsoleInfo("出牌操作完成。\n" + MonsterKeyDescription);
+			AppendConsoleInfo("出牌操作完成。\n" + TargetDescription);
 		}
 	}
 
@@ -111,16 +147,37 @@ public partial class PlayCard : Button
 		return raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
 	}
 
-	private string GetMonsterKeyHint(BattleSytem battleSytem)
+	private string GetPlayerKeyHint(BattleSytem battleSytem)
 	{
-		if (battleSytem.Monsters == null || battleSytem.Monsters.Count == 0)
+		List<CharacterInstance> players = battleSytem.GetAlivePlayers();
+		if (players.Count == 0)
 		{
-			return "当前没有已实例化怪物UniqueInGameId。";
+			return "当前没有可操作的玩家UniqueInGameId。";
 		}
 
-		List<int> keys = new List<int>(battleSytem.Monsters.Keys);
-		keys.Sort();
-		return "当前可用怪物UniqueInGameId：" + string.Join(", ", keys);
+		List<string> parts = new List<string>();
+		foreach (CharacterInstance player in players)
+		{
+			parts.Add($"{player.UniqueInGameId}({player.Name})");
+		}
+
+		return "当前可用玩家UniqueInGameId：" + string.Join(", ", parts);
+	}
+
+	private string GetUnitKeyHint(BattleSytem battleSytem)
+	{
+		List<string> parts = new List<string>();
+		foreach (IUnitInstance unit in battleSytem.GetAllUnits())
+		{
+			if (unit is Unit typedUnit)
+			{
+				parts.Add($"{unit.UniqueInGameId}({typedUnit.Name})");
+			}
+		}
+
+		return parts.Count == 0
+			? "当前没有可用目标UniqueInGameId。"
+			: "当前可用目标UniqueInGameId：" + string.Join(", ", parts);
 	}
 
 	private LineEdit FindLineEdit()

@@ -1,15 +1,15 @@
 using Godot;
 
-public partial class AddCharacterCard : Button
+public partial class AddCharacter : Button
 {
-	private const string ParameterFormat = "卡牌ID [增加数量]";
+	private const string ParameterFormat = "角色ID";
 
 	public override void _Ready()
 	{
-		Pressed += OnAddCharacterCardPressed;
+		Pressed += OnAddCharacterPressed;
 	}
 
-	private void OnAddCharacterCardPressed()
+	private void OnAddCharacterPressed()
 	{
 		LineEdit lineEdit = FindLineEdit();
 		if (lineEdit == null)
@@ -21,33 +21,20 @@ public partial class AddCharacterCard : Button
 		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
 		if (string.IsNullOrEmpty(raw))
 		{
-			AppendConsoleInfo($"新增角色卡牌 参数格式：{ParameterFormat}");
+			AppendConsoleInfo($"新增角色 参数格式：{ParameterFormat}");
 			return;
 		}
 
-		string[] arguments = ParseArguments(raw);
-		if (arguments.Length == 0 || !int.TryParse(arguments[0], out int cardId))
+		if (!int.TryParse(raw, out int characterId))
 		{
-			AppendConsoleError($"错误：卡牌ID '{raw}' 不是合法数字。");
+			AppendConsoleError($"错误：角色ID '{raw}' 不是合法数字。参数格式：{ParameterFormat}");
 			return;
 		}
 
-		int addCount = 1;
-		if (arguments.Length >= 2)
+		EnsureCharacterCacheLoaded();
+		if (!LoadingSystem.CharacterDictionary.ContainsKey(characterId))
 		{
-			if (!int.TryParse(arguments[1], out addCount) || addCount <= 0)
-			{
-				AppendConsoleError($"错误：数量 '{arguments[1]}' 不是大于0的合法数字。");
-				return;
-			}
-		}
-
-		AppendConsoleInfo($"新增角色卡牌 参数解析：卡牌ID={cardId}，增加数量={addCount}");
-
-		EnsureCardCacheLoaded();
-		if (!LoadingSystem.CardDictionary.ContainsKey(cardId))
-		{
-			AppendConsoleError($"错误：卡牌ID {cardId} 未在 Card.csv 中找到。");
+			AppendConsoleError($"错误：角色ID {characterId} 未在 Character.csv 中找到。");
 			return;
 		}
 
@@ -60,29 +47,28 @@ public partial class AddCharacterCard : Button
 
 		if (battleSytem.IsBattleStarted)
 		{
-			AppendConsoleError("错误：战斗已开始，当前仅支持在战斗开始前添加角色卡牌。");
+			AppendConsoleInfo("新增角色仅在战斗开始前生效。当前已开始战斗，本次操作已忽略。");
 			return;
 		}
 
 		BattleSetupData setupData = battleSytem.EnsureSetupData();
-		int actualAddedCount = setupData.AddCharacterCardId(cardId, addCount);
-		battleSytem.RefreshBattleInfoDisplay();
-
-		int sameTypeCount = setupData.GetCharacterCardIdCount(cardId);
-		int totalCount = setupData.GetTotalCharacterCardCount();
-		AppendConsoleInfo($"已添加角色卡牌ID {cardId} 共 {actualAddedCount} 个。该类型当前数量：{sameTypeCount}，角色卡牌总数：{totalCount}");
-	}
-
-	private string[] ParseArguments(string raw)
-	{
-		return raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
-	}
-
-	private void EnsureCardCacheLoaded()
-	{
-		if (LoadingSystem.CardDictionary.Count == 0)
+		int addedCount = setupData.AddCharacterId(characterId);
+		if (addedCount <= 0)
 		{
-			LoadingSystem.LoadCardsByKey(LoadingSystem.CardCsvPathKey, true);
+			AppendConsoleError($"错误：角色数量已达到上限 {BattleSetupData.MaxCharacterCapacity}，无法继续新增角色。");
+			return;
+		}
+
+		battleSytem.SelectedCharacterId = setupData.GetCharacterIdList()[0];
+		battleSytem.RefreshBattleInfoDisplay();
+		AppendConsoleInfo($"已新增角色ID={characterId}。当前角色数量={setupData.GetTotalCharacterCount()}。");
+	}
+
+	private void EnsureCharacterCacheLoaded()
+	{
+		if (LoadingSystem.CharacterDictionary.Count == 0)
+		{
+			LoadingSystem.LoadCharactersByKey(LoadingSystem.CharacterCsvPathKey, true);
 		}
 	}
 

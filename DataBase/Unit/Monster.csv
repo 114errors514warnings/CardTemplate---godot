@@ -1,4 +1,8 @@
-id,Name,MAX_HP,Ini_Attack,Ini_Defend,MaxActionTime,Intention1,Intention2,Intention3,Intention4,Intention5,Intention6,Intention7,Intention8,Intention9,Intention10
-3001,堕魔兽,5,1,1,1,1,2,,,,,,,,
-3002,法师学徒,15,2,2,2,1|1,2|2,,,,,,,,
-3003,堕魔守卫,30,3,3,3,1|1|1,2|2|2,,,,,,,,
+id,Name,MAX_HP,Ini_Attack,Ini_Defend,Intention1,Intention2,Intention3,Intention4,Intention5,Intention6,Intention7,Intention8,Intention9,Intention10
+3001,堕魔兽,5,1,1,1,2,,,,,,,,,
+3002,法师学徒,15,2,2,1|1,2|2,,,,,,,,,
+3003,堕魔守卫,30,3,3,1;2|1;2|1;2,2|2|2,,,,,,,,,
+3004,诅咒弓手,16,3,1,1|3;2;1;2,2|1,,,,,,,,,
+3005,狂热祭司,20,2,2,3;1;6;2|1,2|3;1;6;1,,,,,,,,,
+3006,钢甲仆从,26,2,4,2|2|1,1|3;1;6;1,,,,,,,,,
+3007,双刃猎手,18,4,2,1;2|1;2,1|3;2;1;1,,,,,,,,,

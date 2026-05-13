@@ -8,12 +8,12 @@ using System.Collections.Generic;
 [GlobalClass]
 public partial class LoadMonsterCsv : Node
 {
-	private const int BaseFieldCount = 6;
+	private const int BaseFieldCount = 5;
 	private const int MaxIntentionColumnCount = 10;
 
 	/// <summary>
 	/// 从CSV文件加载所有怪物
-	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,MaxActionTime,Intention1...Intention10
+	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,Intention1...Intention10
 	/// </summary>
 	/// <param name="filePath">CSV文件路径</param>
 	/// <returns>怪物数组</returns>
@@ -68,14 +68,13 @@ public partial class LoadMonsterCsv : Node
 			int maxHp = int.Parse(fields[2]);
 			int iniAttack = int.Parse(fields[3]);
 			int iniDefend = int.Parse(fields[4]);
-			int maxActionTime = int.Parse(fields[5]);
 			int[][][] table = ParseIntentions(fields, line);
 			if (table == null)
 			{
 				return null;
 			}
 
-			return new Monster(id, name, maxHp, iniAttack, iniDefend, maxActionTime, table);
+			return new Monster(id, name, maxHp, iniAttack, iniDefend, table);
 		}
 		catch (Exception ex)
 		{

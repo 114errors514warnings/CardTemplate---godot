@@ -4,20 +4,17 @@ using CardSimulator;
 
 public class Monster : Unit
 {
-    public int MaxActionTime;
     public int[][][] Table { get; private set; }
 
-    public Monster(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int actionTime, int[][][] table = null)
+    public Monster(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int[][][] table = null)
         : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend)
     {
-        this.MaxActionTime = actionTime;
         Table = CloneTable(table);
     }
 
     public Monster(Monster m)
         : base(m)
     {
-        MaxActionTime = m.MaxActionTime;
         Table = CloneTable(m.Table);
     }
 
@@ -70,6 +67,7 @@ public class MonsterInstance : Monster, IUnitInstance
     public int Max_HP { get; set; }
     public int SelectedIntentionIndex { get; private set; } = -1;
     public int[][] SelectedIntention { get; private set; } = Array.Empty<int[]>();
+    public int SelectedIntentionTargetUniqueInGameId { get; private set; } = -1;
 
     private int _hp;
     public int HP
@@ -105,8 +103,8 @@ public class MonsterInstance : Monster, IUnitInstance
     public float posx { get; set; }
     public float posy { get; set; }
 
-    public MonsterInstance(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int ActionTime)
-        : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend, ActionTime)
+    public MonsterInstance(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend)
+        : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend)
     {
         // states = new List<State>();
         UniqueInGameId = UniqueIdGenerator.NextMonsterId();
@@ -119,9 +117,9 @@ public class MonsterInstance : Monster, IUnitInstance
         posy = 0;
     }
 
-    public MonsterInstance(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int ActionTime
+    public MonsterInstance(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend
         , int HP, /*List<State> states,*/ int Shield, int Attack, int Defend, float posx, float posy)
-        : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend, ActionTime)
+        : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend)
     {
         // this.states = new List<State>(states);
         UniqueInGameId = UniqueIdGenerator.NextMonsterId();
@@ -151,11 +149,18 @@ public class MonsterInstance : Monster, IUnitInstance
     {
         SelectedIntentionIndex = intentionIndex;
         SelectedIntention = CloneIntention(intention);
+        SelectedIntentionTargetUniqueInGameId = -1;
+    }
+
+    public void SetSelectedIntentionTarget(int targetUniqueInGameId)
+    {
+        SelectedIntentionTargetUniqueInGameId = targetUniqueInGameId;
     }
 
     public void ClearSelectedIntention()
     {
         SelectedIntentionIndex = -1;
         SelectedIntention = Array.Empty<int[]>();
+        SelectedIntentionTargetUniqueInGameId = -1;
     }
 }

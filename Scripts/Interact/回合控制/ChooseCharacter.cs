@@ -2,8 +2,7 @@ using Godot;
 
 public partial class ChooseCharacter : Button
 {
-	private const string DefaultCharacterCsvPath = "res://DataBase/Unit/Character.csv";
-	private const string ParameterFormat = "角色ID";
+	private const string ParameterFormat = "角色ID [index]";
 
 	public override void _Ready()
 	{
@@ -22,27 +21,51 @@ public partial class ChooseCharacter : Button
 		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
 		EnsureCharacterCacheLoaded();
 
+		BattleSytem battleSytem = FindBattleSystem();
+		if (battleSytem == null)
+		{
+			AppendConsoleError("错误：未找到 BattleSytem 节点，无法写入 BattleSetupData。");
+			return;
+		}
+
+		if (battleSytem.IsBattleStarted)
+		{
+			AppendConsoleInfo("选择角色仅在战斗开始前生效。当前已开始战斗，本次操作已忽略。");
+			return;
+		}
+
 		int characterId;
+		int characterIndex = 1;
 		if (string.IsNullOrEmpty(raw))
 		{
 			characterId = GetDefaultCharacterId();
 			if (characterId <= 0)
 			{
-				AppendConsoleInfo($"选择角色 参数格式：{ParameterFormat}。留空时默认使用第一个角色。当前未找到可用角色ID。");
+				AppendConsoleInfo($"选择角色 参数格式：{ParameterFormat}。留空时默认使用第一个角色，并修改第1个角色槽位。当前未找到可用角色ID。");
 				return;
 			}
 
-			AppendConsoleInfo($"选择角色 未填写参数，默认使用第一个角色ID={characterId}");
+			AppendConsoleInfo($"选择角色 未填写参数，默认使用第一个角色ID={characterId}，修改第1个角色槽位。");
 		}
 		else
 		{
-			if (!int.TryParse(raw, out characterId))
+			string[] arguments = raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+			if (arguments.Length == 0 || !int.TryParse(arguments[0], out characterId))
 			{
 				AppendConsoleError($"错误：角色ID '{raw}' 不是合法数字。参数格式：{ParameterFormat}");
 				return;
 			}
 
-			AppendConsoleInfo($"选择角色 参数解析：角色ID={characterId}");
+			if (arguments.Length >= 2)
+			{
+				if (!int.TryParse(arguments[1], out characterIndex) || characterIndex <= 0)
+				{
+					AppendConsoleError($"错误：index '{arguments[1]}' 不是大于0的合法数字。参数格式：{ParameterFormat}");
+					return;
+				}
+			}
+
+			AppendConsoleInfo($"选择角色 参数解析：角色ID={characterId}，index={characterIndex}");
 		}
 
 		if (!LoadingSystem.CharacterDictionary.ContainsKey(characterId))
@@ -51,22 +74,24 @@ public partial class ChooseCharacter : Button
 			return;
 		}
 
-		BattleSytem battleSytem = FindBattleSystem();
-		if (battleSytem == null)
+		if (characterIndex > BattleSetupData.MaxCharacterCapacity)
 		{
-			AppendConsoleError("错误：未找到 BattleSytem 节点，无法写入 BattleSetupData。");
+			AppendConsoleError($"错误：index={characterIndex} 超出角色上限 {BattleSetupData.MaxCharacterCapacity}。");
 			return;
 		}
 
-		if (battleSytem.SetupData == null)
+		BattleSetupData setupData = battleSytem.EnsureSetupData();
+		setupData.EnsureCharacterOrderInitialized();
+		bool success = setupData.SetCharacterIdAt(characterIndex - 1, characterId);
+		if (!success)
 		{
-			battleSytem.SetupData = new BattleSetupData();
+			AppendConsoleError($"错误：无法修改第 {characterIndex} 个角色槽位。");
+			return;
 		}
 
-		battleSytem.SetupData.CharacterId = characterId;
-		battleSytem.SelectedCharacterId = characterId;
+		battleSytem.SelectedCharacterId = setupData.GetTotalCharacterCount() > 0 ? setupData.GetCharacterIdList()[0] : characterId;
 		battleSytem.RefreshBattleInfoDisplay();
-		AppendConsoleInfo($"已设置角色ID为 {characterId}。");
+		AppendConsoleInfo($"已将第 {characterIndex} 个角色修改为角色ID={characterId}。当前角色数量={setupData.GetTotalCharacterCount()}。");
 	}
 
 	private int GetDefaultCharacterId()
@@ -87,7 +112,7 @@ public partial class ChooseCharacter : Button
 	{
 		if (LoadingSystem.CharacterDictionary.Count == 0)
 		{
-			LoadingSystem.LoadCharacters(DefaultCharacterCsvPath, true);
+			LoadingSystem.LoadCharactersByKey(LoadingSystem.CharacterCsvPathKey, true);
 		}
 	}
 

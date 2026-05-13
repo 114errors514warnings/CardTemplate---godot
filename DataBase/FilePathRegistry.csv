@@ -1,0 +1,6 @@
+Key,Path
+Data.Card.Common,res://DataBase/Card/通用/通用Card.csv
+Data.State.Common,res://DataBase/State/通用State.csv
+Data.Unit.Character,res://DataBase/Unit/Character.csv
+Data.Unit.Monster,res://DataBase/Unit/Monster.csv
+Data.Unit.CharacterDefaultDeck,res://DataBase/Unit/Character/CharacterDefaultDeck.csv
