@@ -98,7 +98,7 @@ public partial class LoadingSystem : Node
 	public void OnInit()
 	{
 		EnsureFilePathRegistryLoaded();
-		Dictionary<int, Card> cards = LoadCardsByKey(CardCsvPathKey, true);
+		LoadAllCardsFromFolder("res://DataBase/Card/");
 		Dictionary<StateType, StateDefinition> states = LoadStatesByKey(StateCsvPathKey, true);
 
 		// 移除打印，由调用者处理
@@ -203,6 +203,72 @@ public partial class LoadingSystem : Node
 	public static List<int> GetCharacterDefaultCardIdListByKey(int characterId, string pathKey = CharacterDefaultDeckCsvPathKey, bool useCache = true)
 	{
 		return GetCharacterDefaultCardIdList(characterId, GetFilePathByKey(pathKey), useCache);
+	}
+
+	/// <summary>
+	/// 扫描指定文件夹（含子文件夹）下的所有 CSV 文件，将卡牌数据合并加载到卡牌缓存中。
+	/// </summary>
+	public static void LoadAllCardsFromFolder(string folderPath)
+	{
+		List<string> csvPaths = new List<string>();
+		CollectCsvFiles(folderPath, csvPaths);
+		foreach (string path in csvPaths)
+		{
+			MergeCardsFromCsvIntoCache(path);
+		}
+	}
+
+	private static void CollectCsvFiles(string folderPath, List<string> result)
+	{
+		DirAccess dir = DirAccess.Open(folderPath);
+		if (dir == null)
+		{
+			GD.PrintErr($"无法打开卡牌文件夹：{folderPath}");
+			return;
+		}
+
+		dir.ListDirBegin();
+		string entry = dir.GetNext();
+		while (!string.IsNullOrEmpty(entry))
+		{
+			string fullPath = folderPath.TrimEnd('/') + "/" + entry;
+			if (dir.CurrentIsDir())
+			{
+				CollectCsvFiles(fullPath, result);
+			}
+			else if (entry.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+			{
+				result.Add(fullPath);
+			}
+			entry = dir.GetNext();
+		}
+		dir.ListDirEnd();
+	}
+
+	private static void MergeCardsFromCsvIntoCache(string filePath)
+	{
+		Card[] cards = LoadCardCsv.LoadCardsFromCSV(filePath);
+		if (cards == null)
+		{
+			return;
+		}
+
+		foreach (Card card in cards)
+		{
+			if (card == null)
+			{
+				continue;
+			}
+
+			if (!cardCache.ContainsKey(card.CardId))
+			{
+				cardCache[card.CardId] = card;
+			}
+			else
+			{
+				GD.PrintErr($"加载卡牌时发现重复 CardId（来源：{filePath}）：{card.CardId}，已跳过。");
+			}
+		}
 	}
 
 	/// <summary>

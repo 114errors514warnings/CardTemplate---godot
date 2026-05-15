@@ -36,6 +36,7 @@
 | 4 | CounterAttack | 反击 |
 | 5 | WhirlwindSlash | 旋风斩 |
 | 6 | AddAttack | 增加攻击力 |
+| 7 | ExtraEnergy | 下回合额外获得能量 |
 
 ## MonsterDamageTargetMode
 

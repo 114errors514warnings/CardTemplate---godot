@@ -6,3 +6,4 @@ StateType,Name,IsStackable,IsPermanent,TurnStartDecayAmount
 4,CounterAttack,TRUE,FALSE,1
 5,WhirlwindSlash,FALSE,TRUE,0
 6,AddAttack,TRUE,TRUE,0
+7,ExtraEnergy,TRUE,FALSE,0

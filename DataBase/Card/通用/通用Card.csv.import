@@ -6,10 +6,10 @@ uid="uid://dsr4tt3oef7lk"
 
 [deps]
 
-files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation", "res://DataBase/Card/通用/通用Card.CardKeyWord.translation"]
+files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation", "res://DataBase/Card/通用/通用Card.en.translation"]
 
 source_file="res://DataBase/Card/通用/通用Card.csv"
-dest_files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation", "res://DataBase/Card/通用/通用Card.CardKeyWord.translation"]
+dest_files=["res://DataBase/Card/通用/通用Card.CardName.translation", "res://DataBase/Card/通用/通用Card.CardType.translation", "res://DataBase/Card/通用/通用Card.EnergyCost.translation", "res://DataBase/Card/通用/通用Card.EffectType.translation", "res://DataBase/Card/通用/通用Card.EffectDesc.translation", "res://DataBase/Card/通用/通用Card.Params.translation", "res://DataBase/Card/通用/通用Card.en.translation"]
 
 [params]
 

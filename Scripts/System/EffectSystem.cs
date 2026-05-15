@@ -62,6 +62,11 @@ public sealed class EffectResult
             return $"来源={BuildUnitLabel(Source)}，目标={BuildUnitLabel(Target)}，总伤害={TotalValue}，护盾抵扣={ShieldAbsorbed}，HP伤害={HpDamage}，目标护盾 {TargetShieldBefore}->{TargetShieldAfter}，目标HP {TargetHpBefore}->{TargetHpAfter}";
         }
 
+        if (string.Equals(EffectName, "ShieldSlam", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"来源={BuildUnitLabel(Source)}，目标={BuildUnitLabel(Target)}，总伤害={TotalValue}，护盾抵扣={ShieldAbsorbed}，HP伤害={HpDamage}，目标护盾 {TargetShieldBefore}->{TargetShieldAfter}，目标HP {TargetHpBefore}->{TargetHpAfter}";
+        }
+
         if (string.Equals(EffectName, "Shield", StringComparison.OrdinalIgnoreCase))
         {
             return $"来源={BuildUnitLabel(Source)}，目标=自身，获得护盾={ShieldGained}，来源护盾 {SourceShieldBefore}->{SourceShieldAfter}";
@@ -367,32 +372,49 @@ public sealed class ShieldSlamEffect : IEffect
             throw new ArgumentException("ShieldSlam effect requires a target.", nameof(context));
         }
 
-        int damage = Math.Max(0, context.Source.Attack + context.Source.Shield + context.GetParam(0));
-        damage = StateSystem.ModifyIncomingDamage(context.Source, context.Target, damage);
+        int sourceValue = context.Source?.Shield ?? 0;
+        int extraDamage = context.GetParam(0);
+        return ApplySourceValueDamage(context.Source, context.Target, sourceValue, extraDamage, Name);
+    }
 
-        int targetShieldBefore = context.Target.Shield;
-        int targetHpBefore = context.Target.HP;
+    public static EffectResult ApplySourceValueDamage(IUnitInstance source, IUnitInstance target, int sourceValue, int extraDamage = 0, string effectName = "VariableDamage")
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
 
-        int absorbedByShield = Math.Min(context.Target.Shield, damage);
-        context.Target.Shield -= absorbedByShield;
+        if (target == null)
+        {
+            throw new ArgumentNullException(nameof(target));
+        }
+
+        int damage = Math.Max(0, source.Attack + sourceValue + extraDamage);
+        damage = StateSystem.ModifyIncomingDamage(source, target, damage);
+
+        int targetShieldBefore = target.Shield;
+        int targetHpBefore = target.HP;
+
+        int absorbedByShield = Math.Min(target.Shield, damage);
+        target.Shield -= absorbedByShield;
 
         int hpDamage = damage - absorbedByShield;
         if (hpDamage > 0)
         {
-            context.Target.HP = Math.Max(0, context.Target.HP - hpDamage);
+            target.HP = Math.Max(0, target.HP - hpDamage);
         }
 
         return new EffectResult(
-            Name,
-            context.Source,
-            context.Target,
+            effectName,
+            source,
+            target,
             totalValue: damage,
             shieldAbsorbed: absorbedByShield,
             hpDamage: hpDamage,
             targetShieldBefore: targetShieldBefore,
-            targetShieldAfter: context.Target.Shield,
+            targetShieldAfter: target.Shield,
             targetHpBefore: targetHpBefore,
-            targetHpAfter: context.Target.HP);
+            targetHpAfter: target.HP);
     }
 }
 

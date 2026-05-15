@@ -105,6 +105,9 @@ public partial class BattleSytem : Node
     // 怪物实例字典，Key 为 UniqueInGameId
     public Dictionary<int, MonsterInstance> Monsters;
 
+    // 本局战斗中各单位的初始生命值快照，Key 为 UniqueInGameId
+    private readonly Dictionary<int, int> BattleInitialHpSnapshots = new Dictionary<int, int>();
+
     // Called when the node enters the scene tree for the first time.
     public override void _Ready()
     {
@@ -189,6 +192,21 @@ public partial class BattleSytem : Node
         return result;
     }
 
+    public int GetBattleLostHp(IUnitInstance unit)
+    {
+        if (unit == null)
+        {
+            return 0;
+        }
+
+        if (!BattleInitialHpSnapshots.TryGetValue(unit.UniqueInGameId, out int initialHp))
+        {
+            return 0;
+        }
+
+        return Math.Max(0, initialHp - unit.HP);
+    }
+
     public bool StartGameFromSetupData()
     {
         if (IsBattleStarted)
@@ -257,6 +275,7 @@ public partial class BattleSytem : Node
         EnsureUnitCachesLoaded();
         InitializePlayers(characterIds);
         InitializeMonsters(monsterIds);
+        SnapshotBattleInitialHp();
 
         CurrentPileDisplayOrderMode = PileDisplayOrderMode.PileOrder;
 
@@ -282,6 +301,33 @@ public partial class BattleSytem : Node
     public void OnInit(int characterId, int monsterId)
     {
         OnInit(characterId, new List<int> { monsterId });
+    }
+
+    private void SnapshotBattleInitialHp()
+    {
+        BattleInitialHpSnapshots.Clear();
+
+        if (Players != null)
+        {
+            foreach (CharacterInstance player in Players.Values)
+            {
+                if (player != null)
+                {
+                    BattleInitialHpSnapshots[player.UniqueInGameId] = player.HP;
+                }
+            }
+        }
+
+        if (Monsters != null)
+        {
+            foreach (MonsterInstance monster in Monsters.Values)
+            {
+                if (monster != null)
+                {
+                    BattleInitialHpSnapshots[monster.UniqueInGameId] = monster.HP;
+                }
+            }
+        }
     }
 
     // Called every frame. 'delta' is the elapsed time since the previous frame.

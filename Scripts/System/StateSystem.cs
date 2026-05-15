@@ -328,6 +328,13 @@ public static class StateSystem
 			}
 		}
 
+		if (TryGetStateStacks(unit, StateType.ExtraEnergy, out int extraEnergyStacks) && extraEnergyStacks > 0)
+		{
+			unit.Energy += extraEnergyStacks;
+			toRemove.Add(StateType.ExtraEnergy);
+			AppendStateTurnStartInfo(unit, StateType.ExtraEnergy, extraEnergyStacks);
+		}
+
 		foreach (StateType stateType in toRemove)
 		{
 			unit.States.Remove(stateType);
@@ -389,6 +396,23 @@ public static class StateSystem
 
 		stacks = stateData.Stacks;
 		return stacks > 0;
+	}
+
+	private static void AppendStateTurnStartInfo(IUnitInstance unit, StateType type, int stacks)
+	{
+		string unitLabel = unit == null ? "Unit" : $"Unit#{unit.UniqueInGameId}";
+		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} state {GetStateLabel(type)} triggered: gain {stacks} energy at turn start and remove this state.");
+	}
+
+	private static string GetStateLabel(StateType type)
+	{
+		StateDefinition definition = GetStateDefinition(type);
+		if (definition != null && !string.IsNullOrWhiteSpace(definition.Name))
+		{
+			return definition.Name;
+		}
+
+		return type.ToString();
 	}
 
 	private static int GetTurnStartDecayAmount(StateType type)

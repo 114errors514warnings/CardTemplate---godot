@@ -8,6 +8,3 @@ CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
 30000002,易伤,Skill,1,AddState,赋予2层易伤,2;1;2
 30000003,虚弱,Skill,1,AddState,赋予2层虚弱,2;2;2
 30000004,反击,Skill,1,AddState,添加状态反击：回合外受到攻击时，反击目标来源,1;4;1
-31002001,反攻号角,State,1,AddState,2回合，反击,1;4;2
-31002002,旋风斩,State,1,AddState,你回合外的攻击会作用于所有敌人,1;5;1
-11002001,盾牌冲撞,Attack,1,ShieldSlam,造成攻击力+护盾值的伤害,2,Retain
