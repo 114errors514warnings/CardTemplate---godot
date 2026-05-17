@@ -1,17 +1,17 @@
 [gd_scene format=3 uid="uid://b1r8c14vmcdai"]
 
-[ext_resource type="Script" uid="uid://dtdprpvr6yi6p" path="res://Scripts/Init.cs" id="1"]
-[ext_resource type="Script" uid="uid://dkxanmhdi8n3k" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
-[ext_resource type="Script" uid="uid://dx4ieog1lmfux" path="res://Scripts/System/BattleSytem.cs" id="3"]
-[ext_resource type="Script" uid="uid://wua77urdkkmd" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
-[ext_resource type="Script" uid="uid://c0ltvk8d1wsnv" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
-[ext_resource type="Script" uid="uid://cwby5o1hx2mvx" path="res://Scripts/Interact/卡牌操作/PlayCard.cs" id="6"]
-[ext_resource type="Script" uid="uid://clljbe3siea6x" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
-[ext_resource type="Script" uid="uid://byuxj2w20g4l0" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
-[ext_resource type="Script" uid="uid://vjajksmqd4mx" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="9"]
-[ext_resource type="Script" uid="uid://bfccequ6evgaj" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
-[ext_resource type="Script" uid="uid://dyh0karbgbmt4" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
-[ext_resource type="Script" uid="uid://b7x68xl30nf58" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
+[ext_resource type="Script" path="res://Scripts/Init.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/System/BattleSytem.cs" id="3"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="4"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="5"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/PlayCard.cs" id="6"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="7"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="9"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="10"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/EndGame.cs" id="12"]
 [ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/RemoveCharacterCard.cs" id="13"]
 [ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/DrawCardCommand.cs" id="14"]
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerHealth.cs" id="15"]
@@ -21,6 +21,7 @@
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/SetPlayerMaxEnergy.cs" id="19"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddCharacter.cs" id="20"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteCharacter.cs" id="21"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/AddState.cs" id="22"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -282,6 +283,14 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "能量上限"
 script = ExtResource("19")
+
+[node name="增加状态" type="Button" parent="操作面板/修改属性" unique_id=2051174001]
+editor_description = "参数：目标UniqueInGameID 状态ID 层数（可选，不填默认为1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "增加状态"
+script = ExtResource("22")
 
 [node name="参数框" type="HBoxContainer" parent="操作面板" unique_id=710620316]
 custom_minimum_size = Vector2(100, 40)

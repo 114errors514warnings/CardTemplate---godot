@@ -5,12 +5,14 @@ using CardSimulator;
 public sealed class StateRuntimeData
 {
 	public StateType Type { get; }
+	public int AppliedOrder { get; }
 	public int Stacks { get; set; }
 	public List<StateStackSegment> StackSegments { get; } = new List<StateStackSegment>();
 
-	public StateRuntimeData(StateType type, int stacks)
+	public StateRuntimeData(StateType type, int stacks, int appliedOrder)
 	{
 		Type = type;
+		AppliedOrder = appliedOrder;
 		Stacks = Math.Max(0, stacks);
 		if (Stacks > 0)
 		{
@@ -132,6 +134,8 @@ public sealed class StateStackSegment
 
 public static class StateSystem
 {
+	private static int nextAppliedOrder = 0;
+
 	public static bool IsStackable(StateType type)
 	{
 		StateDefinition definition = GetStateDefinition(type);
@@ -142,6 +146,24 @@ public static class StateSystem
 	{
 		StateDefinition definition = GetStateDefinition(type);
 		return definition == null || definition.IsPermanent;
+	}
+
+	public static bool IsDebuff(StateType type)
+	{
+		StateDefinition definition = GetStateDefinition(type);
+		return definition != null && definition.IsDebuff;
+	}
+
+	public static bool IsElite(StateType type)
+	{
+		StateDefinition definition = GetStateDefinition(type);
+		return definition != null && definition.IsElite;
+	}
+
+	public static bool IsNormalDebuff(StateType type)
+	{
+		StateDefinition definition = GetStateDefinition(type);
+		return definition != null && definition.IsDebuff && !definition.IsElite;
 	}
 
 	public static void AddOrUpdateState(IUnitInstance unit, StateType type, int stacks)
@@ -174,7 +196,7 @@ public static class StateSystem
 		}
 
 		int initialStacks = IsStackable(type) ? stacks : 1;
-		states[type] = new StateRuntimeData(type, initialStacks);
+		states[type] = new StateRuntimeData(type, initialStacks, System.Threading.Interlocked.Increment(ref nextAppliedOrder));
 	}
 
 	public static bool RegisterStateEndCallback(IUnitInstance unit, StateType type, int stacks, string stateCardUniqueInGameId, IUnitInstance ownerUnit)
@@ -214,6 +236,55 @@ public static class StateSystem
 		List<StateEndedContext> callbacks = stateData.ConsumeAllCallbacks(unit, StateEndReason.Cleared);
 		unit.States.Remove(type);
 		InvokeStateEndedCallbacks(unit, callbacks);
+	}
+
+	public static bool TryRemoveFirstNormalDebuff(IUnitInstance unit, out StateType removedStateType)
+	{
+		removedStateType = StateType.None;
+		if (!TryRemoveFirstNormalDebuffs(unit, 1, out List<StateType> removedStateTypes) || removedStateTypes.Count == 0)
+		{
+			return false;
+		}
+
+		removedStateType = removedStateTypes[0];
+		return true;
+	}
+
+	public static bool TryRemoveFirstNormalDebuffs(IUnitInstance unit, int removeCount, out List<StateType> removedStateTypes)
+	{
+		removedStateTypes = new List<StateType>();
+		if (removeCount <= 0 || unit == null || unit.States == null || unit.States.Count == 0)
+		{
+			return false;
+		}
+
+		List<StateType> orderedStateTypes = GetOrderedStateTypes(unit);
+		for (int index = 0; index < orderedStateTypes.Count && removedStateTypes.Count < removeCount; index++)
+		{
+			StateType stateType = orderedStateTypes[index];
+			if (!IsNormalDebuff(stateType))
+			{
+				continue;
+			}
+
+			RemoveState(unit, stateType);
+			removedStateTypes.Add(stateType);
+		}
+
+		return removedStateTypes.Count > 0;
+	}
+
+	public static List<StateType> GetOrderedStateTypes(IUnitInstance unit)
+	{
+		List<StateType> orderedStateTypes = new List<StateType>();
+		if (unit == null || unit.States == null || unit.States.Count == 0)
+		{
+			return orderedStateTypes;
+		}
+
+		orderedStateTypes.AddRange(unit.States.Keys);
+		orderedStateTypes.Sort((left, right) => CompareStateDisplayOrder(unit, left, right));
+		return orderedStateTypes;
 	}
 
 	public static int ModifyIncomingDamage(IUnitInstance source, IUnitInstance target, int baseDamage)
@@ -396,6 +467,34 @@ public static class StateSystem
 
 		stacks = stateData.Stacks;
 		return stacks > 0;
+	}
+
+	private static int CompareStateDisplayOrder(IUnitInstance unit, StateType left, StateType right)
+	{
+		int leftOrder = GetAppliedOrder(unit, left);
+		int rightOrder = GetAppliedOrder(unit, right);
+		int compare = leftOrder.CompareTo(rightOrder);
+		if (compare != 0)
+		{
+			return compare;
+		}
+
+		return left.CompareTo(right);
+	}
+
+	private static int GetAppliedOrder(IUnitInstance unit, StateType type)
+	{
+		if (unit == null || unit.States == null)
+		{
+			return int.MaxValue;
+		}
+
+		if (!unit.States.TryGetValue(type, out StateRuntimeData stateData) || stateData == null)
+		{
+			return int.MaxValue;
+		}
+
+		return stateData.AppliedOrder;
 	}
 
 	private static void AppendStateTurnStartInfo(IUnitInstance unit, StateType type, int stacks)

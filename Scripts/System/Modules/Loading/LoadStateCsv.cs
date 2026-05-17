@@ -6,7 +6,7 @@ using CardSimulator;
 [GlobalClass]
 public partial class LoadStateCsv : Node
 {
-	private const int ExpectedFieldCount = 5;
+	private const int MinFieldCount = 5;
 
 	public static StateDefinition[] LoadStatesFromCSV(string filePath)
 	{
@@ -41,9 +41,9 @@ public partial class LoadStateCsv : Node
 		try
 		{
 			string[] fields = LoadCsv.ParseCSVFields(line);
-			if (fields.Length < ExpectedFieldCount)
+			if (fields.Length < MinFieldCount)
 			{
-				GD.PrintErr($"Invalid state CSV format. Expected at least {ExpectedFieldCount} fields, got {fields.Length}");
+				GD.PrintErr($"Invalid state CSV format. Expected at least {MinFieldCount} fields, got {fields.Length}");
 				return null;
 			}
 
@@ -78,7 +78,22 @@ public partial class LoadStateCsv : Node
 				return null;
 			}
 
-			return new StateDefinition(stateType, fields[1], isStackable, isPermanent, turnStartDecayAmount);
+			bool isDebuff = false;
+			bool isElite = false;
+
+			if (fields.Length > 5 && !string.IsNullOrWhiteSpace(fields[5]) && !TryParseBoolean(fields[5], out isDebuff))
+			{
+				GD.PrintErr($"Invalid IsDebuff value: {fields[5]}");
+				return null;
+			}
+
+			if (fields.Length > 6 && !string.IsNullOrWhiteSpace(fields[6]) && !TryParseBoolean(fields[6], out isElite))
+			{
+				GD.PrintErr($"Invalid IsElite value: {fields[6]}");
+				return null;
+			}
+
+			return new StateDefinition(stateType, fields[1], isStackable, isPermanent, turnStartDecayAmount, isDebuff, isElite);
 		}
 		catch (Exception ex)
 		{

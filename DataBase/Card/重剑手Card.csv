@@ -1,5 +1,6 @@
 CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
 11002001,盾牌冲撞,Attack,1,ShieldSlam,造成攻击力+护盾值的伤害,2,Retain
+11002002,奋力一击,Attack,2,ClearFirstNormalDebuff|Damage,攻击前解除自身的一个普通弱化状态，额外造成4点伤害,1;1|2;4,
 21002002,未雨绸缪,Skill,2,Shield|AddCost,防御2次，下回合获得2点能量,1;2|1;2
 31002001,反攻号角,State,1,AddState,2回合，反击,1;4;2
 31002002,旋风斩,State,1,AddState,你回合外的攻击会作用于所有敌人,1;5;1

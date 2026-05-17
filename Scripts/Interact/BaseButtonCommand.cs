@@ -166,6 +166,37 @@ public abstract partial class BaseButtonCommand : Button
 		return "当前可用玩家UniqueInGameId：" + string.Join(", ", parts);
 	}
 
+	protected string BuildUnitHint(BattleSytem battleSytem)
+	{
+		if (battleSytem == null)
+		{
+			return "当前没有可用单位UniqueInGameId。";
+		}
+
+		List<string> parts = new List<string>();
+		foreach (CharacterInstance player in battleSytem.GetAlivePlayers())
+		{
+			parts.Add($"{player.UniqueInGameId}({player.Name})");
+		}
+
+		if (battleSytem.Monsters != null)
+		{
+			foreach (MonsterInstance monster in battleSytem.Monsters.Values)
+			{
+				if (monster == null || monster.HP <= 0)
+				{
+					continue;
+				}
+
+				parts.Add($"{monster.UniqueInGameId}({monster.Name})");
+			}
+		}
+
+		return parts.Count == 0
+			? "当前没有可用单位UniqueInGameId。"
+			: "当前可用单位UniqueInGameId：" + string.Join(", ", parts);
+	}
+
 	/// <summary>
 	/// 在控制台输出错误信息
 	/// </summary>
