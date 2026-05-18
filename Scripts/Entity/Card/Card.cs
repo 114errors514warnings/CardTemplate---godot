@@ -178,6 +178,9 @@ public partial class Card : Resource
 				case EffectType.ClearAllStates:
 					result = ApplyClearAllStatesEffect(source, resolvedTargets);
 					break;
+				case EffectType.ClearFirstNormalDebuff:
+					result = ApplyClearFirstNormalDebuffEffect(source, resolvedTargets, effectArgs);
+					break;
 				case EffectType.ShieldSlam:
 					result = ApplyShieldSlamEffect(source, resolvedTargets, effectArgs);
 					break;
@@ -407,6 +410,26 @@ public partial class Card : Resource
 			}
 
 			AppendConsoleInfo($"{GetUnitLabel(resolvedTarget)} 移除所有状态");
+		}
+
+		return new CardApplyResult(true, this, source, lastTarget);
+	}
+
+	private CardApplyResult ApplyClearFirstNormalDebuffEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		IUnitInstance lastTarget = null;
+		int removeCount = (effectArgs != null && effectArgs.Length > 0 && effectArgs[0] > 0) ? effectArgs[0] : 1;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			if (StateSystem.TryRemoveFirstNormalDebuffs(resolvedTarget, removeCount, out List<StateType> removedStateTypes))
+			{
+				AppendConsoleInfo($"{GetUnitLabel(resolvedTarget)} 移除前 {removedStateTypes.Count} 个普通弱化状态：{string.Join(", ", removedStateTypes)}");
+			}
+			else
+			{
+				AppendConsoleInfo($"{GetUnitLabel(resolvedTarget)} 没有可移除的普通弱化状态");
+			}
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget);

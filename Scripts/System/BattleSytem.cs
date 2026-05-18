@@ -509,6 +509,24 @@ public partial class BattleSytem : Node
         return Players != null && Players.TryGetValue(uniqueInGameId, out player) && player != null;
     }
 
+    public bool TryGetUnitByUniqueId(int uniqueInGameId, out IUnitInstance unit)
+    {
+        unit = null;
+        if (TryGetPlayerByUniqueId(uniqueInGameId, out CharacterInstance player))
+        {
+            unit = player;
+            return true;
+        }
+
+        if (Monsters != null && Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster) && monster != null)
+        {
+            unit = monster;
+            return true;
+        }
+
+        return false;
+    }
+
     private void InitializePlayers(List<int> characterIds)
     {
         var characters = LoadingSystem.CharacterDictionary;
@@ -1182,6 +1200,53 @@ public partial class BattleSytem : Node
             },
             player => $"玩家 {player.Name} 增加能量（跳过状态修正）：{oldEnergy}->{player.costs}（+{addEnergy}）。",
             out resultMessage);
+    }
+
+    public bool TryAddStateToUnit(int targetUniqueInGameId, int rawStateType, int stacks, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (stacks <= 0)
+        {
+            resultMessage = $"层数={stacks} 非法，需大于0。";
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(StateType), rawStateType))
+        {
+            resultMessage = $"状态ID={rawStateType} 非法，未定义对应 StateType。";
+            return false;
+        }
+
+        StateType stateType = (StateType)rawStateType;
+        if (stateType == StateType.None)
+        {
+            resultMessage = "状态ID=0 对应 None，不能添加。";
+            return false;
+        }
+
+        EnsureUnitCachesLoaded();
+        if (!LoadingSystem.StateDictionary.ContainsKey(stateType))
+        {
+            resultMessage = $"状态ID={rawStateType} 未在状态配置中找到。";
+            return false;
+        }
+
+        if (!TryGetUnitByUniqueId(targetUniqueInGameId, out IUnitInstance targetUnit))
+        {
+            resultMessage = $"未找到目标UniqueInGameId={targetUniqueInGameId} 对应的单位。";
+            return false;
+        }
+
+        StateSystem.AddOrUpdateState(targetUnit, stateType, stacks);
+        RefreshBattleInfoDisplay();
+
+        string targetLabel = BuildUnitLabel(targetUnit);
+        string stateName = LoadingSystem.StateDictionary.TryGetValue(stateType, out StateDefinition definition) && !string.IsNullOrWhiteSpace(definition.Name)
+            ? definition.Name
+            : stateType.ToString();
+        resultMessage = $"已为 {targetLabel} 添加状态 {stateName}（StateId={(int)stateType}）x{stacks}。";
+        return true;
     }
 
     private void ExecuteMonsterIntention(MonsterInstance monster) => MonsterIntentionService.ExecuteMonsterIntention(monster);

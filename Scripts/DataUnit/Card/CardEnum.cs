@@ -28,6 +28,7 @@ namespace CardSimulator
 		DrawCard,      // 抽卡
 		AddCost,       // 增加能量
 		ClearAllStates,// 清除所有状态
+		ClearFirstNormalDebuff, // 清除状态栏中的第一个普通弱化状态
 		ShieldSlam,    // 护盾冲撞：额外造成等同自身护盾值的伤害
 	}
 
@@ -42,6 +43,7 @@ namespace CardSimulator
 		WhirlwindSlash = 5, // 旋风斩：回合外的攻击作用于所有敌人
 		AddAttack = 6, // 增加攻击力
 		ExtraEnergy = 7, // 下回合额外获得能量
+		Void = 8, // 虚无
 	}
 
 	// 每个效果独立的目标选择方式

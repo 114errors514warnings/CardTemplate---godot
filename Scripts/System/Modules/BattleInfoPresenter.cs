@@ -254,8 +254,7 @@ internal sealed class BattleInfoPresenter
 
         battle.EnsureUnitCachesLoaded();
 
-        List<StateType> stateTypes = new List<StateType>(unit.States.Keys);
-        stateTypes.Sort();
+        List<StateType> stateTypes = StateSystem.GetOrderedStateTypes(unit);
 
         List<string> stateParts = new List<string>();
         for (int index = 0; index < stateTypes.Count; index++)

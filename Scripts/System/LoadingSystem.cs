@@ -98,10 +98,20 @@ public partial class LoadingSystem : Node
 	public void OnInit()
 	{
 		EnsureFilePathRegistryLoaded();
-		LoadAllCardsFromFolder("res://DataBase/Card/");
+		EnsureAllCardsLoaded();
 		Dictionary<StateType, StateDefinition> states = LoadStatesByKey(StateCsvPathKey, true);
 
 		// 移除打印，由调用者处理
+	}
+
+	private static void EnsureAllCardsLoaded()
+	{
+		if (cardCache.Count > 0)
+		{
+			return;
+		}
+
+		LoadAllCardsFromFolder("res://DataBase/Card/");
 	}
 
 	private static void EnsureFilePathRegistryLoaded()
@@ -177,6 +187,12 @@ public partial class LoadingSystem : Node
 
 	public static Dictionary<int, Card> LoadCardsByKey(string pathKey = CardCsvPathKey, bool useCache = true)
 	{
+		if (string.Equals(pathKey, CardCsvPathKey, StringComparison.OrdinalIgnoreCase))
+		{
+			EnsureAllCardsLoaded();
+			return cardCache;
+		}
+
 		return LoadCards(GetFilePathByKey(pathKey), useCache);
 	}
 
@@ -210,6 +226,13 @@ public partial class LoadingSystem : Node
 	/// </summary>
 	public static void LoadAllCardsFromFolder(string folderPath)
 	{
+		if (string.IsNullOrWhiteSpace(folderPath))
+		{
+			GD.PrintErr("卡牌文件夹路径为空，无法加载卡牌。");
+			return;
+		}
+
+		cardCache.Clear();
 		List<string> csvPaths = new List<string>();
 		CollectCsvFiles(folderPath, csvPaths);
 		foreach (string path in csvPaths)
