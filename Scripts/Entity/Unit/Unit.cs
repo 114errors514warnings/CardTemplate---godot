@@ -45,6 +45,7 @@ public interface IUnitInstance
 	Dictionary<StateType, StateRuntimeData> States { get; }
 	List<Card> StatePile { get; }
 	List<Card> DiscardPile { get; }
+	List<Card> ExhaustPile { get; }
 	int Shield { get; set; }
 	int Energy { get; set; }
 	int Attack { get; set; }

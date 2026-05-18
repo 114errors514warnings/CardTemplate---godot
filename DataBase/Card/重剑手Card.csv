@@ -1,6 +1,9 @@
 CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
 11002001,盾牌冲撞,Attack,1,ShieldSlam,造成攻击力+护盾值的伤害,2,Retain
 11002002,奋力一击,Attack,2,ClearFirstNormalDebuff|Damage,攻击前解除自身的一个普通弱化状态，额外造成4点伤害,1;1|2;4,
+11002003,绝力一击,Attack,3,Damage,额外造成10点伤害，可无限升级,2;10,Retain|InfiniteUpgrade
+11002004,淬炼,Attack,2,Damage|UpgradePermanentCard,攻击，造成6点额外伤害，如果击杀目标，随机永久升级卡组中的一张牌，消耗,2;6|3;1;1,Exhaust
 21002002,未雨绸缪,Skill,2,Shield|AddCost,防御2次，下回合获得2点能量,1;2|1;2
+21002003,暂避锋芒,Skill,1,Shield|UpgradeBattleCard,防御，在本局游戏内升级一张手牌,1|1;1,
 31002001,反攻号角,State,1,AddState,2回合，反击,1;4;2
 31002002,旋风斩,State,1,AddState,你回合外的攻击会作用于所有敌人,1;5;1

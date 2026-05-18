@@ -22,6 +22,43 @@ public partial class BattleSytem : Node
         }
     }
 
+    private sealed class CardOperationRequest
+    {
+        public EffectType EffectType { get; }
+        public CardOperationTargetType TargetType { get; }
+        public int Count { get; }
+        public bool RequireKilledTarget { get; }
+
+        public CardOperationRequest(EffectType effectType, CardOperationTargetType targetType, int count, bool requireKilledTarget)
+        {
+            EffectType = effectType;
+            TargetType = targetType;
+            Count = count;
+            RequireKilledTarget = requireKilledTarget;
+        }
+    }
+
+    private sealed class PendingCardSelectionContext
+    {
+        public CharacterInstance SourcePlayer { get; }
+        public Card SourceCard { get; }
+        public List<CardOperationRequest> Requests { get; }
+        public int RequestIndex { get; set; }
+        public List<Card> SelectedCards { get; } = new List<Card>();
+
+        public PendingCardSelectionContext(CharacterInstance sourcePlayer, Card sourceCard, List<CardOperationRequest> requests)
+        {
+            SourcePlayer = sourcePlayer;
+            SourceCard = sourceCard;
+            Requests = requests ?? new List<CardOperationRequest>();
+            RequestIndex = 0;
+        }
+
+        public CardOperationRequest CurrentRequest => RequestIndex >= 0 && RequestIndex < Requests.Count ? Requests[RequestIndex] : null;
+
+        public int RemainingSelectionCount => CurrentRequest == null ? 0 : Math.Max(0, CurrentRequest.Count - SelectedCards.Count);
+    }
+
     public static BattleSytem Current { get; private set; }
 
     internal static readonly Random RandomGenerator = new Random();
@@ -30,7 +67,8 @@ public partial class BattleSytem : Node
     {
         Runtime,
         DrawPile,
-        DiscardPile
+        DiscardPile,
+        ExhaustPile
     }
 
     internal enum PileDisplayOrderMode
@@ -47,6 +85,8 @@ public partial class BattleSytem : Node
     private const string DrawPileTabButtonPathInRoot = "UI_Main/局内信息/tab栏/抽牌堆详细";
     private const string DiscardPileTabButtonPath = "局内信息/tab栏/弃牌堆详细";
     private const string DiscardPileTabButtonPathInRoot = "UI_Main/局内信息/tab栏/弃牌堆详细";
+    private const string ExhaustPileTabButtonPath = "局内信息/tab栏/消耗牌详细";
+    private const string ExhaustPileTabButtonPathInRoot = "UI_Main/局内信息/tab栏/消耗牌详细";
 
     [Export]
     public BattleSetupData SetupData;
@@ -69,6 +109,7 @@ public partial class BattleSytem : Node
     private int OrderedCombatLogDepth = 0;
     private readonly Queue<string> DeferredCombatInfoMessages = new Queue<string>();
     private readonly Queue<System.Action> DeferredDeathActions = new Queue<System.Action>();
+    private PendingCardSelectionContext pendingCardSelectionContext;
     private BattleInfoPresenter battleInfoPresenter;
     private BattleInfoUiBinder battleInfoUiBinder;
     private MonsterIntentionService monsterIntentionService;
@@ -107,6 +148,8 @@ public partial class BattleSytem : Node
 
     // 本局战斗中各单位的初始生命值快照，Key 为 UniqueInGameId
     private readonly Dictionary<int, int> BattleInitialHpSnapshots = new Dictionary<int, int>();
+    private readonly Dictionary<int, int> BattleHpLossEventCounts = new Dictionary<int, int>();
+    private readonly Dictionary<int, int> BattleCardsPlayedThisTurnCounts = new Dictionary<int, int>();
 
     // Called when the node enters the scene tree for the first time.
     public override void _Ready()
@@ -207,6 +250,213 @@ public partial class BattleSytem : Node
         return Math.Max(0, initialHp - unit.HP);
     }
 
+    public int GetBattleHpLossEventCount(IUnitInstance unit)
+    {
+        if (unit == null)
+        {
+            return 0;
+        }
+
+        return BattleHpLossEventCounts.TryGetValue(unit.UniqueInGameId, out int count) ? count : 0;
+    }
+
+    public void RecordHpLossEvent(IUnitInstance target, int hpLoss)
+    {
+        if (target is not CharacterInstance character || hpLoss <= 0)
+        {
+            return;
+        }
+
+        int uniqueInGameId = character.UniqueInGameId;
+        BattleHpLossEventCounts[uniqueInGameId] = BattleHpLossEventCounts.TryGetValue(uniqueInGameId, out int currentCount)
+            ? currentCount + 1
+            : 1;
+    }
+
+    public void OnUnitHpChanged(IUnitInstance unit, int oldHp, int newHp)
+    {
+        if (!IsBattleStarted || unit == null)
+        {
+            return;
+        }
+
+        if (newHp < oldHp)
+        {
+            RecordHpLossEvent(unit, oldHp - newHp);
+        }
+    }
+
+    public int GetBattleCardsPlayedThisTurnCount(CharacterInstance player)
+    {
+        if (player == null)
+        {
+            return 0;
+        }
+
+        return BattleCardsPlayedThisTurnCounts.TryGetValue(player.UniqueInGameId, out int count) ? count : 0;
+    }
+
+    private static bool IsBattleCard(Card card)
+    {
+        return card != null && card.Category != CardCategory.State;
+    }
+
+    private void RecordCardPlayedThisTurn(CharacterInstance player, Card card)
+    {
+        if (player == null || !IsBattleCard(card))
+        {
+            return;
+        }
+
+        int uniqueInGameId = player.UniqueInGameId;
+        BattleCardsPlayedThisTurnCounts[uniqueInGameId] = BattleCardsPlayedThisTurnCounts.TryGetValue(uniqueInGameId, out int currentCount)
+            ? currentCount + 1
+            : 1;
+    }
+
+    private void ResetBattleCardsPlayedThisTurnCounts(IEnumerable<CharacterInstance> players)
+    {
+        if (players == null)
+        {
+            BattleCardsPlayedThisTurnCounts.Clear();
+            return;
+        }
+
+        foreach (CharacterInstance player in players)
+        {
+            if (player != null)
+            {
+                BattleCardsPlayedThisTurnCounts[player.UniqueInGameId] = 0;
+            }
+        }
+    }
+
+    private bool TryValidateCardPlayConditions(CharacterInstance sourcePlayer, Card card, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+
+        if (card == null)
+        {
+            return true;
+        }
+
+        if (card.ConditionParams == null || card.ConditionParams.Length == 0)
+        {
+            return true;
+        }
+
+        for (int index = 0; index < card.ConditionParams.Length; index++)
+        {
+	        CardConditionType conditionType = card.ConditionParams[index];
+            switch (conditionType)
+            {
+                case CardConditionType.NoBattleCardPlayedThisTurn:
+                    if (GetBattleCardsPlayedThisTurnCount(sourcePlayer) > 0)
+                    {
+                        errorMessage = $"错误：卡牌 {BuildCardLabel(card)} 需要满足“本回合内该角色未打出过战斗牌”才能打出。";
+                        return false;
+                    }
+                    break;
+                case CardConditionType.None:
+                    break;
+                default:
+	                errorMessage = $"错误：卡牌ID {card.CardId} 配置了未支持的条件枚举值 {conditionType}。";
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    public bool HasPendingCardSelection => pendingCardSelectionContext != null;
+
+    public string GetPendingCardSelectionPrompt()
+    {
+        if (pendingCardSelectionContext == null)
+        {
+            return string.Empty;
+        }
+
+        CardOperationRequest currentRequest = pendingCardSelectionContext.CurrentRequest;
+        if (currentRequest == null)
+        {
+            return string.Empty;
+        }
+
+        string pileName = GetCardOperationPileDisplayName(currentRequest.TargetType);
+        return $"当前流程暂停：{pendingCardSelectionContext.SourcePlayer.Name} 正在选择{pileName}中的卡牌，还需选择 {pendingCardSelectionContext.RemainingSelectionCount} 张。来源卡牌={BuildCardLabel(pendingCardSelectionContext.SourceCard)}，效果={currentRequest.EffectType}。";
+    }
+
+    public bool TrySelectPendingHandCard(int handIndex, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (pendingCardSelectionContext == null)
+        {
+            resultMessage = "错误：当前没有待完成的选牌流程。";
+            return false;
+        }
+
+        CardOperationRequest currentRequest = pendingCardSelectionContext.CurrentRequest;
+        if (currentRequest == null)
+        {
+            pendingCardSelectionContext = null;
+            resultMessage = "错误：待选牌流程已失效。";
+            return false;
+        }
+
+        CharacterInstance player = pendingCardSelectionContext.SourcePlayer;
+        if (player == null)
+        {
+            pendingCardSelectionContext = null;
+            resultMessage = "错误：待选牌流程对应的玩家不存在。";
+            return false;
+        }
+
+        if (currentRequest.TargetType != CardOperationTargetType.SelectHandCards)
+        {
+            resultMessage = $"错误：当前待选流程不是手牌选择类型：{currentRequest.TargetType}。";
+            return false;
+        }
+
+        if (handIndex < 0 || handIndex >= player.handcards.Count)
+        {
+            resultMessage = $"错误：手牌顺序 {handIndex + 1} 超出范围，当前手牌数量为 {player.handcards.Count}。";
+            return false;
+        }
+
+        Card selectedCard = player.handcards[handIndex];
+        if (selectedCard == null)
+        {
+            resultMessage = $"错误：手牌顺序 {handIndex + 1} 对应卡牌为空。";
+            return false;
+        }
+
+        if (pendingCardSelectionContext.SelectedCards.Any(card => string.Equals(card?.UniqueInGameId, selectedCard.UniqueInGameId, StringComparison.Ordinal)))
+        {
+            resultMessage = $"错误：卡牌 {BuildCardLabel(selectedCard)} 已被选择，本次效果不能重复选择同一张手牌。";
+            return false;
+        }
+
+        pendingCardSelectionContext.SelectedCards.Add(selectedCard);
+        AppendPanelConsoleInfo($"选牌流程：已选择手牌 {handIndex + 1}，对应卡牌 {BuildCardLabel(selectedCard)}。还需选择 {pendingCardSelectionContext.RemainingSelectionCount} 张。");
+
+        if (pendingCardSelectionContext.RemainingSelectionCount > 0)
+        {
+            resultMessage = GetPendingCardSelectionPrompt();
+            RefreshBattleInfoDisplay();
+            return true;
+        }
+
+        if (!TryAdvancePendingCardOperations(out resultMessage))
+        {
+            return false;
+        }
+
+        RefreshBattleInfoDisplay();
+        CheckBattleEndAndHandle();
+        return true;
+    }
+
     public bool StartGameFromSetupData()
     {
         if (IsBattleStarted)
@@ -273,6 +523,7 @@ public partial class BattleSytem : Node
     public void OnInit(List<int> characterIds, List<int> monsterIds)
     {
         EnsureUnitCachesLoaded();
+        pendingCardSelectionContext = null;
         InitializePlayers(characterIds);
         InitializeMonsters(monsterIds);
         SnapshotBattleInitialHp();
@@ -306,6 +557,8 @@ public partial class BattleSytem : Node
     private void SnapshotBattleInitialHp()
     {
         BattleInitialHpSnapshots.Clear();
+        BattleHpLossEventCounts.Clear();
+        BattleCardsPlayedThisTurnCounts.Clear();
 
         if (Players != null)
         {
@@ -393,7 +646,7 @@ public partial class BattleSytem : Node
         }
 
         battleInfoLabel.Text = BattleInfoPresenter.BuildCurrentBattleInfoDisplayText(CurrentBattleInfoTab, CurrentPileDisplayOrderMode, CachedRuntimeBattleInfo);
-        BattleInfoUiBinder.UpdateTabVisualState(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot, CurrentBattleInfoTab);
+        BattleInfoUiBinder.UpdateTabVisualState(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot, ExhaustPileTabButtonPath, ExhaustPileTabButtonPathInRoot, CurrentBattleInfoTab);
     }
 
     private void BindBattleInfoTabButtons()
@@ -412,9 +665,12 @@ public partial class BattleSytem : Node
             DrawPileTabButtonPathInRoot,
             DiscardPileTabButtonPath,
             DiscardPileTabButtonPathInRoot,
+            ExhaustPileTabButtonPath,
+            ExhaustPileTabButtonPathInRoot,
             OnRuntimeBattleInfoTabPressed,
             OnDrawPileBattleInfoTabPressed,
             OnDiscardPileBattleInfoTabPressed,
+            OnExhaustPileBattleInfoTabPressed,
             CurrentBattleInfoTab);
     }
 
@@ -433,6 +689,11 @@ public partial class BattleSytem : Node
         SwitchBattleInfoTab(BattleInfoTab.DiscardPile);
     }
 
+    private void OnExhaustPileBattleInfoTabPressed()
+    {
+        SwitchBattleInfoTab(BattleInfoTab.ExhaustPile);
+    }
+
     private void SwitchBattleInfoTab(BattleInfoTab tab)
     {
         CurrentBattleInfoTab = tab;
@@ -449,7 +710,7 @@ public partial class BattleSytem : Node
             battleInfoLabel.Text = BattleInfoPresenter.BuildCurrentBattleInfoDisplayText(CurrentBattleInfoTab, CurrentPileDisplayOrderMode, CachedRuntimeBattleInfo);
         }
 
-        BattleInfoUiBinder.UpdateTabVisualState(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot, CurrentBattleInfoTab);
+        BattleInfoUiBinder.UpdateTabVisualState(scene, RuntimeTabButtonPath, RuntimeTabButtonPathInRoot, DrawPileTabButtonPath, DrawPileTabButtonPathInRoot, DiscardPileTabButtonPath, DiscardPileTabButtonPathInRoot, ExhaustPileTabButtonPath, ExhaustPileTabButtonPathInRoot, CurrentBattleInfoTab);
     }
 
     public bool TogglePileDisplayOrderMode()
@@ -458,7 +719,7 @@ public partial class BattleSytem : Node
             ? PileDisplayOrderMode.IdOrder
             : PileDisplayOrderMode.PileOrder;
 
-        if (CurrentBattleInfoTab == BattleInfoTab.DrawPile || CurrentBattleInfoTab == BattleInfoTab.DiscardPile)
+        if (CurrentBattleInfoTab == BattleInfoTab.DrawPile || CurrentBattleInfoTab == BattleInfoTab.DiscardPile || CurrentBattleInfoTab == BattleInfoTab.ExhaustPile)
         {
             SwitchBattleInfoTab(CurrentBattleInfoTab);
         }
@@ -530,6 +791,40 @@ public partial class BattleSytem : Node
     private void InitializePlayers(List<int> characterIds)
     {
         var characters = LoadingSystem.CharacterDictionary;
+
+        List<CharacterInstance> existingPlayers = GetOrderedPlayers();
+        bool canReuseExistingPlayers = existingPlayers.Count == characterIds.Count;
+        if (canReuseExistingPlayers)
+        {
+            for (int index = 0; index < characterIds.Count; index++)
+            {
+                if (existingPlayers[index].id != characterIds[index])
+                {
+                    canReuseExistingPlayers = false;
+                    break;
+                }
+            }
+        }
+
+        if (canReuseExistingPlayers)
+        {
+            Players = existingPlayers.ToDictionary(player => player.UniqueInGameId, player => player);
+            foreach (CharacterInstance player in existingPlayers)
+            {
+                if (!characters.TryGetValue(player.id, out Character template))
+                {
+                    AppendPanelConsoleError($"错误：角色ID {player.id} 未在缓存中找到，无法复用角色实例。");
+                    continue;
+                }
+
+                ResetPlayerForNewBattle(player, template);
+                BindPlayerCallbacks(player);
+                EnsurePlayerDefaultDeckInitialized(player);
+                AppendPanelConsoleInfo($"已复用角色 {player.Name}（ID: {player.id}, UniqueInGameId: {player.UniqueInGameId}），保留默认卡组实例 {player.DefaultDeck.Count} 张。" );
+            }
+            return;
+        }
+
         Players = new Dictionary<int, CharacterInstance>();
 
         foreach (int characterId in characterIds)
@@ -541,23 +836,99 @@ public partial class BattleSytem : Node
             }
 
             CharacterInstance player = new CharacterInstance(character);
-            player.OnStateEnded = CreateStateEndedCallback(player);
-            player.OnDead = () =>
-            {
-                AppendPanelConsoleInfo($"玩家死亡：{player.Name}（UniqueInGameId: {player.UniqueInGameId}）。");
-                if (GetAlivePlayers().Count == 0)
-                {
-                    AppendPanelConsoleInfo("战斗结束：所有玩家已死亡。游戏结束。");
-                    EndGame();
-                }
-                else
-                {
-                    RefreshBattleInfoDisplay();
-                }
-            };
+            BindPlayerCallbacks(player);
+            EnsurePlayerDefaultDeckInitialized(player);
             Players[player.UniqueInGameId] = player;
             AppendPanelConsoleInfo($"已创建角色 {player.Name}（ID: {characterId}, UniqueInGameId: {player.UniqueInGameId}）。");
         }
+    }
+
+    private void BindPlayerCallbacks(CharacterInstance player)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        player.OnStateEnded = CreateStateEndedCallback(player);
+        player.OnDead = () =>
+        {
+            AppendPanelConsoleInfo($"玩家死亡：{player.Name}（UniqueInGameId: {player.UniqueInGameId}）。");
+            if (GetAlivePlayers().Count == 0)
+            {
+                AppendPanelConsoleInfo("战斗结束：所有玩家已死亡。游戏结束。");
+                EndGame();
+            }
+            else
+            {
+                RefreshBattleInfoDisplay();
+            }
+        };
+    }
+
+    private void ResetPlayerForNewBattle(CharacterInstance player, Character template)
+    {
+        if (player == null || template == null)
+        {
+            return;
+        }
+
+        player.id = template.id;
+        player.Name = template.Name;
+        player.MAX_HP = template.MAX_HP;
+        player.Max_HP = template.MAX_HP;
+        player.HP = template.MAX_HP;
+        player.Attack = template.Ini_Attack;
+        player.Defend = template.Ini_Defend;
+        player.drawCardNum = template.drawCardNum;
+        player.Shield = 0;
+        player.Max_costs = 3;
+        player.costs = 0;
+        player.posx = 0;
+        player.posy = 0;
+        player.cards?.Clear();
+        player.handcards?.Clear();
+        player.drawpile?.Clear();
+        player.discardpile?.Clear();
+        player.ExhaustPile?.Clear();
+        player.StatePile?.Clear();
+        player.States?.Clear();
+    }
+
+    private void EnsurePlayerDefaultDeckInitialized(CharacterInstance player)
+    {
+        if (player == null || player.DefaultDeck.Count > 0)
+        {
+            return;
+        }
+
+        List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdListByKey(player.id, LoadingSystem.CharacterDefaultDeckCsvPathKey, true);
+        List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
+
+        foreach (int cardId in defaultCardIds)
+        {
+            if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+            {
+                AppendPanelConsoleError($"错误：角色 {player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。" );
+                continue;
+            }
+
+            player.DefaultDeck.Add(template.CreateDeckInstance());
+        }
+
+        foreach (int cardId in configuredCardIds)
+        {
+            if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+            {
+                AppendPanelConsoleError($"错误：新增配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。" );
+                continue;
+            }
+
+            player.DefaultDeck.Add(template.CreateDeckInstance());
+        }
+
+        player.cards?.Clear();
+        player.cards?.AddRange(player.DefaultDeck);
     }
 
     /// <summary>
@@ -722,6 +1093,117 @@ public partial class BattleSytem : Node
         RefreshBattleInfoDisplay();
     }
 
+    public EffectResult ApplyExhaustCards(IUnitInstance source, params string[] cardUniqueInGameIds)
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        if (cardUniqueInGameIds == null || cardUniqueInGameIds.Length == 0)
+        {
+            return new EffectResult("ExhaustCards", source, null, summaryOverride: $"来源={BuildUnitLabel(source)}，消耗卡牌=0（未提供卡牌实例UniqueInGameId）。");
+        }
+
+        if (source is not CharacterInstance player)
+        {
+            return new EffectResult("ExhaustCards", source, null, summaryOverride: $"来源={BuildUnitLabel(source)}，当前仅支持玩家单位执行消耗卡牌效果。", totalValue: 0);
+        }
+
+        List<string> movedCardParts = new List<string>();
+        List<string> missingIds = new List<string>();
+
+        for (int index = 0; index < cardUniqueInGameIds.Length; index++)
+        {
+            string cardUniqueInGameId = cardUniqueInGameIds[index];
+            if (string.IsNullOrWhiteSpace(cardUniqueInGameId))
+            {
+                continue;
+            }
+
+            if (!TryRemoveCardFromSupportedPiles(player, cardUniqueInGameId, out Card card, out string fromPileName))
+            {
+                missingIds.Add(cardUniqueInGameId);
+                AppendPanelConsoleError($"消耗效果：未在 {player.Name} 的手牌/抽牌堆/弃牌堆中找到 UniqueInGameId={cardUniqueInGameId} 的卡牌，已跳过。");
+                continue;
+            }
+
+            player.ExhaustPile.Add(card);
+            movedCardParts.Add($"{BuildCardLabel(card)}（来自{fromPileName}）");
+            AppendPanelConsoleInfo($"消耗效果：{BuildCardLabel(card)} 已从 {player.Name} 的{fromPileName}移入消耗牌堆。当前消耗牌堆 {player.ExhaustPile.Count} 张。");
+        }
+
+        if (movedCardParts.Count > 0)
+        {
+            RefreshBattleInfoDisplay();
+        }
+
+        string summary = movedCardParts.Count > 0
+            ? $"来源={BuildUnitLabel(source)}，已消耗 {movedCardParts.Count} 张卡牌：{string.Join("、", movedCardParts)}"
+            : $"来源={BuildUnitLabel(source)}，未消耗任何卡牌。";
+
+        if (missingIds.Count > 0)
+        {
+            summary += $"；未找到：{string.Join("、", missingIds)}";
+        }
+
+        return new EffectResult("ExhaustCards", source, null, summaryOverride: summary, totalValue: movedCardParts.Count);
+    }
+
+    private bool TryRemoveCardFromSupportedPiles(CharacterInstance player, string uniqueInGameId, out Card card, out string fromPileName)
+    {
+        card = null;
+        fromPileName = string.Empty;
+        if (player == null || string.IsNullOrWhiteSpace(uniqueInGameId))
+        {
+            return false;
+        }
+
+        if (TryRemoveCardFromPile(player.handcards, uniqueInGameId, out card))
+        {
+            fromPileName = "手牌";
+            return true;
+        }
+
+        if (TryRemoveCardFromPile(player.drawpile, uniqueInGameId, out card))
+        {
+            fromPileName = "抽牌堆";
+            return true;
+        }
+
+        if (TryRemoveCardFromPile(player.discardpile, uniqueInGameId, out card))
+        {
+            fromPileName = "弃牌堆";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryRemoveCardFromPile(List<Card> pile, string uniqueInGameId, out Card card)
+    {
+        card = null;
+        if (pile == null || string.IsNullOrWhiteSpace(uniqueInGameId))
+        {
+            return false;
+        }
+
+        for (int index = 0; index < pile.Count; index++)
+        {
+            Card current = pile[index];
+            if (current == null || !string.Equals(current.UniqueInGameId, uniqueInGameId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            pile.RemoveAt(index);
+            card = current;
+            return true;
+        }
+
+        return false;
+    }
+
     private bool TryResolvePlayerHandCardByIndex(int playerUniqueInGameId, int handIndex, out CharacterInstance player, out Card card, out string errorMessage)
     {
         card = null;
@@ -808,6 +1290,12 @@ public partial class BattleSytem : Node
 
     public bool PlayHandCard(CharacterInstance sourcePlayer, Card card, IUnitInstance target = null)
     {
+        if (HasPendingCardSelection)
+        {
+            AppendPanelConsoleError("错误：当前有待完成的选牌流程，请先使用“选择卡牌”按钮完成当前卡牌效果。" );
+            return false;
+        }
+
         if (!IsBattleStarted)
         {
             AppendPanelConsoleError("错误：当前不在战斗中，无法出牌。");
@@ -845,6 +1333,24 @@ public partial class BattleSytem : Node
             return false;
         }
 
+        if (!TryValidateCardPlayConditions(sourcePlayer, card, out string cardConditionError))
+        {
+            AppendPanelConsoleError(cardConditionError);
+            return false;
+        }
+
+        if (!TryBuildCardOperationRequests(card, out List<CardOperationRequest> cardOperationRequests, out string cardOperationError))
+        {
+            AppendPanelConsoleError(cardOperationError);
+            return false;
+        }
+
+        if (!ValidateCardOperationRequests(sourcePlayer, cardOperationRequests, out string cardOperationValidationError))
+        {
+            AppendPanelConsoleError(cardOperationValidationError);
+            return false;
+        }
+
         Card.CardApplyResult applyResult = card.Apply(sourcePlayer, target);
         if (!applyResult.Success)
         {
@@ -872,6 +1378,11 @@ public partial class BattleSytem : Node
             RegisterStateCardEndCallbacks(stateCardApplications, card, sourcePlayer);
             AppendPanelConsoleInfo($"玩家 {sourcePlayer.Name} 打出状态牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {sourcePlayer.costs}。卡牌已移入 {BuildUnitLabel(statePileTarget)} 的状态牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张。目标状态牌堆当前 {statePileTarget.StatePile.Count} 张。");
         }
+        else if (card.HasKeyWord(CardKeyWord.Exhaust))
+        {
+            sourcePlayer.ExhaustPile.Add(card);
+            AppendPanelConsoleInfo($"玩家 {sourcePlayer.Name} 打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {sourcePlayer.costs}。卡牌已移入消耗牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张，消耗牌堆当前 {sourcePlayer.ExhaustPile.Count} 张。");
+        }
         else
         {
             sourcePlayer.discardpile.Add(card);
@@ -883,6 +1394,27 @@ public partial class BattleSytem : Node
             AppendPanelConsoleInfo($"卡牌结算：{applyResult.EffectResult.BuildSummary()}");
         }
 
+        RecordCardPlayedThisTurn(sourcePlayer, card);
+        StateSystem.OnCardPlayed(sourcePlayer, card);
+
+        if (!TryExecuteCardOperations(sourcePlayer, card, applyResult, cardOperationRequests, out bool enteredPendingSelection, out string cardOperationMessage))
+        {
+            AppendPanelConsoleError(cardOperationMessage);
+            RefreshBattleInfoDisplay();
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(cardOperationMessage))
+        {
+            AppendPanelConsoleInfo(cardOperationMessage);
+        }
+
+        if (enteredPendingSelection)
+        {
+            RefreshBattleInfoDisplay();
+            return true;
+        }
+
         RefreshBattleInfoDisplay();
         CheckBattleEndAndHandle();
 
@@ -891,6 +1423,12 @@ public partial class BattleSytem : Node
 
     public void EndPlayerTurn()
     {
+        if (HasPendingCardSelection)
+        {
+            AppendPanelConsoleError("错误：当前有待完成的选牌流程，无法结束回合。");
+            return;
+        }
+
         if (!IsBattleStarted)
         {
             AppendPanelConsoleError("错误：当前不在战斗中，无法结束回合。");
@@ -937,6 +1475,7 @@ public partial class BattleSytem : Node
         }
 
         IsPlayerTurn = true;
+        ResetBattleCardsPlayedThisTurnCounts(alivePlayers);
         foreach (CharacterInstance player in alivePlayers)
         {
             StateSystem.OnTurnStart(player);
@@ -1249,6 +1788,72 @@ public partial class BattleSytem : Node
         return true;
     }
 
+    public bool TryRemoveStateFromUnit(int targetUniqueInGameId, int rawStateType, int? stacks, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+
+        if (!Enum.IsDefined(typeof(StateType), rawStateType))
+        {
+            resultMessage = $"状态ID={rawStateType} 非法，未定义对应 StateType。";
+            return false;
+        }
+
+        StateType stateType = (StateType)rawStateType;
+        if (stateType == StateType.None)
+        {
+            resultMessage = "状态ID=0 对应 None，不能删除。";
+            return false;
+        }
+
+        if (stacks.HasValue && stacks.Value <= 0)
+        {
+            resultMessage = $"层数={stacks.Value} 非法，需大于0。";
+            return false;
+        }
+
+        EnsureUnitCachesLoaded();
+        if (!LoadingSystem.StateDictionary.ContainsKey(stateType))
+        {
+            resultMessage = $"状态ID={rawStateType} 未在状态配置中找到。";
+            return false;
+        }
+
+        if (!TryGetUnitByUniqueId(targetUniqueInGameId, out IUnitInstance targetUnit))
+        {
+            resultMessage = $"未找到目标UniqueInGameId={targetUniqueInGameId} 对应的单位。";
+            return false;
+        }
+
+        if (!StateSystem.TryGetStateStacks(targetUnit, stateType, out int currentStacks) || currentStacks <= 0)
+        {
+            resultMessage = $"目标 {BuildUnitLabel(targetUnit)} 当前不存在状态 {(int)stateType}。";
+            return false;
+        }
+
+        int removedStacks;
+        if (!stacks.HasValue)
+        {
+            removedStacks = currentStacks;
+            StateSystem.RemoveState(targetUnit, stateType);
+        }
+        else
+        {
+            removedStacks = StateSystem.RemoveStateStacks(targetUnit, stateType, stacks.Value);
+        }
+
+        RefreshBattleInfoDisplay();
+
+        string targetLabel = BuildUnitLabel(targetUnit);
+        string stateName = LoadingSystem.StateDictionary.TryGetValue(stateType, out StateDefinition definition) && !string.IsNullOrWhiteSpace(definition.Name)
+            ? definition.Name
+            : stateType.ToString();
+        int remainingStacks = StateSystem.TryGetStateStacks(targetUnit, stateType, out int leftStacks) ? leftStacks : 0;
+        resultMessage = remainingStacks > 0
+            ? $"已为 {targetLabel} 删除状态 {stateName}（StateId={(int)stateType}）x{removedStacks}，剩余 {remainingStacks} 层。"
+            : $"已为 {targetLabel} 删除状态 {stateName}（StateId={(int)stateType}）全部 {removedStacks} 层。";
+        return true;
+    }
+
     private void ExecuteMonsterIntention(MonsterInstance monster) => MonsterIntentionService.ExecuteMonsterIntention(monster);
 
     public void BeginOrderedCombatLog()
@@ -1380,45 +1985,408 @@ public partial class BattleSytem : Node
             player.handcards.Clear();
             player.drawpile.Clear();
             player.discardpile.Clear();
+            player.ExhaustPile.Clear();
+            player.StatePile.Clear();
 
-            List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdListByKey(player.id, LoadingSystem.CharacterDefaultDeckCsvPathKey, true);
+            EnsurePlayerDefaultDeckInitialized(player);
             int defaultAddedCount = 0;
-            foreach (int cardId in defaultCardIds)
+            foreach (Card deckCard in player.DefaultDeck)
             {
-                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
+                if (deckCard == null)
                 {
-                    AppendPanelConsoleError($"错误：角色 {player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
                     continue;
                 }
 
-                player.drawpile.Add(template.CreateRuntimeInstance());
+                player.drawpile.Add(deckCard.CreateBattleInstanceFromDeckCard());
                 defaultAddedCount++;
-            }
-
-            List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
-            int configuredAddedCount = 0;
-            for (int index = 0; index < configuredCardIds.Count; index++)
-            {
-                int cardId = configuredCardIds[index];
-                if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
-                {
-                    AppendPanelConsoleError($"错误：新增配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
-                    continue;
-                }
-
-                player.drawpile.Add(template.CreateRuntimeInstance());
-                configuredAddedCount++;
             }
 
             if (player.drawpile.Count > 0)
             {
                 ShuffleCards(player.drawpile);
-                AppendPanelConsoleInfo($"角色 {player.id} 抽牌堆初始化完成：默认卡组 {defaultAddedCount} 张 + 新增卡牌 {configuredAddedCount} 张，共 {player.drawpile.Count} 张（已洗牌）。");
+                AppendPanelConsoleInfo($"角色 {player.id} 抽牌堆初始化完成：默认卡组实例 {defaultAddedCount} 张，共 {player.drawpile.Count} 张（已洗牌）。");
                 continue;
             }
 
-            AppendPanelConsoleInfo($"角色 {player.id} 无默认卡组且未配置新增卡牌，抽牌堆为空。");
+            AppendPanelConsoleInfo($"角色 {player.id} 无默认卡组实例，抽牌堆为空。");
         }
+    }
+
+    private bool TryBuildCardOperationRequests(Card card, out List<CardOperationRequest> requests, out string errorMessage)
+    {
+        requests = new List<CardOperationRequest>();
+        errorMessage = string.Empty;
+        if (card == null || card.EffectTypes == null || card.EffectTypes.Length == 0)
+        {
+            return true;
+        }
+
+        for (int index = 0; index < card.EffectTypes.Length; index++)
+        {
+            EffectType effectType = card.EffectTypes[index];
+            if (effectType != EffectType.UpgradeBattleCard && effectType != EffectType.UpgradePermanentCard)
+            {
+                continue;
+            }
+
+            int[] rawEffectParams = card.Params != null && index < card.Params.Length ? card.Params[index] : Array.Empty<int>();
+            if (rawEffectParams.Length <= 0)
+            {
+                errorMessage = $"卡牌 {BuildCardLabel(card)} 的卡牌操作效果 {effectType} 缺少目标类型参数。";
+                return false;
+            }
+
+            CardOperationTargetType targetType = (CardOperationTargetType)rawEffectParams[0];
+            if (!Enum.IsDefined(typeof(CardOperationTargetType), targetType) || targetType == CardOperationTargetType.None)
+            {
+                errorMessage = $"卡牌 {BuildCardLabel(card)} 的卡牌操作效果 {effectType} 目标类型非法：{rawEffectParams[0]}。";
+                return false;
+            }
+
+            int count = rawEffectParams.Length > 1 ? rawEffectParams[1] : 1;
+            if (count <= 0)
+            {
+                errorMessage = $"卡牌 {BuildCardLabel(card)} 的卡牌操作效果 {effectType} 目标数量必须大于 0。";
+                return false;
+            }
+
+            bool requireKilledTarget = rawEffectParams.Length > 2 && rawEffectParams[2] > 0;
+            requests.Add(new CardOperationRequest(effectType, targetType, count, requireKilledTarget));
+        }
+
+        return true;
+    }
+
+    private bool ValidateCardOperationRequests(CharacterInstance sourcePlayer, List<CardOperationRequest> requests, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (sourcePlayer == null || requests == null || requests.Count == 0)
+        {
+            return true;
+        }
+
+        int availableHandCountAfterPlay = Math.Max(0, sourcePlayer.handcards.Count - 1);
+        foreach (CardOperationRequest request in requests)
+        {
+            if (request.TargetType == CardOperationTargetType.SelectHandCards || request.TargetType == CardOperationTargetType.RandomHandCards)
+            {
+                if (availableHandCountAfterPlay < request.Count)
+                {
+                    errorMessage = $"错误：{sourcePlayer.Name} 当前可供选择的手牌不足。打出当前卡后剩余 {availableHandCountAfterPlay} 张手牌，但效果 {request.EffectType} 需要选择 {request.Count} 张。";
+                    return false;
+                }
+            }
+
+            if (request.TargetType == CardOperationTargetType.RandomDefaultDeckCards && sourcePlayer.DefaultDeck.Count < request.Count)
+            {
+                errorMessage = $"错误：{sourcePlayer.Name} 的默认卡组实例不足 {request.Count} 张，无法执行 {request.EffectType}。";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryExecuteCardOperations(CharacterInstance sourcePlayer, Card sourceCard, Card.CardApplyResult applyResult, List<CardOperationRequest> requests, out bool enteredPendingSelection, out string resultMessage)
+    {
+        enteredPendingSelection = false;
+        resultMessage = string.Empty;
+        if (requests == null || requests.Count == 0)
+        {
+            return true;
+        }
+
+        List<string> messageParts = new List<string>();
+        for (int index = 0; index < requests.Count; index++)
+        {
+            CardOperationRequest request = requests[index];
+            if (request.RequireKilledTarget && !DidApplyResultKillTarget(applyResult))
+            {
+                messageParts.Add($"卡牌操作跳过：来源={BuildCardLabel(sourceCard)}，效果={request.EffectType} 需要先击杀目标，本次未满足条件。");
+                continue;
+            }
+
+            if (request.TargetType == CardOperationTargetType.RandomHandCards)
+            {
+                if (!TryApplyCardOperationToRandomHandCards(sourcePlayer, sourceCard, request, out string randomMessage))
+                {
+                    resultMessage = randomMessage;
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(randomMessage))
+                {
+                    messageParts.Add(randomMessage);
+                }
+                continue;
+            }
+
+            if (request.TargetType == CardOperationTargetType.RandomDefaultDeckCards)
+            {
+                if (!TryApplyCardOperationToRandomDefaultDeckCards(sourcePlayer, sourceCard, request, out string randomDeckMessage))
+                {
+                    resultMessage = randomDeckMessage;
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(randomDeckMessage))
+                {
+                    messageParts.Add(randomDeckMessage);
+                }
+                continue;
+            }
+
+            if (request.TargetType == CardOperationTargetType.SelectHandCards)
+            {
+                pendingCardSelectionContext = new PendingCardSelectionContext(sourcePlayer, sourceCard, requests.Skip(index).ToList());
+                enteredPendingSelection = true;
+                string prompt = GetPendingCardSelectionPrompt();
+                if (!string.IsNullOrWhiteSpace(prompt))
+                {
+                    messageParts.Add(prompt);
+                }
+                resultMessage = string.Join("\n", messageParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+                return true;
+            }
+
+            resultMessage = $"错误：暂不支持的卡牌目标类型：{request.TargetType}。";
+            return false;
+        }
+
+        resultMessage = string.Join("\n", messageParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        return true;
+    }
+
+    private bool TryAdvancePendingCardOperations(out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (pendingCardSelectionContext == null)
+        {
+            return true;
+        }
+
+        List<string> messageParts = new List<string>();
+        while (pendingCardSelectionContext != null)
+        {
+            CardOperationRequest currentRequest = pendingCardSelectionContext.CurrentRequest;
+            if (currentRequest == null)
+            {
+                pendingCardSelectionContext = null;
+                break;
+            }
+
+            if (currentRequest.TargetType == CardOperationTargetType.SelectHandCards)
+            {
+                if (pendingCardSelectionContext.SelectedCards.Count < currentRequest.Count)
+                {
+                    string prompt = GetPendingCardSelectionPrompt();
+                    if (!string.IsNullOrWhiteSpace(prompt))
+                    {
+                        messageParts.Add(prompt);
+                    }
+                    resultMessage = string.Join("\n", messageParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+                    return true;
+                }
+
+                if (!TryApplyCardOperationToCards(pendingCardSelectionContext.SourcePlayer, pendingCardSelectionContext.SourceCard, currentRequest, pendingCardSelectionContext.SelectedCards, out string applyMessage))
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(applyMessage))
+                {
+                    messageParts.Add(applyMessage);
+                }
+
+                pendingCardSelectionContext.RequestIndex++;
+                pendingCardSelectionContext.SelectedCards.Clear();
+                continue;
+            }
+
+            if (currentRequest.TargetType == CardOperationTargetType.RandomHandCards)
+            {
+                if (!TryApplyCardOperationToRandomHandCards(pendingCardSelectionContext.SourcePlayer, pendingCardSelectionContext.SourceCard, currentRequest, out string randomMessage))
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(randomMessage))
+                {
+                    messageParts.Add(randomMessage);
+                }
+
+                pendingCardSelectionContext.RequestIndex++;
+                continue;
+            }
+
+            if (currentRequest.TargetType == CardOperationTargetType.RandomDefaultDeckCards)
+            {
+                if (!TryApplyCardOperationToRandomDefaultDeckCards(pendingCardSelectionContext.SourcePlayer, pendingCardSelectionContext.SourceCard, currentRequest, out string randomDeckMessage))
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(randomDeckMessage))
+                {
+                    messageParts.Add(randomDeckMessage);
+                }
+
+                pendingCardSelectionContext.RequestIndex++;
+                continue;
+            }
+
+            resultMessage = $"错误：暂不支持的卡牌目标类型：{currentRequest.TargetType}。";
+            return false;
+        }
+
+        resultMessage = string.Join("\n", messageParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        return true;
+    }
+
+    private bool TryApplyCardOperationToRandomHandCards(CharacterInstance sourcePlayer, Card sourceCard, CardOperationRequest request, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (sourcePlayer == null)
+        {
+            resultMessage = "错误：随机选牌时来源玩家不存在。";
+            return false;
+        }
+
+        if (sourcePlayer.handcards.Count < request.Count)
+        {
+            resultMessage = $"错误：{sourcePlayer.Name} 的手牌数量不足，无法随机选择 {request.Count} 张。";
+            return false;
+        }
+
+        List<Card> candidates = new List<Card>(sourcePlayer.handcards);
+        ShuffleCards(candidates);
+        List<Card> selectedCards = candidates.Take(request.Count).ToList();
+        return TryApplyCardOperationToCards(sourcePlayer, sourceCard, request, selectedCards, out resultMessage);
+    }
+
+    private bool TryApplyCardOperationToRandomDefaultDeckCards(CharacterInstance sourcePlayer, Card sourceCard, CardOperationRequest request, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (sourcePlayer == null)
+        {
+            resultMessage = "错误：随机默认卡组选牌时来源玩家不存在。";
+            return false;
+        }
+
+        if (sourcePlayer.DefaultDeck.Count < request.Count)
+        {
+            resultMessage = $"错误：{sourcePlayer.Name} 的默认卡组实例数量不足，无法随机选择 {request.Count} 张。";
+            return false;
+        }
+
+        List<Card> candidates = new List<Card>(sourcePlayer.DefaultDeck);
+        ShuffleCards(candidates);
+        List<Card> selectedCards = candidates.Take(request.Count).ToList();
+        return TryApplyCardOperationToCards(sourcePlayer, sourceCard, request, selectedCards, out resultMessage);
+    }
+
+    private bool TryApplyCardOperationToCards(CharacterInstance sourcePlayer, Card sourceCard, CardOperationRequest request, List<Card> targetCards, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (sourcePlayer == null)
+        {
+            resultMessage = "错误：卡牌操作缺少来源玩家。";
+            return false;
+        }
+
+        if (request == null || targetCards == null || targetCards.Count == 0)
+        {
+            return true;
+        }
+
+        List<string> upgradedParts = new List<string>();
+        foreach (Card targetCard in targetCards)
+        {
+            if (targetCard == null)
+            {
+                continue;
+            }
+
+            switch (request.EffectType)
+            {
+                case EffectType.UpgradeBattleCard:
+                    targetCard.BattleUpgradeLevel++;
+                    upgradedParts.Add($"{BuildCardLabel(targetCard)} 战斗内升级至 {targetCard.BattleUpgradeLevel}");
+                    break;
+                case EffectType.UpgradePermanentCard:
+                    if (!TryApplyPermanentUpgrade(sourcePlayer, targetCard, out string permanentUpgradePart))
+                    {
+                        resultMessage = permanentUpgradePart;
+                        return false;
+                    }
+                    upgradedParts.Add(permanentUpgradePart);
+                    break;
+                default:
+                    resultMessage = $"错误：暂不支持的卡牌操作效果：{request.EffectType}。";
+                    return false;
+            }
+        }
+
+        string sourceLabel = sourceCard == null ? "无" : BuildCardLabel(sourceCard);
+        resultMessage = $"卡牌操作结算：来源={sourceLabel}，效果={request.EffectType}，目标={string.Join("、", upgradedParts)}。";
+        return true;
+    }
+
+    private bool TryApplyPermanentUpgrade(CharacterInstance sourcePlayer, Card battleCard, out string resultMessage)
+    {
+        resultMessage = string.Empty;
+        if (sourcePlayer == null || battleCard == null)
+        {
+            resultMessage = "错误：永久升级缺少必要的玩家或卡牌信息。";
+            return false;
+        }
+
+        if (sourcePlayer.DefaultDeck.Any(card => ReferenceEquals(card, battleCard)))
+        {
+            battleCard.PermanentUpgradeLevel++;
+            resultMessage = $"{BuildCardLabel(battleCard)} 永久升级至 {battleCard.PermanentUpgradeLevel}";
+            return true;
+        }
+
+        string sourceDeckCardUniqueInGameId = string.IsNullOrWhiteSpace(battleCard.SourceDeckCardUniqueInGameId)
+            ? battleCard.UniqueInGameId
+            : battleCard.SourceDeckCardUniqueInGameId;
+        Card deckCard = sourcePlayer.DefaultDeck.FirstOrDefault(card => string.Equals(card?.UniqueInGameId, sourceDeckCardUniqueInGameId, StringComparison.Ordinal));
+        if (deckCard == null)
+        {
+            resultMessage = $"错误：未在 {sourcePlayer.Name} 的默认卡组实例中找到来源卡牌 UniqueInGameId={sourceDeckCardUniqueInGameId}，无法执行永久升级。";
+            return false;
+        }
+
+        deckCard.PermanentUpgradeLevel++;
+        battleCard.PermanentUpgradeLevel = deckCard.PermanentUpgradeLevel;
+        resultMessage = $"{BuildCardLabel(battleCard)} 永久升级至 {deckCard.PermanentUpgradeLevel}（默认卡组来源={BuildCardLabel(deckCard)}）";
+        return true;
+    }
+
+    private static string GetCardOperationPileDisplayName(CardOperationTargetType targetType)
+    {
+        return targetType switch
+        {
+            CardOperationTargetType.SelectHandCards => "手牌",
+            CardOperationTargetType.RandomHandCards => "手牌",
+            CardOperationTargetType.RandomDefaultDeckCards => "默认卡组",
+            _ => "未知牌堆"
+        };
+    }
+
+    private static bool DidApplyResultKillTarget(Card.CardApplyResult applyResult)
+    {
+        if (applyResult?.EffectResult == null)
+        {
+            return false;
+        }
+
+        EffectResult effectResult = applyResult.EffectResult;
+        return effectResult.Target != null
+            && effectResult.TargetHpBefore > 0
+            && effectResult.TargetHpAfter <= 0
+            && effectResult.HpDamage > 0;
     }
 
     private System.Action CreateMonsterOnDeadCallback(MonsterInstance instance)
@@ -1461,8 +2429,16 @@ public partial class BattleSytem : Node
                 return;
             }
 
-            context.OwnerUnit.DiscardPile.Add(stateCard);
-            AppendPanelConsoleInfo($"状态结束：{targetLabel} 的状态 {context.StateType} 已结束，对应状态牌 {BuildCardLabel(stateCard)} 已移入 {ownerLabel} 的弃牌堆。原因={context.EndReason}。");
+            if (stateCard.HasKeyWord(CardKeyWord.Exhaust))
+            {
+                context.OwnerUnit.ExhaustPile.Add(stateCard);
+                AppendPanelConsoleInfo($"状态结束：{targetLabel} 的状态 {context.StateType} 已结束，对应状态牌 {BuildCardLabel(stateCard)} 已移入 {ownerLabel} 的消耗牌堆。原因={context.EndReason}。");
+            }
+            else
+            {
+                context.OwnerUnit.DiscardPile.Add(stateCard);
+                AppendPanelConsoleInfo($"状态结束：{targetLabel} 的状态 {context.StateType} 已结束，对应状态牌 {BuildCardLabel(stateCard)} 已移入 {ownerLabel} 的弃牌堆。原因={context.EndReason}。");
+            }
             RefreshBattleInfoDisplay();
         };
     }
@@ -1514,6 +2490,10 @@ public partial class BattleSytem : Node
 
     public void EndBattle()
     {
+        pendingCardSelectionContext = null;
+        BattleInitialHpSnapshots.Clear();
+        BattleHpLossEventCounts.Clear();
+        BattleCardsPlayedThisTurnCounts.Clear();
         int monsterCount = Monsters == null ? 0 : Monsters.Count;
         if (Monsters != null)
         {
@@ -1530,6 +2510,10 @@ public partial class BattleSytem : Node
 
     public void EndGame()
     {
+        pendingCardSelectionContext = null;
+        BattleInitialHpSnapshots.Clear();
+        BattleHpLossEventCounts.Clear();
+        BattleCardsPlayedThisTurnCounts.Clear();
         int monsterCount = Monsters == null ? 0 : Monsters.Count;
         int playerCount = Players == null ? 0 : Players.Count;
 
@@ -1540,6 +2524,7 @@ public partial class BattleSytem : Node
                 player?.handcards?.Clear();
                 player?.drawpile?.Clear();
                 player?.discardpile?.Clear();
+                player?.ExhaustPile?.Clear();
                 player?.StatePile?.Clear();
             }
 

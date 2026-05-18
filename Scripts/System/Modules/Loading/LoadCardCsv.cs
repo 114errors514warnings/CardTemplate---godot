@@ -16,9 +16,10 @@ public partial class LoadCardCsv : Node
 
 	/// <summary>
 	/// 从CSV文件加载所有卡牌
-	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
+	/// CSV格式: CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord,ConditionParams
 	/// EffectType 支持"|"分隔多效果；Params 用"|"分隔每个效果的参数组，用";"分隔同一效果内的参数
 	/// CardKeyWord 支持"|"分隔多个关键词；为兼容旧配置，true 视为 Retain
+	/// ConditionParams 为可选第9列，用"|"分隔多个条件枚举值；只要该列非空，就会在出牌前执行对应条件校验
 	/// Params[i][0] 固定表示 EffectTargetType，后续参数为该效果自身参数
 	/// NeedTarget 自动推导：任意效果TargetType为SelectedTarget则为true
 	/// </summary>
@@ -79,6 +80,7 @@ public partial class LoadCardCsv : Node
 			string paramsStr = fields.Length > 6 ? fields[6] : string.Empty;
 
 			CardKeyWord cardKeyWord = fields.Length > 7 ? ParseCardKeyWord(fields[7]) : CardKeyWord.None;
+			CardConditionType[] conditionParams = fields.Length > 8 ? ParseConditionParams(fields[8]) : Array.Empty<CardConditionType>();
 
 			// 解析 EffectTypes（"|"分隔多个效果）
 			EffectType[] effectTypes = ParseEffectTypes(effectTypeStr);
@@ -90,7 +92,7 @@ public partial class LoadCardCsv : Node
 			CardCategory category = (CardCategory)Enum.Parse(typeof(CardCategory), categoryStr, ignoreCase: true);
 
 			// NeedTarget 自动从 Params 中推导，无需CSV配置
-			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName, cardKeyWord);
+			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName, cardKeyWord, conditionParams);
 		}
 		catch (Exception ex)
 		{
@@ -139,6 +141,27 @@ public partial class LoadCardCsv : Node
 		}
 
 		return result;
+	}
+
+	private static CardConditionType[] ParseConditionParams(string conditionParamsStr)
+	{
+		if (string.IsNullOrWhiteSpace(conditionParamsStr))
+			return Array.Empty<CardConditionType>();
+
+		string[] parts = conditionParamsStr.Split(new char[] { EFFECT_SEPARATOR, ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries);
+		List<CardConditionType> result = new List<CardConditionType>(parts.Length);
+		foreach (string part in parts)
+		{
+			string trimmed = part.Trim();
+			if (string.IsNullOrEmpty(trimmed))
+			{
+				continue;
+			}
+
+			result.Add((CardConditionType)Enum.Parse(typeof(CardConditionType), trimmed, ignoreCase: true));
+		}
+
+		return result.ToArray();
 	}
 
 	/// <summary>

@@ -32,11 +32,15 @@ public class CharacterInstance : Character, IUnitInstance
         get => _hp;
         set
         {
+            int oldHp = _hp;
             bool wasAlive = _hp > 0;
             _hp = value;
+
+            BattleSytem battle = BattleSytem.Current;
+            battle?.OnUnitHpChanged(this, oldHp, _hp);
+
             if (wasAlive && _hp <= 0)
             {
-                BattleSytem battle = BattleSytem.Current;
                 if (battle != null)
                 {
                     battle.HandleUnitDeath(OnDead);
@@ -51,8 +55,10 @@ public class CharacterInstance : Character, IUnitInstance
     public System.Action OnDead { get; set; }
     public System.Action<StateEndedContext> OnStateEnded { get; set; }
     public Dictionary<StateType, StateRuntimeData> States { get; } = new Dictionary<StateType, StateRuntimeData>();
+    public List<Card> DefaultDeck { get; } = new List<Card>();
     public List<Card> StatePile { get; } = new List<Card>();
     public List<Card> DiscardPile => discardpile;
+    public List<Card> ExhaustPile { get; } = new List<Card>();
     public int Shield { get; set; }
     public int Energy
     {

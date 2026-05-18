@@ -14,6 +14,14 @@ namespace CardSimulator
 	{
 		None = 0,
 		Retain = 1 << 0, // 保留：回合结束时不弃置
+		Exhaust = 1 << 1, // 消耗：打出后进入消耗牌堆，不再参与常规循环
+		InfiniteUpgrade = 1 << 2, // 无限升级：可持续记录升级级数
+	}
+
+	public enum CardConditionType
+	{
+		None = 0,
+		NoBattleCardPlayedThisTurn = 1, // 本回合内，该牌所属角色尚未打出过战斗牌
 	}
 
 	// 效果类型枚举（示例，你可根据需求扩展）
@@ -30,6 +38,17 @@ namespace CardSimulator
 		ClearAllStates,// 清除所有状态
 		ClearFirstNormalDebuff, // 清除状态栏中的第一个普通弱化状态
 		ShieldSlam,    // 护盾冲撞：额外造成等同自身护盾值的伤害
+		UpgradeBattleCard, // 升级战斗中的具体卡牌
+		UpgradePermanentCard, // 升级角色默认卡组中的具体卡牌
+		DamageByBattleLostHp, // 额外造成自身本局已失去生命值的伤害
+	}
+
+	public enum CardOperationTargetType
+	{
+		None = 0,
+		SelectHandCards = 1,
+		RandomHandCards = 2,
+		RandomDefaultDeckCards = 3,
 	}
 
 	// 状态类型枚举（可挂载到 UnitInstance）
@@ -44,6 +63,7 @@ namespace CardSimulator
 		AddAttack = 6, // 增加攻击力
 		ExtraEnergy = 7, // 下回合额外获得能量
 		Void = 8, // 虚无
+		CourageArmor = 9, // 勇气铠甲：打出攻击牌时触发一次防御
 	}
 
 	// 每个效果独立的目标选择方式

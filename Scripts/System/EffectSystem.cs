@@ -454,4 +454,20 @@ public static class EffectSystem
     {
         return Apply(ShieldSlam, new EffectContext(source, target, effectParams));
     }
+
+    public static EffectResult ApplyExhaustCards(IUnitInstance source, params string[] cardUniqueInGameIds)
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        BattleSytem battle = BattleSytem.Current;
+        if (battle == null)
+        {
+            return new EffectResult("ExhaustCards", source, null, summaryOverride: $"来源={source.UniqueInGameId}，当前不存在 BattleSytem，无法执行消耗效果。", totalValue: 0);
+        }
+
+        return battle.ApplyExhaustCards(source, cardUniqueInGameIds);
+    }
 }

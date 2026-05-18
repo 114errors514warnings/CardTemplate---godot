@@ -22,6 +22,8 @@
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddCharacter.cs" id="20"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteCharacter.cs" id="21"]
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/AddState.cs" id="22"]
+[ext_resource type="Script" path="res://Scripts/Interact/修改属性/DeleteState.cs" id="23"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChooseCard.cs" id="24"]
 
 [node name="UI_Main" type="Control" unique_id=1897072024]
 layout_mode = 3
@@ -73,6 +75,13 @@ custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 size_flags_vertical = 4
 text = "弃牌堆详细"
+
+[node name="消耗牌详细" type="Button" parent="局内信息/tab栏" unique_id=1168278049]
+editor_description = "显示所有玩家的消耗牌堆详情"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "消耗牌详细"
 
 [node name="对局信息滚动" type="ScrollContainer" parent="局内信息" unique_id=1859807431]
 layout_mode = 1
@@ -236,6 +245,14 @@ size_flags_vertical = 4
 text = "结束游戏"
 script = ExtResource("12")
 
+[node name="选择卡牌" type="Button" parent="操作面板/回合控制" unique_id=1823456702]
+editor_description = "参数：牌堆中的卡牌顺序（当前版本仅支持手牌，从1开始）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "选择卡牌"
+script = ExtResource("24")
+
 [node name="修改属性" type="HFlowContainer" parent="操作面板" unique_id=1261323471]
 custom_minimum_size = Vector2(100, 40)
 layout_mode = 1
@@ -291,6 +308,14 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "增加状态"
 script = ExtResource("22")
+
+[node name="删除状态" type="Button" parent="操作面板/修改属性" unique_id=2051174002]
+editor_description = "参数：目标UniqueInGameID 状态ID 层数（可选，不填默认为删除全部层数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除状态"
+script = ExtResource("23")
 
 [node name="参数框" type="HBoxContainer" parent="操作面板" unique_id=710620316]
 custom_minimum_size = Vector2(100, 40)

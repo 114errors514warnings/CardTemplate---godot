@@ -19,6 +19,7 @@ internal sealed class BattleInfoPresenter
         {
             BattleSytem.BattleInfoTab.DrawPile => BuildAllPlayerPileDetailText("抽牌堆", currentPileDisplayOrderMode, cachedRuntimeBattleInfo),
             BattleSytem.BattleInfoTab.DiscardPile => BuildAllPlayerPileDetailText("弃牌堆", currentPileDisplayOrderMode, cachedRuntimeBattleInfo),
+            BattleSytem.BattleInfoTab.ExhaustPile => BuildAllPlayerPileDetailText("消耗牌堆", currentPileDisplayOrderMode, cachedRuntimeBattleInfo),
             _ => cachedRuntimeBattleInfo
         };
     }
@@ -26,11 +27,18 @@ internal sealed class BattleInfoPresenter
     public string BuildRuntimeBattleInfo()
     {
         StringBuilder builder = new StringBuilder();
+        string pendingPrompt = battle.GetPendingCardSelectionPrompt();
+        if (!string.IsNullOrWhiteSpace(pendingPrompt))
+        {
+            builder.AppendLine(pendingPrompt);
+            builder.AppendLine();
+        }
+
         List<CharacterInstance> alivePlayers = battle.GetAlivePlayers();
         for (int playerIndex = 0; playerIndex < alivePlayers.Count; playerIndex++)
         {
             CharacterInstance player = alivePlayers[playerIndex];
-            builder.AppendLine($"角色ID：{player.id} 名称：{player.Name} UniqueInGameID：{FormatUniqueInGameId(player.UniqueInGameId)} HP：{player.HP}/{player.Max_HP}（当前/最大） Atk：{player.Attack} Def：{player.Defend} Costs：{player.costs} Shield：{player.Shield}");
+            builder.AppendLine($"角色ID：{player.id} 名称：{player.Name} UniqueInGameID：{FormatUniqueInGameId(player.UniqueInGameId)} HP：{player.HP}/{player.Max_HP}（当前/最大） Atk：{player.Attack} Def：{player.Defend} Costs：{player.costs} Shield：{player.Shield} 本局失去生命值：{battle.GetBattleLostHp(player)} 失去生命次数：{battle.GetBattleHpLossEventCount(player)}");
             builder.AppendLine($"当前状态：{FormatUnitStates(player)}");
             builder.AppendLine("手牌：");
 
@@ -67,7 +75,7 @@ internal sealed class BattleInfoPresenter
         foreach (int monsterKey in monsterKeys)
         {
             MonsterInstance monster = battle.Monsters[monsterKey];
-            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield} 当前意图：{battle.GetMonsterIntentionDisplay(monster)}");
+            builder.AppendLine($"怪物ID：{monster.id} 名称：{monster.Name} UniqueInGameID：{FormatUniqueInGameId(monster.UniqueInGameId)} HP：{monster.HP}/{monster.Max_HP}（当前/最大） Atk：{monster.Attack} Def：{monster.Defend} Shield：{monster.Shield} 本局失去生命值：{battle.GetBattleLostHp(monster)} 失去生命次数：{battle.GetBattleHpLossEventCount(monster)} 当前意图：{battle.GetMonsterIntentionDisplay(monster)}");
             builder.AppendLine($"当前状态：{FormatUnitStates(monster)}");
         }
 
@@ -169,9 +177,7 @@ internal sealed class BattleInfoPresenter
         for (int playerIndex = 0; playerIndex < alivePlayers.Count; playerIndex++)
         {
             CharacterInstance player = alivePlayers[playerIndex];
-            List<Card> cards = string.Equals(pileName, "抽牌堆", StringComparison.Ordinal)
-                ? player.drawpile
-                : player.discardpile;
+            List<Card> cards = GetPlayerPileCards(player, pileName);
             builder.AppendLine($"[{playerIndex + 1}] {player.Name} UniqueInGameID={FormatUniqueInGameId(player.UniqueInGameId)}");
 
             if (cards == null || cards.Count == 0)
@@ -198,6 +204,21 @@ internal sealed class BattleInfoPresenter
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private static List<Card> GetPlayerPileCards(CharacterInstance player, string pileName)
+    {
+        if (string.Equals(pileName, "抽牌堆", StringComparison.Ordinal))
+        {
+            return player.drawpile;
+        }
+
+        if (string.Equals(pileName, "消耗牌堆", StringComparison.Ordinal))
+        {
+            return player.ExhaustPile;
+        }
+
+        return player.discardpile;
     }
 
     private static List<Card> GetCardsForDisplay(List<Card> cards, BattleSytem.PileDisplayOrderMode currentPileDisplayOrderMode)
@@ -286,17 +307,31 @@ internal sealed class BattleInfoPresenter
             return "空卡牌";
         }
 
+        string baseName;
         if (!string.IsNullOrWhiteSpace(card.CardName))
         {
-            return card.CardName.Trim();
+            baseName = card.CardName.Trim();
         }
-
-        if (!string.IsNullOrWhiteSpace(card.EffectDescription))
+        else if (!string.IsNullOrWhiteSpace(card.EffectDescription))
         {
-            return card.EffectDescription.Trim();
+            baseName = card.EffectDescription.Trim();
+        }
+        else
+        {
+            baseName = $"CardId={card.CardId}";
         }
 
-        return $"CardId={card.CardId}";
+        if (card.TotalUpgradeLevel <= 0)
+        {
+            return baseName;
+        }
+
+        if (card.HasKeyWord(CardKeyWord.InfiniteUpgrade))
+        {
+            return $"{baseName}+{card.TotalUpgradeLevel}";
+        }
+
+        return $"{baseName}+";
     }
 
     private Dictionary<int, int> GetConfiguredMonsterCounts()

@@ -35,7 +35,7 @@ internal sealed class BattleInfoUiBinder
         return scene.GetNodeOrNull<Button>(fallbackPath);
     }
 
-    public void BindTabButtons(Node scene, string runtimePath, string runtimeFallbackPath, string drawPath, string drawFallbackPath, string discardPath, string discardFallbackPath, Action onRuntimePressed, Action onDrawPressed, Action onDiscardPressed, BattleSytem.BattleInfoTab currentTab)
+    public void BindTabButtons(Node scene, string runtimePath, string runtimeFallbackPath, string drawPath, string drawFallbackPath, string discardPath, string discardFallbackPath, string exhaustPath, string exhaustFallbackPath, Action onRuntimePressed, Action onDrawPressed, Action onDiscardPressed, Action onExhaustPressed, BattleSytem.BattleInfoTab currentTab)
     {
         Button runtimeButton = FindBattleInfoButton(scene, runtimePath, runtimeFallbackPath);
         if (runtimeButton != null)
@@ -55,18 +55,26 @@ internal sealed class BattleInfoUiBinder
             discardPileButton.Pressed += onDiscardPressed;
         }
 
-        UpdateTabVisualState(scene, runtimePath, runtimeFallbackPath, drawPath, drawFallbackPath, discardPath, discardFallbackPath, currentTab);
+        Button exhaustPileButton = FindBattleInfoButton(scene, exhaustPath, exhaustFallbackPath);
+        if (exhaustPileButton != null)
+        {
+            exhaustPileButton.Pressed += onExhaustPressed;
+        }
+
+        UpdateTabVisualState(scene, runtimePath, runtimeFallbackPath, drawPath, drawFallbackPath, discardPath, discardFallbackPath, exhaustPath, exhaustFallbackPath, currentTab);
     }
 
-    public void UpdateTabVisualState(Node scene, string runtimePath, string runtimeFallbackPath, string drawPath, string drawFallbackPath, string discardPath, string discardFallbackPath, BattleSytem.BattleInfoTab currentTab)
+    public void UpdateTabVisualState(Node scene, string runtimePath, string runtimeFallbackPath, string drawPath, string drawFallbackPath, string discardPath, string discardFallbackPath, string exhaustPath, string exhaustFallbackPath, BattleSytem.BattleInfoTab currentTab)
     {
         Button runtimeButton = FindBattleInfoButton(scene, runtimePath, runtimeFallbackPath);
         Button drawPileButton = FindBattleInfoButton(scene, drawPath, drawFallbackPath);
         Button discardPileButton = FindBattleInfoButton(scene, discardPath, discardFallbackPath);
+        Button exhaustPileButton = FindBattleInfoButton(scene, exhaustPath, exhaustFallbackPath);
 
         UpdateButtonState(runtimeButton, currentTab == BattleSytem.BattleInfoTab.Runtime);
         UpdateButtonState(drawPileButton, currentTab == BattleSytem.BattleInfoTab.DrawPile);
         UpdateButtonState(discardPileButton, currentTab == BattleSytem.BattleInfoTab.DiscardPile);
+        UpdateButtonState(exhaustPileButton, currentTab == BattleSytem.BattleInfoTab.ExhaustPile);
     }
 
     private static void UpdateButtonState(Button button, bool isActive)

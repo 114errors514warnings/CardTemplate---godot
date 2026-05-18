@@ -238,6 +238,46 @@ public static class StateSystem
 		InvokeStateEndedCallbacks(unit, callbacks);
 	}
 
+	public static int RemoveStateStacks(IUnitInstance unit, StateType type, int stacks)
+	{
+		if (unit == null)
+		{
+			throw new ArgumentNullException(nameof(unit));
+		}
+
+		if (stacks <= 0)
+		{
+			return 0;
+		}
+
+		if (!unit.States.TryGetValue(type, out StateRuntimeData stateData) || stateData == null)
+		{
+			return 0;
+		}
+
+		int removedStacks = 0;
+		List<StateEndedContext> callbacks = new List<StateEndedContext>();
+		while (removedStacks < stacks && stateData.Stacks > 0)
+		{
+			StateEndedContext endedContext = stateData.ConsumeOneStack(unit, StateEndReason.Cleared);
+			if (endedContext != null)
+			{
+				callbacks.Add(endedContext);
+			}
+
+			removedStacks++;
+		}
+
+		if (stateData.Stacks <= 0)
+		{
+			callbacks.AddRange(stateData.ConsumeAllCallbacks(unit, StateEndReason.Cleared));
+			unit.States.Remove(type);
+		}
+
+		InvokeStateEndedCallbacks(unit, callbacks);
+		return removedStacks;
+	}
+
 	public static bool TryRemoveFirstNormalDebuff(IUnitInstance unit, out StateType removedStateType)
 	{
 		removedStateType = StateType.None;
@@ -348,6 +388,30 @@ public static class StateSystem
 		// }
 
 		return energy;
+	}
+
+	public static void OnCardPlayed(IUnitInstance unit, Card card)
+	{
+		if (unit == null)
+		{
+			throw new ArgumentNullException(nameof(unit));
+		}
+
+		if (card == null || card.Category != CardCategory.Attack)
+		{
+			return;
+		}
+
+		if (!TryGetStateStacks(unit, StateType.CourageArmor, out int courageArmorStacks) || courageArmorStacks <= 0)
+		{
+			return;
+		}
+
+		EffectResult shieldResult = EffectSystem.ApplyShield(unit);
+		if (shieldResult != null)
+		{
+			AppendStateCardPlayedInfo(unit, StateType.CourageArmor, card, shieldResult);
+		}
 	}
 
 	private static int FloorByRule(double value)
@@ -501,6 +565,16 @@ public static class StateSystem
 	{
 		string unitLabel = unit == null ? "Unit" : $"Unit#{unit.UniqueInGameId}";
 		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} state {GetStateLabel(type)} triggered: gain {stacks} energy at turn start and remove this state.");
+	}
+
+	private static void AppendStateCardPlayedInfo(IUnitInstance unit, StateType type, Card card, EffectResult shieldResult)
+	{
+		string unitLabel = unit == null ? "Unit" : $"Unit#{unit.UniqueInGameId}";
+		string cardLabel = card == null
+			? "未知卡牌"
+			: string.IsNullOrWhiteSpace(card.CardName) ? $"CardId={card.CardId}" : card.CardName;
+		int gainedShield = shieldResult?.ShieldGained ?? 0;
+		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} 的 {GetStateLabel(type)} 触发：打出攻击牌 {cardLabel} 后防御一次，获得 {gainedShield} 点护盾。");
 	}
 
 	private static string GetStateLabel(StateType type)

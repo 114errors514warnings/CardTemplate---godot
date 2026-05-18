@@ -14,6 +14,10 @@
 | 7 | AddCost | 增加能量 |
 | 8 | ClearAllStates | 清除全部状态 |
 | 9 | ShieldSlam | 护盾冲撞 |
+| 10 | ClearFirstNormalDebuff | 清除状态栏中的第一个普通弱化状态 |
+| 11 | UpgradeBattleCard | 升级战斗中的具体卡牌 |
+| 12 | UpgradePermanentCard | 升级角色默认卡组中的具体卡牌 |
+| 13 | DamageByBattleLostHp | 额外造成自身本局已失去生命值的伤害 |
 
 ## EffectTargetType
 
@@ -37,6 +41,8 @@
 | 5 | WhirlwindSlash | 旋风斩 |
 | 6 | AddAttack | 增加攻击力 |
 | 7 | ExtraEnergy | 下回合额外获得能量 |
+| 8 | Void | 虚无 |
+| 9 | CourageArmor | 勇气铠甲 |
 
 ## MonsterDamageTargetMode
 
@@ -51,6 +57,8 @@
 - 怪物意图参数中，第一个整数为 `EffectType`，后续整数为该效果的参数。
 - 实际效果与数值结算以代码实现为准，本文仅记录当前枚举映射关系。
 - 当前 `AddAttack` 的效果为：来源造成攻击伤害时，额外增加等同层数的伤害。
+- `DamageByBattleLostHp` 的伤害口径为：`来源攻击力 + CSV额外值 + max(0, 战斗开始时生命值 - 当前生命值)`。
+- 战斗系统会记录每个单位在本局内“失去生命事件”的次数；一次结算中无论掉几点生命，都只记 1 次。
 
 ## 怪物 Damage 意图的目标模式补充
 

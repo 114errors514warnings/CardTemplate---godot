@@ -8,3 +8,4 @@ StateType,Name,IsStackable,IsPermanent,TurnStartDecayAmount,IsDebuff,IsElite
 6,AddAttack,TRUE,TRUE,0,FALSE,FALSE
 7,ExtraEnergy,TRUE,FALSE,0,FALSE,FALSE
 8,Void,FALSE,TRUE,0,TRUE,TRUE
+9,CourageArmor,FALSE,TRUE,0,FALSE,FALSE

@@ -37,6 +37,9 @@ public partial class Card : Resource
 	
 	[Export]
 	public string UniqueInGameId { get; set; } = string.Empty; // 局内唯一ID
+
+	[Export]
+	public string SourceDeckCardUniqueInGameId { get; set; } = string.Empty; // 默认卡组中的来源卡牌实例ID
 	
 	[Export]
 	public int EnergyCost { get; set; } = 0; // 消耗能量
@@ -56,6 +59,16 @@ public partial class Card : Resource
 	[Export]
 	public CardKeyWord CardKeyWord { get; set; } = CardKeyWord.None; // 卡牌关键词
 
+	public CardConditionType[] ConditionParams { get; set; } = Array.Empty<CardConditionType>();
+
+	[Export]
+	public int PermanentUpgradeLevel { get; set; } = 0; // 默认卡组中的永久升级级数
+
+	[Export]
+	public int BattleUpgradeLevel { get; set; } = 0; // 当前战斗中的升级级数
+
+	public int TotalUpgradeLevel => PermanentUpgradeLevel + BattleUpgradeLevel;
+
 	// 各效果对应的参数，Params[i][0] 固定表示目标类型，后续参数为该效果自身参数
 	public int[][] Params { get; set; } = Array.Empty<int[]>();
 
@@ -63,11 +76,12 @@ public partial class Card : Resource
 	public Card() { }
 
 	// 带参数的构造函数，NeedTarget 自动从 cardParams 推导
-	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType[] effectTypes, string effectDesc, int[][] cardParams = null, string cardName = "", CardKeyWord cardKeyWord = CardKeyWord.None)
+	public Card(int cardId, string uniqueInGameId, int energyCost, CardCategory category, EffectType[] effectTypes, string effectDesc, int[][] cardParams = null, string cardName = "", CardKeyWord cardKeyWord = CardKeyWord.None, CardConditionType[] conditionParams = null)
 	{
 		CardId = cardId;
 		CardName = cardName;
 		UniqueInGameId = uniqueInGameId;
+		SourceDeckCardUniqueInGameId = string.Empty;
 		EnergyCost = energyCost;
 		Category = category;
 		EffectTypes = effectTypes ?? Array.Empty<EffectType>();
@@ -75,6 +89,9 @@ public partial class Card : Resource
 		Params = cardParams ?? Array.Empty<int[]>();
 		NeedTarget = DeriveNeedTarget(Params);
 		CardKeyWord = cardKeyWord;
+		ConditionParams = conditionParams ?? Array.Empty<CardConditionType>();
+		PermanentUpgradeLevel = 0;
+		BattleUpgradeLevel = 0;
 	}
 
 	public bool HasKeyWord(CardKeyWord keyWord)
@@ -120,8 +137,26 @@ public partial class Card : Resource
 
 	public virtual Card CreateRuntimeInstance()
 	{
-		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName, CardKeyWord);
+		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName, CardKeyWord, ConditionParams);
 		card.GenerateUniqueInGameId();
+		return card;
+	}
+
+	public virtual Card CreateDeckInstance()
+	{
+		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName, CardKeyWord, ConditionParams);
+		card.GenerateUniqueInGameId();
+		card.SourceDeckCardUniqueInGameId = card.UniqueInGameId;
+		return card;
+	}
+
+	public virtual Card CreateBattleInstanceFromDeckCard()
+	{
+		Card card = new Card(CardId, string.Empty, EnergyCost, Category, EffectTypes, EffectDescription, Params, CardName, CardKeyWord, ConditionParams);
+		card.GenerateUniqueInGameId();
+		card.SourceDeckCardUniqueInGameId = string.IsNullOrWhiteSpace(SourceDeckCardUniqueInGameId) ? UniqueInGameId : SourceDeckCardUniqueInGameId;
+		card.PermanentUpgradeLevel = PermanentUpgradeLevel;
+		card.BattleUpgradeLevel = 0;
 		return card;
 	}
 
@@ -140,6 +175,12 @@ public partial class Card : Resource
 		{
 			int[] rawEffectParams = (Params != null && i < Params.Length) ? Params[i] : Array.Empty<int>();
 			EffectType effectType = EffectTypes[i];
+			if (IsCardOperationEffect(effectType))
+			{
+				lastResult = new CardApplyResult(true, this, source, target);
+				continue;
+			}
+
 			EffectTargetType effectTargetType = ParseEffectTargetType(rawEffectParams);
 			int[] effectArgs = GetEffectArguments(rawEffectParams);
 			List<IUnitInstance> resolvedTargets = ResolveEffectTargets(source, target, effectTargetType);
@@ -157,6 +198,9 @@ public partial class Card : Resource
 				case EffectType.Damage:
 					result = ApplyDamageEffect(source, resolvedTargets, effectArgs);
 					break;
+					case EffectType.DamageByBattleLostHp:
+						result = ApplyDamageByBattleLostHpEffect(source, resolvedTargets, effectArgs);
+						break;
 				case EffectType.Shield:
 					result = ApplyShieldEffect(source, resolvedTargets, effectArgs);
 					break;
@@ -205,17 +249,51 @@ public partial class Card : Resource
 		return lastResult;
 	}
 
+	private static bool IsCardOperationEffect(EffectType effectType)
+	{
+		return effectType == EffectType.UpgradeBattleCard || effectType == EffectType.UpgradePermanentCard;
+	}
+
 	private CardApplyResult ApplyDamageEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
 	{
+		int[] finalEffectArgs = BuildDamageEffectArguments(effectArgs);
 		EffectResult lastEffectResult = null;
 		IUnitInstance lastTarget = null;
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, effectArgs);
+			lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, finalEffectArgs);
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private CardApplyResult ApplyDamageByBattleLostHpEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int baseExtraDamage = effectArgs != null && effectArgs.Length > 0 ? effectArgs[0] : 0;
+		int battleLostHp = BattleSytem.Current?.GetBattleLostHp(source) ?? 0;
+		int totalExtraDamage = baseExtraDamage + battleLostHp;
+		return ApplyDamageEffect(source, resolvedTargets, new int[] { totalExtraDamage });
+	}
+
+	private int[] BuildDamageEffectArguments(int[] effectArgs)
+	{
+		if (effectArgs == null || effectArgs.Length == 0)
+		{
+			return Array.Empty<int>();
+		}
+
+		int[] result = new int[effectArgs.Length];
+		Array.Copy(effectArgs, result, effectArgs.Length);
+
+		if (!HasKeyWord(CardKeyWord.InfiniteUpgrade) || TotalUpgradeLevel <= 0)
+		{
+			return result;
+		}
+
+		double scaledExtraDamage = result[0] * Math.Pow(1.2d, TotalUpgradeLevel);
+		result[0] = (int)Math.Floor(scaledExtraDamage);
+		return result;
 	}
 
 	private CardApplyResult ApplyShieldEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
@@ -394,13 +472,6 @@ public partial class Card : Resource
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			
-			// 移动所有状态牌到弃牌堆
-			if (resolvedTarget.StatePile.Count > 0)
-			{
-				resolvedTarget.DiscardPile.AddRange(resolvedTarget.StatePile);
-				resolvedTarget.StatePile.Clear();
-			}
 
 			// 清除所有状态
 			var statesToRemove = new System.Collections.Generic.List<StateType>(resolvedTarget.States.Keys);
