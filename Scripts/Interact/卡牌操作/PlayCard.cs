@@ -138,7 +138,7 @@ public partial class PlayCard : Button
 		bool played = battleSytem.PlayHandCard(playerUniqueInGameId, handIndex, target);
 		if (played)
 		{
-			AppendConsoleInfo("出牌操作完成。\n" + TargetDescription);
+			AppendConsoleInfo("出牌操作完成。");
 		}
 	}
 

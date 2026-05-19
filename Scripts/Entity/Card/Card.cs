@@ -3,6 +3,7 @@ using Godot;
 using CardSimulator;
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 // 标记为可在编辑器中创建的资源
 [GlobalClass]
@@ -25,6 +26,50 @@ public partial class Card : Resource
 			Target = target;
 			EffectResult = effectResult;
 			ErrorMessage = errorMessage ?? string.Empty;
+		}
+	}
+
+	private sealed class DamageTargetSummary
+	{
+		public IUnitInstance Target { get; }
+		public int HitCount { get; set; }
+		public int TotalDamage { get; set; }
+		public int TotalShieldAbsorbed { get; set; }
+		public int TotalHpDamage { get; set; }
+		public int TargetShieldBefore { get; set; }
+		public int TargetShieldAfter { get; set; }
+		public int TargetHpBefore { get; set; }
+		public int TargetHpAfter { get; set; }
+
+		public DamageTargetSummary(IUnitInstance target, EffectResult effectResult)
+		{
+			Target = target;
+			HitCount = 1;
+			TotalDamage = effectResult?.TotalValue ?? 0;
+			TotalShieldAbsorbed = effectResult?.ShieldAbsorbed ?? 0;
+			TotalHpDamage = effectResult?.HpDamage ?? 0;
+			TargetShieldBefore = effectResult?.TargetShieldBefore ?? target?.Shield ?? 0;
+			TargetShieldAfter = effectResult?.TargetShieldAfter ?? target?.Shield ?? 0;
+			TargetHpBefore = effectResult?.TargetHpBefore ?? target?.HP ?? 0;
+			TargetHpAfter = effectResult?.TargetHpAfter ?? target?.HP ?? 0;
+		}
+	}
+
+	private sealed class ShieldTargetSummary
+	{
+		public IUnitInstance Target { get; }
+		public int HitCount { get; set; }
+		public int TotalShieldGained { get; set; }
+		public int TargetShieldBefore { get; set; }
+		public int TargetShieldAfter { get; set; }
+
+		public ShieldTargetSummary(IUnitInstance target, EffectResult effectResult)
+		{
+			Target = target;
+			HitCount = 1;
+			TotalShieldGained = effectResult?.ShieldGained ?? 0;
+			TargetShieldBefore = effectResult?.SourceShieldBefore ?? target?.Shield ?? 0;
+			TargetShieldAfter = effectResult?.SourceShieldAfter ?? target?.Shield ?? 0;
 		}
 	}
 
@@ -256,13 +301,26 @@ public partial class Card : Resource
 
 	private CardApplyResult ApplyDamageEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
 	{
-		int[] finalEffectArgs = BuildDamageEffectArguments(effectArgs);
+		int hitCount = GetDamageHitCount(effectArgs);
+		int[] finalEffectArgs = BuildDamageEffectArguments(GetDamageBaseArguments(effectArgs));
+		List<EffectResult> effectResults = new List<EffectResult>();
+		Dictionary<int, DamageTargetSummary> targetSummaries = new Dictionary<int, DamageTargetSummary>();
 		EffectResult lastEffectResult = null;
 		IUnitInstance lastTarget = null;
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, finalEffectArgs);
+			for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)
+			{
+				lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, finalEffectArgs);
+				effectResults.Add(lastEffectResult);
+				AccumulateDamageSummary(targetSummaries, resolvedTarget, lastEffectResult);
+			}
+		}
+
+		if (effectResults.Count > 1)
+		{
+			lastEffectResult = BuildAggregatedDamageEffectResult(source, effectResults, targetSummaries);
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
@@ -296,17 +354,209 @@ public partial class Card : Resource
 		return result;
 	}
 
+	private static int[] GetDamageBaseArguments(int[] effectArgs)
+	{
+		if (effectArgs == null || effectArgs.Length == 0)
+		{
+			return Array.Empty<int>();
+		}
+
+		if (effectArgs.Length == 1)
+		{
+			return (int[])effectArgs.Clone();
+		}
+
+		int[] result = new int[effectArgs.Length - 1];
+		Array.Copy(effectArgs, result, result.Length);
+		return result;
+	}
+
+	private static int GetDamageHitCount(int[] effectArgs)
+	{
+		if (effectArgs == null || effectArgs.Length <= 1)
+		{
+			return 1;
+		}
+
+		return Math.Max(1, effectArgs[effectArgs.Length - 1]);
+	}
+
+	private static void AccumulateDamageSummary(Dictionary<int, DamageTargetSummary> targetSummaries, IUnitInstance target, EffectResult effectResult)
+	{
+		if (target == null || effectResult == null)
+		{
+			return;
+		}
+
+		if (!targetSummaries.TryGetValue(target.UniqueInGameId, out DamageTargetSummary summary))
+		{
+			targetSummaries[target.UniqueInGameId] = new DamageTargetSummary(target, effectResult);
+			return;
+		}
+
+		summary.HitCount++;
+		summary.TotalDamage += effectResult.TotalValue;
+		summary.TotalShieldAbsorbed += effectResult.ShieldAbsorbed;
+		summary.TotalHpDamage += effectResult.HpDamage;
+		summary.TargetShieldAfter = effectResult.TargetShieldAfter;
+		summary.TargetHpAfter = effectResult.TargetHpAfter;
+	}
+
+	private EffectResult BuildAggregatedDamageEffectResult(IUnitInstance source, List<EffectResult> effectResults, Dictionary<int, DamageTargetSummary> targetSummaries)
+	{
+		int totalDamage = 0;
+		int totalShieldAbsorbed = 0;
+		int totalHpDamage = 0;
+		foreach (EffectResult effectResult in effectResults)
+		{
+			if (effectResult == null)
+			{
+				continue;
+			}
+
+			totalDamage += effectResult.TotalValue;
+			totalShieldAbsorbed += effectResult.ShieldAbsorbed;
+			totalHpDamage += effectResult.HpDamage;
+		}
+
+		StringBuilder summaryBuilder = new StringBuilder();
+		summaryBuilder.Append($"来源={GetUnitLabel(source)}，受击单位数={targetSummaries.Count}，总命中次数={effectResults.Count}，总伤害={totalDamage}，护盾抵扣={totalShieldAbsorbed}，HP伤害={totalHpDamage}");
+		if (targetSummaries.Count > 0)
+		{
+			summaryBuilder.Append("。目标详情：");
+			bool isFirst = true;
+			foreach (DamageTargetSummary summary in targetSummaries.Values)
+			{
+				if (!isFirst)
+				{
+					summaryBuilder.Append("；");
+				}
+
+				summaryBuilder.Append($"{GetUnitLabel(summary.Target)} 受击{summary.HitCount}次，护盾 {summary.TargetShieldBefore}->{summary.TargetShieldAfter}，HP {summary.TargetHpBefore}->{summary.TargetHpAfter}，护盾抵扣={summary.TotalShieldAbsorbed}，HP伤害={summary.TotalHpDamage}");
+				isFirst = false;
+			}
+		}
+
+		return new EffectResult(
+			"Attack",
+			source,
+			null,
+			summaryOverride: summaryBuilder.ToString(),
+			totalValue: totalDamage,
+			shieldAbsorbed: totalShieldAbsorbed,
+			hpDamage: totalHpDamage);
+	}
+
 	private CardApplyResult ApplyShieldEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
 	{
+		int shieldCount = GetShieldRepeatCount(effectArgs);
+		int[] finalEffectArgs = GetShieldBaseArguments(effectArgs);
+		List<EffectResult> effectResults = new List<EffectResult>();
+		Dictionary<int, ShieldTargetSummary> targetSummaries = new Dictionary<int, ShieldTargetSummary>();
 		EffectResult lastEffectResult = null;
 		IUnitInstance lastTarget = null;
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			lastEffectResult = EffectSystem.ApplyShield(resolvedTarget, effectArgs);
+			for (int shieldIndex = 0; shieldIndex < shieldCount; shieldIndex++)
+			{
+				lastEffectResult = EffectSystem.ApplyShield(resolvedTarget, finalEffectArgs);
+				effectResults.Add(lastEffectResult);
+				AccumulateShieldSummary(targetSummaries, resolvedTarget, lastEffectResult);
+			}
+		}
+
+		if (effectResults.Count > 1)
+		{
+			lastEffectResult = BuildAggregatedShieldEffectResult(source, effectResults, targetSummaries);
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private static int[] GetShieldBaseArguments(int[] effectArgs)
+	{
+		if (effectArgs == null || effectArgs.Length == 0)
+		{
+			return Array.Empty<int>();
+		}
+
+		if (effectArgs.Length == 1)
+		{
+			return (int[])effectArgs.Clone();
+		}
+
+		int[] result = new int[effectArgs.Length - 1];
+		Array.Copy(effectArgs, result, result.Length);
+		return result;
+	}
+
+	private static int GetShieldRepeatCount(int[] effectArgs)
+	{
+		if (effectArgs == null || effectArgs.Length <= 1)
+		{
+			return 1;
+		}
+
+		return Math.Max(1, effectArgs[effectArgs.Length - 1]);
+	}
+
+	private static void AccumulateShieldSummary(Dictionary<int, ShieldTargetSummary> targetSummaries, IUnitInstance target, EffectResult effectResult)
+	{
+		if (target == null || effectResult == null)
+		{
+			return;
+		}
+
+		if (!targetSummaries.TryGetValue(target.UniqueInGameId, out ShieldTargetSummary summary))
+		{
+			targetSummaries[target.UniqueInGameId] = new ShieldTargetSummary(target, effectResult);
+			return;
+		}
+
+		summary.HitCount++;
+		summary.TotalShieldGained += effectResult.ShieldGained;
+		summary.TargetShieldAfter = effectResult.SourceShieldAfter;
+	}
+
+	private EffectResult BuildAggregatedShieldEffectResult(IUnitInstance source, List<EffectResult> effectResults, Dictionary<int, ShieldTargetSummary> targetSummaries)
+	{
+		int totalShieldGained = 0;
+		foreach (EffectResult effectResult in effectResults)
+		{
+			if (effectResult == null)
+			{
+				continue;
+			}
+
+			totalShieldGained += effectResult.ShieldGained;
+		}
+
+		StringBuilder summaryBuilder = new StringBuilder();
+		summaryBuilder.Append($"来源={GetUnitLabel(source)}，受护盾单位数={targetSummaries.Count}，总防御次数={effectResults.Count}，总获得护盾={totalShieldGained}");
+		if (targetSummaries.Count > 0)
+		{
+			summaryBuilder.Append("。目标详情：");
+			bool isFirst = true;
+			foreach (ShieldTargetSummary summary in targetSummaries.Values)
+			{
+				if (!isFirst)
+				{
+					summaryBuilder.Append("；");
+				}
+
+				summaryBuilder.Append($"{GetUnitLabel(summary.Target)} 防御{summary.HitCount}次，护盾 {summary.TargetShieldBefore}->{summary.TargetShieldAfter}，总获得护盾={summary.TotalShieldGained}");
+				isFirst = false;
+			}
+		}
+
+		return new EffectResult(
+			"Shield",
+			source,
+			null,
+			summaryOverride: summaryBuilder.ToString(),
+			totalValue: totalShieldGained,
+			shieldGained: totalShieldGained);
 	}
 
 	private CardApplyResult ApplyAddStateEffect(IUnitInstance source, IUnitInstance originalTarget, List<IUnitInstance> resolvedTargets, int[] effectArgs)
