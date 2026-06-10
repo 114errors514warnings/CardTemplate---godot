@@ -64,43 +64,16 @@ public partial class ChangePileOrder : Button
 
 	private void AppendConsoleInfo(string message, bool alsoPrint)
 	{
-		AppendConsole("[信息] " + message, alsoPrint);
+		SceneConsoleRouter.AppendRaw("[信息] " + message, alsoPrint);
 	}
 
 	private void AppendConsoleError(string message, bool alsoPrint)
 	{
-		AppendConsole("[错误] " + message, alsoPrint);
+		SceneConsoleRouter.AppendRaw("[错误] " + message, alsoPrint);
 	}
 
 	private void AppendConsole(string message, bool alsoPrint)
 	{
-		if (alsoPrint)
-		{
-			GD.PrintErr(message);
-		}
-
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return;
-		}
-
-		RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-		if (console == null)
-		{
-			console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-		}
-
-		if (console == null)
-		{
-			return;
-		}
-
-		if (!string.IsNullOrEmpty(console.Text))
-		{
-			console.Text += "\n";
-		}
-
-		console.Text += message;
+		SceneConsoleRouter.AppendRaw(message, alsoPrint);
 	}
 }

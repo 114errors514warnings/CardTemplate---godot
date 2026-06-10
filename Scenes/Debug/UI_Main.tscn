@@ -1,0 +1,347 @@
+[gd_scene format=3 uid="uid://dasbcmnsg8c86"]
+
+[ext_resource type="Script" uid="uid://dtdprpvr6yi6p" path="res://Scripts/Init.cs" id="1_ubnyd"]
+[ext_resource type="Script" uid="uid://dx4ieog1lmfux" path="res://Scripts/System/BattleSytem.cs" id="2_w2rps"]
+[ext_resource type="Script" uid="uid://cvqf0pr8m7ud4" path="res://Scripts/Interact/卡牌操作/DrawCardCommand.cs" id="3_snjb5"]
+[ext_resource type="Script" uid="uid://vjajksmqd4mx" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="4_4euy2"]
+[ext_resource type="Script" uid="uid://cwby5o1hx2mvx" path="res://Scripts/Interact/卡牌操作/PlayCard.cs" id="5_10jht"]
+[ext_resource type="Script" uid="uid://q7e7atlxn8j7" path="res://Scripts/Interact/卡牌操作/RemoveCharacterCard.cs" id="6_ee8l6"]
+[ext_resource type="Script" uid="uid://bfccequ6evgaj" path="res://Scripts/Interact/卡牌操作/ChangePileOrder.cs" id="7_2yqjg"]
+[ext_resource type="Script" uid="uid://byuxj2w20g4l0" path="res://Scripts/Interact/回合控制/StartGame.cs" id="8_ik0f4"]
+[ext_resource type="Script" uid="uid://clljbe3siea6x" path="res://Scripts/Interact/回合控制/EndTurn.cs" id="9_4jjbi"]
+[ext_resource type="Script" uid="uid://wua77urdkkmd" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="10_j0g5b"]
+[ext_resource type="Script" uid="uid://dyh0karbgbmt4" path="res://Scripts/Interact/回合控制/ChangeMonsterIntention.cs" id="11_dwxdc"]
+[ext_resource type="Script" uid="uid://dkxanmhdi8n3k" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="12_tjkeh"]
+[ext_resource type="Script" uid="uid://dgh0rxifjdp0x" path="res://Scripts/Interact/回合控制/AddCharacter.cs" id="13_0xf40"]
+[ext_resource type="Script" uid="uid://4tulufjdv1ut" path="res://Scripts/Interact/回合控制/DeleteCharacter.cs" id="14_76odg"]
+[ext_resource type="Script" uid="uid://c0ltvk8d1wsnv" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="15_6ecyn"]
+[ext_resource type="Script" uid="uid://b7x68xl30nf58" path="res://Scripts/Interact/回合控制/EndGame.cs" id="16_k1gf6"]
+[ext_resource type="Script" uid="uid://n3t0nlavjhlf" path="res://Scripts/Interact/回合控制/ChooseCard.cs" id="17_d4x8n"]
+[ext_resource type="Script" uid="uid://tx35nn3f6loa" path="res://Scripts/Interact/修改属性/SetPlayerHealth.cs" id="18_0bs2x"]
+[ext_resource type="Script" uid="uid://bumrwcdkxrlec" path="res://Scripts/Interact/修改属性/SetPlayerDefend.cs" id="19_doqfa"]
+[ext_resource type="Script" uid="uid://bw86nwxloqmur" path="res://Scripts/Interact/修改属性/SetPlayerAttack.cs" id="20_rne4w"]
+[ext_resource type="Script" uid="uid://c21h6744ilf6f" path="res://Scripts/Interact/修改属性/AddPlayerEnergyRaw.cs" id="21_imf6f"]
+[ext_resource type="Script" uid="uid://bqtopdwjkijcj" path="res://Scripts/Interact/修改属性/SetPlayerMaxEnergy.cs" id="22_452f0"]
+[ext_resource type="Script" uid="uid://77y8q43tohya" path="res://Scripts/Interact/修改属性/AddState.cs" id="23_tchq8"]
+[ext_resource type="Script" uid="uid://ds7u6ax7fosjp" path="res://Scripts/Interact/修改属性/DeleteState.cs" id="24_u8nv6"]
+
+[node name="UI_Main" type="Control" unique_id=1897072024]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_ubnyd")
+
+[node name="BattleSytem" type="Node" parent="." unique_id=1186768121]
+script = ExtResource("2_w2rps")
+
+[node name="局内信息" type="Label" parent="." unique_id=1167309657]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.8
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="tab栏" type="HBoxContainer" parent="局内信息" unique_id=739570786]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 0.1
+
+[node name="局内" type="Button" parent="局内信息/tab栏" unique_id=7523492]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "局内"
+
+[node name="抽牌堆详细" type="Button" parent="局内信息/tab栏" unique_id=207600754]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "抽牌堆详细"
+
+[node name="弃牌堆详细" type="Button" parent="局内信息/tab栏" unique_id=1168278048]
+editor_description = "参数为抽牌数，不填默认1
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "弃牌堆详细"
+
+[node name="消耗牌详细" type="Button" parent="局内信息/tab栏" unique_id=1168278049]
+editor_description = "显示所有玩家的消耗牌堆详情"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "消耗牌详细"
+
+[node name="对局信息滚动" type="ScrollContainer" parent="局内信息" unique_id=1859807431]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.1
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="对局信息显示" type="RichTextLabel" parent="局内信息/对局信息滚动" unique_id=1275098432]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "文字示例"
+fit_content = true
+scroll_following = true
+
+[node name="操作面板" type="Label" parent="." unique_id=1282936871]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 0.5
+anchor_bottom = 0.8
+
+[node name="卡牌操作" type="HFlowContainer" parent="操作面板" unique_id=212513424]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 0.3
+
+[node name="抽牌" type="Button" parent="操作面板/卡牌操作" unique_id=191082677]
+editor_description = "参数：抽牌数（不填默认1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "抽牌"
+script = ExtResource("3_snjb5")
+
+[node name="弃牌" type="Button" parent="操作面板/卡牌操作" unique_id=850997975]
+editor_description = "参数想要弃牌的顺序（从1开始），强制需要参数"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "弃牌"
+
+[node name="新增卡牌" type="Button" parent="操作面板/卡牌操作" unique_id=893810668]
+editor_description = "参数：卡牌ID、目标位置（1手牌、2抽牌堆、3弃牌堆）（待拓展）（强制需要参数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增卡牌
+"
+script = ExtResource("4_4euy2")
+
+[node name="出牌" type="Button" parent="操作面板/卡牌操作" unique_id=896988153]
+editor_description = "参数：手牌顺序（从1开始）、目标敌人UniqueInGameId（不需要目标时填-1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "出牌"
+script = ExtResource("5_10jht")
+
+[node name="删除卡牌" type="Button" parent="操作面板/卡牌操作" unique_id=1253564499]
+editor_description = "参数：卡牌ID [删除数量]"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除卡牌"
+script = ExtResource("6_ee8l6")
+
+[node name="切换牌堆顺序显示" type="Button" parent="操作面板/卡牌操作" unique_id=239836368]
+editor_description = "参数：无需参数，抽牌堆和弃牌堆切换是否顺序显示"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "切换牌堆顺序显示"
+script = ExtResource("7_2yqjg")
+
+[node name="回合控制" type="HFlowContainer" parent="操作面板" unique_id=1664858752]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.3
+anchor_right = 1.0
+anchor_bottom = 0.6
+
+[node name="开始游戏" type="Button" parent="操作面板/回合控制" unique_id=1725832303]
+editor_description = "无需参数
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "开始游戏"
+script = ExtResource("8_ik0f4")
+
+[node name="结束回合" type="Button" parent="操作面板/回合控制" unique_id=944544839]
+editor_description = "无需参数
+"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "结束回合"
+script = ExtResource("9_4jjbi")
+
+[node name="新增敌人" type="Button" parent="操作面板/回合控制" unique_id=578080280]
+editor_description = "参数：怪物ID、增加数量（不填默认为1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增敌人"
+script = ExtResource("10_j0g5b")
+
+[node name="修改意图" type="Button" parent="操作面板/回合控制" unique_id=413725015]
+editor_description = "参数：怪物UniqueInGameID、意图index（从1开始）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "修改意图"
+script = ExtResource("11_dwxdc")
+
+[node name="选择角色" type="Button" parent="操作面板/回合控制" unique_id=15859348]
+editor_description = "参数：角色ID [index]
+index从1开始，不填默认修改第1个角色
+仅在战斗开始前生效"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "选择角色"
+script = ExtResource("12_tjkeh")
+
+[node name="新增角色" type="Button" parent="操作面板/回合控制" unique_id=1300145201]
+editor_description = "参数：角色ID
+仅在战斗开始前生效"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "新增角色"
+script = ExtResource("13_0xf40")
+
+[node name="删除角色" type="Button" parent="操作面板/回合控制" unique_id=1330600042]
+editor_description = "无需参数，默认删除最后一个角色
+仅在战斗开始前生效"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除角色"
+script = ExtResource("14_76odg")
+
+[node name="删除敌人" type="Button" parent="操作面板/回合控制" unique_id=773515993]
+editor_description = "参数：怪物ID、删除数量（不填默认为1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除敌人"
+script = ExtResource("15_6ecyn")
+
+[node name="结束游戏" type="Button" parent="操作面板/回合控制" unique_id=1823456701]
+editor_description = "参数：必须输入0才执行强制结束游戏"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "结束游戏"
+script = ExtResource("16_k1gf6")
+
+[node name="选择卡牌" type="Button" parent="操作面板/回合控制" unique_id=1823456702]
+editor_description = "参数：牌堆中的卡牌顺序（当前版本仅支持手牌，从1开始）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "选择卡牌"
+script = ExtResource("17_d4x8n")
+
+[node name="修改属性" type="HFlowContainer" parent="操作面板" unique_id=1261323471]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.6
+anchor_right = 1.0
+anchor_bottom = 0.9
+
+[node name="生命" type="Button" parent="操作面板/修改属性" unique_id=1965584985]
+editor_description = "参数：当前生命值 最大生命值"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "生命值（当前/最大）"
+script = ExtResource("18_0bs2x")
+
+[node name="防御" type="Button" parent="操作面板/修改属性" unique_id=214657802]
+editor_description = "参数：防御值"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "防御"
+script = ExtResource("19_doqfa")
+
+[node name="攻击" type="Button" parent="操作面板/修改属性" unique_id=1818566060]
+editor_description = "参数：攻击值"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "攻击"
+script = ExtResource("20_rne4w")
+
+[node name="+能量" type="Button" parent="操作面板/修改属性" unique_id=1924740906]
+editor_description = "参数：增加能量值（跳过状态修正）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "+能量"
+script = ExtResource("21_imf6f")
+
+[node name="能量上限" type="Button" parent="操作面板/修改属性" unique_id=1866877204]
+editor_description = "参数：能量上限（>=1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "能量上限"
+script = ExtResource("22_452f0")
+
+[node name="增加状态" type="Button" parent="操作面板/修改属性" unique_id=2051174001]
+editor_description = "参数：目标UniqueInGameID 状态ID 层数（可选，不填默认为1）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "增加状态"
+script = ExtResource("23_tchq8")
+
+[node name="删除状态" type="Button" parent="操作面板/修改属性" unique_id=2051174002]
+editor_description = "参数：目标UniqueInGameID 状态ID 层数（可选，不填默认为删除全部层数）"
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = "删除状态"
+script = ExtResource("24_u8nv6")
+
+[node name="参数框" type="HBoxContainer" parent="操作面板" unique_id=710620316]
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.9
+anchor_right = 1.0
+anchor_bottom = 1.0
+alignment = 1
+
+[node name="LineEdit" type="LineEdit" parent="操作面板/参数框" unique_id=1932179816]
+editor_description = "所有使用的参数前都需要包含目标的index，然后再是对应按钮需要的参数"
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+
+[node name="ConsoleContainer" type="ScrollContainer" parent="." unique_id=1952900498]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.8
+anchor_right = 0.8
+anchor_bottom = 1.0
+
+[node name="Console" type="RichTextLabel" parent="ConsoleContainer" unique_id=1328327077]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Console示例文本"
+fit_content = true
+scroll_following = true

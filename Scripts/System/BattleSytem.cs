@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -168,6 +168,7 @@ public partial class BattleSytem : Node
         }
 
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     public override void _ExitTree()
@@ -537,6 +538,7 @@ public partial class BattleSytem : Node
         IsPlayerTurn = false;
         StartPlayerTurn();
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     /// <summary>
@@ -619,6 +621,7 @@ public partial class BattleSytem : Node
         }
 
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     public void RefreshBattleInfoDisplay()
@@ -1091,6 +1094,7 @@ public partial class BattleSytem : Node
         }
 
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     public EffectResult ApplyExhaustCards(IUnitInstance source, params string[] cardUniqueInGameIds)
@@ -1458,6 +1462,7 @@ public partial class BattleSytem : Node
         }
 
         AppendPanelConsoleInfo("玩家回合结束。进入怪物回合。");
+        NotifyBattleSceneRefresh();
         StartMonsterTurn();
     }
 
@@ -1491,6 +1496,7 @@ public partial class BattleSytem : Node
             AppendPanelConsoleInfo($"玩家回合开始：{player.Name} 抽牌 {drawn}/{drawCount}，费用重置为 {player.costs}。");
         }
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     private void StartMonsterTurn()
@@ -1511,7 +1517,7 @@ public partial class BattleSytem : Node
         for (int index = 0; index < orderedKeys.Count; index++)
         {
             int uniqueInGameId = orderedKeys[index];
-            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster))
+            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster) || monster.HP <= 0)
             {
                 continue;
             }
@@ -1525,11 +1531,12 @@ public partial class BattleSytem : Node
             }
         }
 
+        NotifyBattleSceneRefresh();
         AppendPanelConsoleInfo($"怪物回合开始：本轮行动怪物数量 {orderedKeys.Count}。");
 
         foreach (int uniqueInGameId in orderedKeys)
         {
-            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster))
+            if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster) || monster.HP <= 0)
             {
                 continue;
             }
@@ -1542,8 +1549,10 @@ public partial class BattleSytem : Node
             }
         }
 
+        NotifyBattleSceneRefresh();
         SelectIntentionsForAllMonsters();
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
         if (CheckBattleEndAndHandle())
         {
             return;
@@ -1852,6 +1861,15 @@ public partial class BattleSytem : Node
             ? $"已为 {targetLabel} 删除状态 {stateName}（StateId={(int)stateType}）x{removedStacks}，剩余 {remainingStacks} 层。"
             : $"已为 {targetLabel} 删除状态 {stateName}（StateId={(int)stateType}）全部 {removedStacks} 层。";
         return true;
+    }
+
+    private void NotifyBattleSceneRefresh()
+    {
+        Node scene = GetTree().CurrentScene;
+        if (scene != null && scene is CardBattleScene cardBattleScene)
+        {
+            cardBattleScene.RequestExternalUiRefresh();
+        }
     }
 
     private void ExecuteMonsterIntention(MonsterInstance monster) => MonsterIntentionService.ExecuteMonsterIntention(monster);
@@ -2395,7 +2413,7 @@ public partial class BattleSytem : Node
         {
             int id = instance.UniqueInGameId;
             AppendPanelConsoleInfo($"怪物死亡：{instance.Name}（UniqueInGameId: {id}）。");
-            Monsters?.Remove(id);
+            // Keep in dictionary to preserve position; HP=0 marks as dead
             RefreshBattleInfoDisplay();
             CheckBattleEndAndHandle();
         };
@@ -2479,7 +2497,7 @@ public partial class BattleSytem : Node
             return true;
         }
 
-        if (Monsters == null || Monsters.Count == 0)
+        if (Monsters == null || Monsters.Values.All(m => m.HP <= 0))
         {
             EndBattle();
             return true;
@@ -2506,6 +2524,7 @@ public partial class BattleSytem : Node
 
         AppendPanelConsoleInfo($"战斗结束：已销毁怪物实例 {monsterCount} 个。");
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     public void EndGame()
@@ -2543,6 +2562,7 @@ public partial class BattleSytem : Node
 
         AppendPanelConsoleInfo($"战斗结束：已销毁角色实例 {playerCount} 个，怪物实例 {monsterCount} 个。");
         RefreshBattleInfoDisplay();
+        NotifyBattleSceneRefresh();
     }
 
     public void AppendPanelConsoleInfo(string message)

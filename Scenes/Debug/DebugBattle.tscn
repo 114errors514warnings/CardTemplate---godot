@@ -25,7 +25,7 @@
 [ext_resource type="Script" path="res://Scripts/Interact/修改属性/DeleteState.cs" id="23"]
 [ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChooseCard.cs" id="24"]
 
-[node name="UI_Main" type="Control" unique_id=1897072024]
+[node name="DebugBattle" type="Control" unique_id=1897072024]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

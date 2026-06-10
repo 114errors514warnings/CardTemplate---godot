@@ -1,165 +1,184 @@
-using Godot;
+﻿using Godot;
 
 public partial class DeleteMonster : Button
 {
-	private const string ParameterFormat = "怪物ID [删除数量]";
+    private const string ParameterFormat = "怪物ID [删除数量]";
 
-	public override void _Ready()
-	{
-		Pressed += OnDeleteMonsterPressed;
-	}
+    public override void _Ready()
+    {
+        Pressed += OnDeleteMonsterPressed;
+    }
 
-	private void OnDeleteMonsterPressed()
-	{
-		LineEdit lineEdit = FindLineEdit();
-		if (lineEdit == null)
-		{
-			AppendConsoleError("错误：未找到参数框 LineEdit。路径应为 操作面板/参数框/LineEdit。");
-			return;
-		}
+    private void OnDeleteMonsterPressed()
+    {
+        LineEdit lineEdit = FindLineEdit();
+        if (lineEdit == null)
+        {
+            AppendConsoleError("错误：未找到参数框 LineEdit。路径应为 操作面板/参数框/LineEdit。");
+            return;
+        }
 
-		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
-		if (string.IsNullOrEmpty(raw))
-		{
-			AppendConsoleInfo($"删除敌人 参数格式：{ParameterFormat}");
-			return;
-		}
+        string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
 
-		string[] arguments = ParseArguments(raw);
-		if (arguments.Length == 0 || !int.TryParse(arguments[0], out int monsterId))
-		{
-			AppendConsoleError($"错误：怪物ID '{raw}' 不是合法数字。");
-			return;
-		}
+        BattleSytem battleSytem = FindBattleSystem();
+        if (battleSytem == null)
+        {
+            AppendConsoleError("错误：未找到 BattleSytem 节点，无法写入 BattleSetupData。");
+            return;
+        }
 
-		int deleteCount = 1;
-		if (arguments.Length >= 2)
-		{
-			if (!int.TryParse(arguments[1], out deleteCount) || deleteCount <= 0)
-			{
-				AppendConsoleError($"错误：数量 '{arguments[1]}' 不是大于0的合法数字。");
-				return;
-			}
-		}
+        BattleSetupData setupData = battleSytem.EnsureSetupData();
 
-		AppendConsoleInfo($"删除敌人 参数解析：怪物ID={monsterId}，删除数量={deleteCount}");
+        if (string.IsNullOrEmpty(raw))
+        {
+            // 输入为空，默认删除最后一个敌人
+            System.Collections.Generic.List<int> monsterList = setupData.GetMonsterIdList();
+            if (monsterList.Count == 0)
+            {
+                AppendConsoleError("错误：当前没有可删除的敌人。");
+                return;
+            }
 
-		BattleSytem battleSytem = FindBattleSystem();
-		if (battleSytem == null)
-		{
-			AppendConsoleError("错误：未找到 BattleSytem 节点，无法写入 BattleSetupData。");
-			return;
-		}
+            int lastMonsterId = monsterList[monsterList.Count - 1];
+            int removedCount = setupData.RemoveMonsterId(lastMonsterId, 1);
+            battleSytem.SyncSelectedMonsterIdsFromSetupData();
 
-		BattleSetupData setupData = battleSytem.EnsureSetupData();
-		int currentCount = setupData.GetMonsterIdCount(monsterId);
-		if (currentCount <= 0)
-		{
-			AppendConsoleError($"错误：BattleSetupData 中不存在怪物ID {monsterId}。");
-			return;
-		}
+            int remainCount = setupData.GetMonsterIdCount(lastMonsterId);
+            int totalCount = setupData.GetTotalMonsterCount();
+            AppendConsoleInfo($"已删除最后一个敌人（怪物ID {lastMonsterId}）共 {removedCount} 个。该类型剩余：{remainCount}，怪物总数：{totalCount}");
+            return;
+        }
 
-		int removedCount = setupData.RemoveMonsterId(monsterId, deleteCount);
-		battleSytem.SyncSelectedMonsterIdsFromSetupData();
+        string[] arguments = ParseArguments(raw);
+        if (arguments.Length == 0 || !int.TryParse(arguments[0], out int monsterId))
+        {
+            AppendConsoleError($"错误：怪物ID '{raw}' 不是合法数字。");
+            return;
+        }
 
-		int remainCount = setupData.GetMonsterIdCount(monsterId);
-		int totalCount = setupData.GetTotalMonsterCount();
-		AppendConsoleInfo($"已删除怪物ID {monsterId} 共 {removedCount} 个。该类型剩余：{remainCount}，怪物总数：{totalCount}");
-	}
+        int deleteCount = 1;
+        if (arguments.Length >= 2)
+        {
+            if (!int.TryParse(arguments[1], out deleteCount) || deleteCount <= 0)
+            {
+                AppendConsoleError($"错误：数量 '{arguments[1]}' 不是大于0的合法数字。");
+                return;
+            }
+        }
 
-	private string[] ParseArguments(string raw)
-	{
-		return raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
-	}
+        AppendConsoleInfo($"删除敌人 参数解析：怪物ID={monsterId}，删除数量={deleteCount}");
 
-	private LineEdit FindLineEdit()
-	{
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return null;
-		}
+        int currentCount = setupData.GetMonsterIdCount(monsterId);
+        if (currentCount <= 0)
+        {
+            AppendConsoleError($"错误：BattleSetupData 中不存在怪物ID {monsterId}。");
+            return;
+        }
 
-		LineEdit lineEdit = scene.GetNodeOrNull<LineEdit>("操作面板/参数框/LineEdit");
-		if (lineEdit != null)
-		{
-			return lineEdit;
-		}
+        int removed = setupData.RemoveMonsterId(monsterId, deleteCount);
+        battleSytem.SyncSelectedMonsterIdsFromSetupData();
 
-		return scene.GetNodeOrNull<LineEdit>("UI_Main/操作面板/参数框/LineEdit");
-	}
+        int remain = setupData.GetMonsterIdCount(monsterId);
+        int total = setupData.GetTotalMonsterCount();
+        AppendConsoleInfo($"已删除怪物ID {monsterId} 共 {removed} 个。该类型剩余：{remain}，怪物总数：{total}");
+    }
 
-	private BattleSytem FindBattleSystem()
-	{
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return null;
-		}
+    private string[] ParseArguments(string raw)
+    {
+        return raw.Split(new char[] { ' ', '\t', ',', '，', ';', '；', '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+    }
 
-		BattleSytem direct = scene.GetNodeOrNull<BattleSytem>("BattleSytem");
-		if (direct != null)
-		{
-			return direct;
-		}
+    private LineEdit FindLineEdit()
+    {
+        Node panel = FindAncestorByName(this, "操作面板");
+        if (panel != null)
+        {
+            LineEdit panelLineEdit = panel.GetNodeOrNull<LineEdit>("参数框/LineEdit");
+            if (panelLineEdit != null)
+            {
+                return panelLineEdit;
+            }
+        }
 
-		return FindNodeRecursive<BattleSytem>(scene);
-	}
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return null;
+        }
 
-	private T FindNodeRecursive<T>(Node root) where T : Node
-	{
-		if (root is T found)
-		{
-			return found;
-		}
+        LineEdit lineEdit = scene.GetNodeOrNull<LineEdit>("操作面板/参数框/LineEdit");
+        if (lineEdit != null)
+        {
+            return lineEdit;
+        }
 
-		foreach (Node child in root.GetChildren())
-		{
-			T childFound = FindNodeRecursive<T>(child);
-			if (childFound != null)
-			{
-				return childFound;
-			}
-		}
+        return scene.GetNodeOrNull<LineEdit>("DebugBattle/操作面板/参数框/LineEdit");
+    }
 
-		return null;
-	}
+    private Node FindAncestorByName(Node start, string targetName)
+    {
+        Node current = start;
+        while (current != null)
+        {
+            if (current.Name == targetName)
+            {
+                return current;
+            }
 
-	private void AppendConsoleError(string message)
-	{
-		AppendConsole("[错误] " + message);
-		GD.PrintErr(message);
-	}
+            current = current.GetParent();
+        }
 
-	private void AppendConsoleInfo(string message)
-	{
-		AppendConsole("[信息] " + message);
-	}
+        return null;
+    }
 
-	private void AppendConsole(string message)
-	{
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return;
-		}
+    private BattleSytem FindBattleSystem()
+    {
+        Node scene = GetTree().CurrentScene;
+        if (scene == null)
+        {
+            return null;
+        }
 
-		RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-		if (console == null)
-		{
-			console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-		}
+        BattleSytem direct = scene.GetNodeOrNull<BattleSytem>("BattleSytem");
+        if (direct != null)
+        {
+            return direct;
+        }
 
-		if (console == null)
-		{
-			return;
-		}
+        return FindNodeRecursive<BattleSytem>(scene);
+    }
 
-		if (!string.IsNullOrEmpty(console.Text))
-		{
-			console.Text += "\n";
-		}
+    private T FindNodeRecursive<T>(Node root) where T : Node
+    {
+        if (root is T found)
+        {
+            return found;
+        }
 
-		console.Text += message;
-	}
+        foreach (Node child in root.GetChildren())
+        {
+            T childFound = FindNodeRecursive<T>(child);
+            if (childFound != null)
+            {
+                return childFound;
+            }
+        }
+
+        return null;
+    }
+
+    private void AppendConsoleError(string message)
+    {
+        SceneConsoleRouter.AppendError(message);
+    }
+
+    private void AppendConsoleInfo(string message)
+    {
+        SceneConsoleRouter.AppendInfo(message);
+    }
+
+    private void AppendConsole(string message)
+    {
+        SceneConsoleRouter.AppendRaw(message);
+    }
 }

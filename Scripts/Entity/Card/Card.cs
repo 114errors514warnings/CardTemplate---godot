@@ -842,34 +842,6 @@ public partial class Card : Resource
 
 	private static void AppendConsole(string message, bool alsoPrintError)
 	{
-		if (alsoPrintError)
-		{
-			GD.PrintErr(message);
-		}
-
-		SceneTree sceneTree = Engine.GetMainLoop() as SceneTree;
-		Node scene = sceneTree?.CurrentScene;
-		if (scene == null)
-		{
-			return;
-		}
-
-		RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-		if (console == null)
-		{
-			console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-		}
-
-		if (console == null)
-		{
-			return;
-		}
-
-		if (!string.IsNullOrEmpty(console.Text))
-		{
-			console.Text += "\n";
-		}
-
-		console.Text += message;
+		SceneConsoleRouter.AppendRaw(message, alsoPrintError);
 	}
 }

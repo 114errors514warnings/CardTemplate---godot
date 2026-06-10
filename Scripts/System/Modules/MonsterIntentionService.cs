@@ -161,6 +161,19 @@ internal sealed class MonsterIntentionService
         }
     }
 
+
+    private void ShowDamageOnCharacterView(IUnitInstance target, EffectResult result)
+    {
+        if (target == null || result == null) return;
+        int totalDamage = result.HpDamage;
+        if (totalDamage <= 0) return;
+
+        CardBattleScene scene = battle.GetTree().CurrentScene as CardBattleScene;
+        if (scene == null) return;
+
+        scene.ShowDamageNumberOnUnit(target, totalDamage);
+    }
+
     private bool TryExecuteMonsterEffect(MonsterInstance monster, int[] effectConfig, MonsterIntentionExecutionContext executionContext, out string resultSummary)
     {
         resultSummary = string.Empty;
@@ -191,6 +204,7 @@ internal sealed class MonsterIntentionService
                 {
                     EffectResult attackResult = EffectSystem.ApplyAttack(monster, target, damageArgs);
                     battle.AppendPanelConsoleInfo($"怪物行动（{monster.Name}#{monster.UniqueInGameId}）Damage：{attackResult.BuildSummary()}");
+                    ShowDamageOnCharacterView(target, attackResult);
                     battle.FlushDeferredCombatResolution();
                 }
                 finally

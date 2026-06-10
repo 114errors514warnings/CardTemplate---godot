@@ -1,0 +1,228 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/ChooseCharacter.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddMonster.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteMonster.cs" id="3"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/StartGame.cs" id="4"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/AddCharacterCard.cs" id="5"]
+[ext_resource type="Script" path="res://Scripts/Interact/卡牌操作/RemoveCharacterCard.cs" id="6"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/AddCharacter.cs" id="7"]
+[ext_resource type="Script" path="res://Scripts/Interact/回合控制/DeleteCharacter.cs" id="8"]
+
+[node name="BattleSetupWindow" type="Control"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="Backdrop" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.58)
+
+[node name="RootMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="Window" type="PanelContainer" parent="RootMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MainVBox" type="VBoxContainer" parent="RootMargin/Window"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 18
+
+[node name="Header" type="HBoxContainer" parent="RootMargin/Window/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="RootMargin/Window/MainVBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "战前配置"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CloseButton" type="Button" parent="RootMargin/Window/MainVBox/Header"]
+custom_minimum_size = Vector2(96, 44)
+layout_mode = 2
+text = "关闭"
+
+[node name="Body" type="HBoxContainer" parent="RootMargin/Window/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 18
+
+[node name="左侧配置栏" type="PanelContainer" parent="RootMargin/Window/MainVBox/Body"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LeftMargin" type="MarginContainer" parent="RootMargin/Window/MainVBox/Body/左侧配置栏"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="操作面板" type="VBoxContainer" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="标题" type="Label" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板"]
+layout_mode = 2
+text = "配置按钮"
+
+[node name="说明" type="RichTextLabel" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+bbcode_enabled = false
+scroll_active = false
+text = "左侧按钮直接复用旧调试场景的战前脚本。\n\n角色：\n- 新增角色：输入 角色ID\n- 删除角色：默认删除最后一个角色槽位\n- 选择角色：输入 角色ID [槽位序号]，用于指定要配置哪一个角色槽位\n\n怪物：\n- 新增敌人：输入 怪物ID [数量]\n- 删除敌人：输入 怪物ID [数量]\n\n卡牌：\n- 先通过选择角色确定角色槽位\n- 新增卡牌 / 删除卡牌：输入 卡牌ID [数量]"
+fit_content = true
+
+[node name="回合控制" type="HFlowContainer" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板"]
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+
+[node name="开始游戏" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "开始游戏"
+script = ExtResource("4")
+
+[node name="选择角色" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "选择角色"
+script = ExtResource("1")
+
+[node name="新增角色" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "新增角色"
+script = ExtResource("7")
+
+[node name="删除角色" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "删除角色"
+script = ExtResource("8")
+
+[node name="新增敌人" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "新增敌人"
+script = ExtResource("2")
+
+[node name="删除敌人" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "删除敌人"
+script = ExtResource("3")
+
+[node name="新增卡牌" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "新增卡牌"
+script = ExtResource("5")
+
+[node name="删除卡牌" type="Button" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/回合控制"]
+custom_minimum_size = Vector2(116, 42)
+layout_mode = 2
+text = "删除卡牌"
+script = ExtResource("6")
+
+[node name="参数框" type="HBoxContainer" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板"]
+layout_mode = 2
+
+[node name="LineEdit" type="LineEdit" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板/参数框"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "输入角色ID / 怪物ID / 卡牌ID 及数量"
+
+[node name="参数提示" type="RichTextLabel" parent="RootMargin/Window/MainVBox/Body/左侧配置栏/LeftMargin/操作面板"]
+custom_minimum_size = Vector2(0, 165)
+layout_mode = 2
+bbcode_enabled = false
+scroll_active = false
+text = "常用参数：\n选择角色：角色ID [index]\n新增角色：角色ID\n新增敌人：怪物ID [数量]\n删除敌人：怪物ID [数量]\n新增卡牌：卡牌ID [数量]\n删除卡牌：卡牌ID [数量]\n\n右侧会实时刷新当前已配置的角色、怪物与角色卡牌。"
+fit_content = true
+
+[node name="右侧战况栏" type="PanelContainer" parent="RootMargin/Window/MainVBox/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="RightMargin" type="MarginContainer" parent="RootMargin/Window/MainVBox/Body/右侧战况栏"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="RightVBox" type="VBoxContainer" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="右侧标题" type="Label" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin/RightVBox"]
+layout_mode = 2
+text = "当前战前配置"
+
+[node name="右侧说明" type="Label" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin/RightVBox"]
+layout_mode = 2
+text = "参考 DebugBattle 的对局信息区域，显示已添加角色、怪物和角色卡牌。"
+autowrap_mode = 3
+
+[node name="局内信息" type="VBoxContainer" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin/RightVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="对局信息滚动" type="ScrollContainer" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin/RightVBox/局内信息"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="对局信息显示" type="RichTextLabel" parent="RootMargin/Window/MainVBox/Body/右侧战况栏/RightMargin/RightVBox/局内信息/对局信息滚动"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+fit_content = true
+scroll_following = true
+text = "等待初始化战斗配置..."

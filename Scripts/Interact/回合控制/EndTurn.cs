@@ -57,43 +57,16 @@ public partial class EndTurn : Button
 
     private void AppendConsoleInfo(string message)
     {
-        AppendConsole("[信息] " + message, false);
+		SceneConsoleRouter.AppendInfo(message);
     }
 
     private void AppendConsoleError(string message, bool alsoPrintError)
     {
-        AppendConsole("[错误] " + message, alsoPrintError);
+		SceneConsoleRouter.AppendRaw("[错误] " + message, alsoPrintError);
     }
 
     private void AppendConsole(string message, bool alsoPrintError)
     {
-        if (alsoPrintError)
-        {
-            GD.PrintErr(message);
-        }
-
-        Node scene = GetTree().CurrentScene;
-        if (scene == null)
-        {
-            return;
-        }
-
-        RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-        if (console == null)
-        {
-            console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-        }
-
-        if (console == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(console.Text))
-        {
-            console.Text += "\n";
-        }
-
-        console.Text += message;
+        SceneConsoleRouter.AppendRaw(message, alsoPrintError);
     }
 }

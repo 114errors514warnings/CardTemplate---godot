@@ -2,9 +2,6 @@ using Godot;
 
 public partial class EndGame : Button
 {
-	private const string RequiredParameter = "0";
-	private const string ParameterFormat = "0";
-
 	public override void _Ready()
 	{
 		Pressed += OnEndGamePressed;
@@ -12,20 +9,6 @@ public partial class EndGame : Button
 
 	private void OnEndGamePressed()
 	{
-		LineEdit lineEdit = FindLineEdit();
-		if (lineEdit == null)
-		{
-			AppendConsoleError("错误：未找到参数框 LineEdit。路径应为 操作面板/参数框/LineEdit。");
-			return;
-		}
-
-		string raw = lineEdit.Text == null ? string.Empty : lineEdit.Text.Trim();
-		if (raw != RequiredParameter)
-		{
-			AppendConsoleError($"错误：结束游戏 需要输入参数 {ParameterFormat} 才能执行。当前输入为 '{raw}'。");
-			return;
-		}
-
 		BattleSytem battleSytem = FindBattleSystem();
 		if (battleSytem == null)
 		{
@@ -33,25 +16,16 @@ public partial class EndGame : Button
 			return;
 		}
 
-		AppendConsoleInfo("结束游戏 参数校验通过：0");
+		AppendConsoleInfo("结束游戏：重置战场并返回战前配置。");
 		battleSytem.EndGame();
-	}
 
-	private LineEdit FindLineEdit()
-	{
+		// Return to setup window via the scene
 		Node scene = GetTree().CurrentScene;
-		if (scene == null)
+		if (scene != null && scene.HasMethod("RequestExternalUiRefresh"))
 		{
-			return null;
+			scene.CallDeferred("RequestExternalUiRefresh");
+			scene.CallDeferred("ShowSetupWindow");
 		}
-
-		LineEdit lineEdit = scene.GetNodeOrNull<LineEdit>("操作面板/参数框/LineEdit");
-		if (lineEdit != null)
-		{
-			return lineEdit;
-		}
-
-		return scene.GetNodeOrNull<LineEdit>("UI_Main/操作面板/参数框/LineEdit");
 	}
 
 	private BattleSytem FindBattleSystem()
@@ -92,39 +66,16 @@ public partial class EndGame : Button
 
 	private void AppendConsoleError(string message)
 	{
-		AppendConsole("[错误] " + message);
-		GD.PrintErr(message);
+		SceneConsoleRouter.AppendError(message);
 	}
 
 	private void AppendConsoleInfo(string message)
 	{
-		AppendConsole("[信息] " + message);
+		SceneConsoleRouter.AppendInfo(message);
 	}
 
 	private void AppendConsole(string message)
 	{
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return;
-		}
-
-		RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-		if (console == null)
-		{
-			console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-		}
-
-		if (console == null)
-		{
-			return;
-		}
-
-		if (!string.IsNullOrEmpty(console.Text))
-		{
-			console.Text += "\n";
-		}
-
-		console.Text += message;
+		SceneConsoleRouter.AppendRaw(message);
 	}
 }

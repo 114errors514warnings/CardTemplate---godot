@@ -81,7 +81,7 @@ public partial class ChangeMonsterIntention : Button
 			return lineEdit;
 		}
 
-		return scene.GetNodeOrNull<LineEdit>("UI_Main/操作面板/参数框/LineEdit");
+		return scene.GetNodeOrNull<LineEdit>("DebugBattle/操作面板/参数框/LineEdit");
 	}
 
 	private BattleSytem FindBattleSystem()
@@ -122,39 +122,16 @@ public partial class ChangeMonsterIntention : Button
 
 	private void AppendConsoleError(string message)
 	{
-		AppendConsole("[错误] " + message);
-		GD.PrintErr(message);
+		SceneConsoleRouter.AppendError(message);
 	}
 
 	private void AppendConsoleInfo(string message)
 	{
-		AppendConsole("[信息] " + message);
+		SceneConsoleRouter.AppendInfo(message);
 	}
 
 	private void AppendConsole(string message)
 	{
-		Node scene = GetTree().CurrentScene;
-		if (scene == null)
-		{
-			return;
-		}
-
-		RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-		if (console == null)
-		{
-			console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-		}
-
-		if (console == null)
-		{
-			return;
-		}
-
-		if (!string.IsNullOrEmpty(console.Text))
-		{
-			console.Text += "\n";
-		}
-
-		console.Text += message;
+		SceneConsoleRouter.AppendRaw(message);
 	}
 }

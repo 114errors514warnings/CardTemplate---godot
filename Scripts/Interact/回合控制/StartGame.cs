@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 
 public partial class StartGame : Button
 {
@@ -16,7 +16,13 @@ public partial class StartGame : Button
             return;
         }
 
-        battleSytem.StartGameFromSetupData();
+        bool started = battleSytem.StartGameFromSetupData();
+        if (started)
+        {
+            Node scene = GetTree().CurrentScene;
+            if (scene != null && scene.HasMethod("RequestExternalUiRefresh"))
+                scene.CallDeferred("RequestExternalUiRefresh");
+        }
     }
 
     private BattleSytem FindBattleSystem()
@@ -57,33 +63,6 @@ public partial class StartGame : Button
 
     private void AppendConsoleError(string message, bool alsoPrintError)
     {
-        if (alsoPrintError)
-        {
-            GD.PrintErr(message);
-        }
-
-        Node scene = GetTree().CurrentScene;
-        if (scene == null)
-        {
-            return;
-        }
-
-        RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-        if (console == null)
-        {
-            console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-        }
-
-        if (console == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(console.Text))
-        {
-            console.Text += "\n";
-        }
-
-        console.Text += "[错误] " + message;
+        SceneConsoleRouter.AppendRaw("[错误] " + message, alsoPrintError);
     }
 }

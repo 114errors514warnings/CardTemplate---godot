@@ -16,7 +16,13 @@ internal sealed class BattleInfoUiBinder
             return battleInfoLabel;
         }
 
-        return scene.GetNodeOrNull<RichTextLabel>(fallbackPath);
+        battleInfoLabel = scene.GetNodeOrNull<RichTextLabel>(fallbackPath);
+        if (battleInfoLabel != null)
+        {
+            return battleInfoLabel;
+        }
+
+        return FindNodeByName<RichTextLabel>(scene, GetLastPathSegment(primaryPath));
     }
 
     public Button FindBattleInfoButton(Node scene, string primaryPath, string fallbackPath)
@@ -32,7 +38,48 @@ internal sealed class BattleInfoUiBinder
             return button;
         }
 
-        return scene.GetNodeOrNull<Button>(fallbackPath);
+        button = scene.GetNodeOrNull<Button>(fallbackPath);
+        if (button != null)
+        {
+            return button;
+        }
+
+        return FindNodeByName<Button>(scene, GetLastPathSegment(primaryPath));
+    }
+
+    private static string GetLastPathSegment(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        string[] parts = path.Split('/');
+        return parts.Length == 0 ? path : parts[parts.Length - 1];
+    }
+
+    private static T FindNodeByName<T>(Node root, string nodeName) where T : Node
+    {
+        if (root == null || string.IsNullOrWhiteSpace(nodeName))
+        {
+            return null;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            if (child is T typed && child.Name == nodeName)
+            {
+                return typed;
+            }
+
+            T nested = FindNodeByName<T>(child, nodeName);
+            if (nested != null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
     }
 
     public void BindTabButtons(Node scene, string runtimePath, string runtimeFallbackPath, string drawPath, string drawFallbackPath, string discardPath, string discardFallbackPath, string exhaustPath, string exhaustFallbackPath, Action onRuntimePressed, Action onDrawPressed, Action onDiscardPressed, Action onExhaustPressed, BattleSytem.BattleInfoTab currentTab)
