@@ -1398,6 +1398,8 @@ public partial class BattleSytem : Node
             AppendPanelConsoleInfo($"卡牌结算：{applyResult.EffectResult.BuildSummary()}");
         }
 
+        ShowDamageNumbersForCardPlay(applyResult);
+
         RecordCardPlayedThisTurn(sourcePlayer, card);
         StateSystem.OnCardPlayed(sourcePlayer, card);
 
@@ -1499,7 +1501,7 @@ public partial class BattleSytem : Node
         NotifyBattleSceneRefresh();
     }
 
-    private void StartMonsterTurn()
+    private async void StartMonsterTurn()
     {
         if (!IsBattleStarted || GetAlivePlayers().Count == 0)
         {
@@ -1534,18 +1536,26 @@ public partial class BattleSytem : Node
         NotifyBattleSceneRefresh();
         AppendPanelConsoleInfo($"怪物回合开始：本轮行动怪物数量 {orderedKeys.Count}。");
 
-        foreach (int uniqueInGameId in orderedKeys)
+        for (int i = 0; i < orderedKeys.Count; i++)
         {
+            int uniqueInGameId = orderedKeys[i];
             if (Monsters == null || !Monsters.TryGetValue(uniqueInGameId, out MonsterInstance monster) || monster.HP <= 0)
             {
                 continue;
             }
 
             ExecuteMonsterIntention(monster);
+            NotifyBattleSceneRefresh();
 
             if (CheckBattleEndAndHandle())
             {
                 return;
+            }
+
+            // 0.5s delay between monsters, except after the last one
+            if (i < orderedKeys.Count - 1)
+            {
+                await ToSignal(GetTree().CreateTimer(0.5f), SceneTreeTimer.SignalName.Timeout);
             }
         }
 
@@ -1873,6 +1883,27 @@ public partial class BattleSytem : Node
     }
 
     private void ExecuteMonsterIntention(MonsterInstance monster) => MonsterIntentionService.ExecuteMonsterIntention(monster);
+
+    private void ShowDamageNumbersForCardPlay(Card.CardApplyResult applyResult)
+    {
+        if (applyResult == null || !applyResult.Success || applyResult.IndividualEffectResults == null)
+        {
+            return;
+        }
+
+        CardBattleScene scene = GetTree().CurrentScene as CardBattleScene;
+        if (scene == null) return;
+
+        foreach (EffectResult singleResult in applyResult.IndividualEffectResults)
+        {
+            if (singleResult == null || singleResult.HpDamage <= 0 || singleResult.Target == null)
+            {
+                continue;
+            }
+
+            scene.ShowDamageNumberOnUnit(singleResult.Target, singleResult.HpDamage);
+        }
+    }
 
     public void BeginOrderedCombatLog()
     {

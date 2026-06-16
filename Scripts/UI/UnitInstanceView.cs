@@ -225,7 +225,37 @@ public partial class UnitInstanceView : PanelContainer
         if (intentionLabel != null) intentionLabel.Visible = false;
     }
 
-    public void ShowFloatingDamage(int damage)
+	public void ShowDeadOverlay()
+	{
+		EnsureNodes();
+		if (healthBar == null) return;
+
+		// 移除旧的死亡覆盖层（如果存在）
+		for (int i = healthBar.GetChildCount() - 1; i >= 0; i--)
+		{
+			Node child = healthBar.GetChild(i);
+			if (child is Label label && label.Name == "DeadOverlay")
+			{
+				label.QueueFree();
+			}
+		}
+
+		Label deadLabel = new Label();
+		deadLabel.Name = "DeadOverlay";
+		deadLabel.Text = "已死亡";
+		deadLabel.HorizontalAlignment = HorizontalAlignment.Center;
+		deadLabel.VerticalAlignment = VerticalAlignment.Center;
+		deadLabel.AddThemeFontSizeOverride("font_size", 20);
+		deadLabel.Modulate = new Color(0.85f, 0.85f, 0.85f);
+		deadLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.7f));
+		deadLabel.AddThemeConstantOverride("outline_size", 2);
+		deadLabel.SetAnchorsPreset(LayoutPreset.FullRect);
+		deadLabel.MouseFilter = MouseFilterEnum.Ignore;
+
+		healthBar.AddChild(deadLabel);
+	}
+
+	public void ShowFloatingDamage(int damage)
     {
         if (damage <= 0) return;
         if (BoundUnit == null) return;

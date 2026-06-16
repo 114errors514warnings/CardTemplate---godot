@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 using CardSimulator;
 using System;
 using System.Collections.Generic;
@@ -25,6 +25,7 @@ public partial class CardBattleScene : Control
 	[Export] public PackedScene DebugPanelScene;
 	[Export] public PackedScene UnitViewScene;
 	[Export] public int MaxPlayerSlots = 3;
+	[Export] public int MaxMonsterSlots = 3;
 	[Export] public int PilePopupColumns = 4;
 
 	private BattleSytem battle;
@@ -58,6 +59,7 @@ public partial class CardBattleScene : Control
 	private Button setupWindowButton;
 	private Button debugPanelButton;
 	private Control windowLayer;
+	private Control floatLayer;
 	private Control setupWindow;
 	private Control debugPanelWindow;
 	private bool pendingExternalRefresh;
@@ -119,6 +121,7 @@ public partial class CardBattleScene : Control
 		if (!AutoStartBattle) { battle?.RefreshBattleInfoDisplay(); ShowSetupWindow(); }
 		else { initialMonsterOrder.Clear(); initialMonsterOrder.AddRange(BuildInitialMonsterIds()); battle?.OnInit(BuildInitialCharacterIds(), BuildInitialMonsterIds()); }
 		RefreshAllUi(); BindUiEvents(); ApplyArenaPanelStyle();
+		CreateFloatLayer();
 	}
 
 	public override void _Process(double delta)
@@ -126,7 +129,7 @@ public partial class CardBattleScene : Control
 		if (pendingExternalRefresh)
 		{
 			pendingExternalRefresh = false;
-			if (initialMonsterOrder.Count == 0) initialMonsterOrder.AddRange(GetOrderedMonsters().Select(m => m.UniqueInGameId));
+			SyncMonsterOrderFromBattle();
 			RefreshAllUi();
 			if (battle != null && battle.IsBattleStarted) HideSetupWindow();
 		}
@@ -134,13 +137,64 @@ public partial class CardBattleScene : Control
 		UpdateDragState();
 	}
 
+	private void SyncMonsterOrderFromBattle()
+	{
+		if (battle == null || !battle.IsBattleStarted || battle.Monsters == null || battle.Monsters.Count == 0)
+		{
+			if (initialMonsterOrder.Count == 0) return;
+			initialMonsterOrder.Clear();
+			return;
+		}
+		initialMonsterOrder.Clear();
+		initialMonsterOrder.AddRange(GetOrderedMonsters().Select(m => m.UniqueInGameId));
+	}
+
 	public void RequestExternalUiRefresh() { pendingExternalRefresh = true; }
 
 	public void ShowDamageNumberOnUnit(IUnitInstance unit, int damage)
 	{
-		if (unit == null || damage <= 0) return;
-		if (unitViews.TryGetValue(unit.UniqueInGameId, out var view))
-			view.Root.ShowFloatingDamage(damage);
+		if (unit == null || damage <= 0 || floatLayer == null) return;
+
+		Vector2 screenPos;
+		if (unitViews.TryGetValue(unit.UniqueInGameId, out var view) && view?.Root != null)
+		{
+			screenPos = view.Root.GlobalPosition + view.Root.Size * new Vector2(0.5f, 0.07f);
+		}
+		else
+		{
+			screenPos = GetViewportRect().Size * new Vector2(0.5f, 0.35f);
+		}
+
+		Label floatingLabel = new Label();
+		floatingLabel.Text = damage.ToString();
+		floatingLabel.HorizontalAlignment = HorizontalAlignment.Center;
+		floatingLabel.VerticalAlignment = VerticalAlignment.Center;
+		floatingLabel.AddThemeFontSizeOverride("font_size", 36);
+		floatingLabel.AddThemeColorOverride("font_color", Colors.White);
+		floatingLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 1));
+		floatingLabel.AddThemeConstantOverride("outline_size", 2);
+		floatingLabel.Position = screenPos - floatLayer.GlobalPosition - floatingLabel.Size / 2;
+
+		floatLayer.AddChild(floatingLabel);
+
+		Tween tween = floatingLabel.CreateTween();
+		tween.SetParallel(true);
+		tween.TweenProperty(floatingLabel, "position", floatingLabel.Position + new Vector2(0, -70), 0.8f);
+		tween.TweenProperty(floatingLabel, "modulate", new Color(1, 1, 1, 0), 0.8f);
+		tween.Finished += () =>
+		{
+			if (floatingLabel != null && IsInstanceValid(floatingLabel))
+				floatingLabel.QueueFree();
+		};
+	}
+
+
+	private void CreateFloatLayer()
+	{
+		floatLayer = new Control();
+		floatLayer.MouseFilter = Control.MouseFilterEnum.Ignore;
+		floatLayer.SetAnchorsPreset(LayoutPreset.FullRect);
+		AddChild(floatLayer);
 	}
 
 	// ── Input ──────────────────────────────────────────
@@ -391,19 +445,50 @@ public partial class CardBattleScene : Control
 		if (playersRow == null || monstersRow == null) return;
 		unitViews.Clear();
 		ClearChildren(playersRow); ClearChildren(monstersRow);
-		var players = GetOrderedPlayers();
+		var players = GetAllOrderedPlayers();
 		for (int i = 0; i < Math.Max(MaxPlayerSlots, players.Count); i++)
 		{
-			if (i < players.Count) playersRow.AddChild(CreateUnitPanel(players[i], true, players[i].Name));
-			else playersRow.AddChild(CreateEmptyUnitSlot($"\u89D2\u8272\u69FD\u4F4D {i + 1}"));
+			if (i < players.Count)
+			{
+				CharacterInstance player = players[i];
+				if (player.HP > 0)
+				{
+					playersRow.AddChild(CreateUnitPanel(player, true, player.Name));
+				}
+				else
+				{
+					var deadSlot = CreateEmptyUnitSlot(player.Name);
+					deadSlot.ShowDeadOverlay();
+					playersRow.AddChild(deadSlot);
+				}
+			}
+			else
+			{
+				playersRow.AddChild(CreateEmptyUnitSlot($"\u89D2\u8272\u69FD\u4F4D {i + 1}"));
+			}
 		}
-		for (int mi = 0; mi < initialMonsterOrder.Count; mi++)
+		List<MonsterInstance> orderedMonsters = GetOrderedMonsters();
+		int actualMonsterCount = orderedMonsters.Count;
+		for (int mi = 0; mi < MaxMonsterSlots; mi++)
 		{
-			int mid = initialMonsterOrder[mi];
-			MonsterInstance lm = (battle != null && battle.Monsters != null && battle.Monsters.TryGetValue(mid, out var tmpLm)) ? tmpLm : null;
-			bool alive = lm != null && lm.HP > 0;
-			if (alive) monstersRow.AddChild(CreateUnitPanel(lm, false, lm.Name));
-			else monstersRow.AddChild(CreateEmptyUnitSlot(lm != null ? lm.Name + "\n\u5DF2\u6B7B\u4EA1" : "\u5DF2\u6B7B\u4EA1"));
+			if (mi < actualMonsterCount)
+			{
+				MonsterInstance monster = orderedMonsters[mi];
+				if (monster.HP > 0)
+				{
+					monstersRow.AddChild(CreateUnitPanel(monster, false, monster.Name));
+				}
+				else
+				{
+					var deadSlot = CreateEmptyUnitSlot(monster.Name);
+					deadSlot.ShowDeadOverlay();
+					monstersRow.AddChild(deadSlot);
+				}
+			}
+			else
+			{
+				monstersRow.AddChild(CreateEmptyUnitSlot($"怪物槽位 {mi + 1}"));
+			}
 		}
 	}
 	private UnitInstanceView CreateUnitPanel(IUnitInstance unit, bool isPlayer, string title)
@@ -615,6 +700,11 @@ public partial class CardBattleScene : Control
 	{
 		if (battle == null || battle.Players == null) return new();
 		return battle.Players.Values.Where(p => p.HP > 0).OrderBy(p => p.UniqueInGameId).ToList();
+	}
+	private List<CharacterInstance> GetAllOrderedPlayers()
+	{
+		if (battle == null || battle.Players == null) return new();
+		return battle.Players.Values.OrderBy(p => p.UniqueInGameId).ToList();
 	}
 	private List<MonsterInstance> GetOrderedMonsters()
 	{

@@ -1,4 +1,4 @@
-// Card.cs
+﻿// Card.cs
 using Godot;
 using CardSimulator;
 using System;
@@ -16,15 +16,20 @@ public partial class Card : Resource
 		public IUnitInstance Source { get; }
 		public IUnitInstance Target { get; }
 		public EffectResult EffectResult { get; }
+		public IReadOnlyList<EffectResult> IndividualEffectResults { get; }
 		public string ErrorMessage { get; }
 
 		public CardApplyResult(bool success, Card card, IUnitInstance source, IUnitInstance target, EffectResult effectResult = null, string errorMessage = "")
+			: this(success, card, source, target, effectResult, null, errorMessage) { }
+
+		public CardApplyResult(bool success, Card card, IUnitInstance source, IUnitInstance target, EffectResult effectResult, List<EffectResult> individualEffectResults, string errorMessage = "")
 		{
 			Success = success;
 			Card = card;
 			Source = source;
 			Target = target;
 			EffectResult = effectResult;
+			IndividualEffectResults = individualEffectResults?.AsReadOnly();
 			ErrorMessage = errorMessage ?? string.Empty;
 		}
 	}
