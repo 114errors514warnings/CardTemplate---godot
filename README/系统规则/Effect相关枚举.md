@@ -18,6 +18,8 @@
 | 11 | UpgradeBattleCard | 升级战斗中的具体卡牌 |
 | 12 | UpgradePermanentCard | 升级角色默认卡组中的具体卡牌 |
 | 13 | DamageByBattleLostHp | 额外造成自身本局已失去生命值的伤害 |
+| 14 | AddKeyword | 为卡牌添加运行时关键词（及KeywordFlag） |
+| 15 | MirrorShieldToAllies | 将前续Shield效果的累积护盾复制到全体友方 |
 
 ## EffectTargetType
 
@@ -28,6 +30,7 @@
 | 2 | SelectedTarget | 选定目标 |
 | 3 | AllEnemies | 全体敌人 |
 | 4 | AllUnits | 所有单位 |
+| 5 | AllAllies | 全体友方单位（不含自身） |
 
 ## StateType
 
@@ -40,9 +43,16 @@
 | 4 | CounterAttack | 反击 |
 | 5 | WhirlwindSlash | 旋风斩 |
 | 6 | AddAttack | 增加攻击力 |
-| 7 | ExtraEnergy | 下回合额外获得能量 |
+| 7 | ExtraEnergy | 下回合额外获得能量（已废弃） |
 | 8 | Void | 虚无 |
 | 9 | CourageArmor | 勇气铠甲 |
+| 10 | TurnStartEffect | 统一回合开始效果（资源类型由TurnStartResourceType指定） |
+| 11 | GainAttackOnHpLoss | 燃血：失去生命时+1攻击 |
+| 12 | CounterAttackWhenAttacking | 紧咬不放：攻击施加者时触发其反击 |
+| 13 | ShieldGuard | 持盾防守：下回合防御+3/攻击-1/禁战斗牌 |
+| 14 | ShieldCapEqualsHP | 阵地：回合开始时护盾上限=HP |
+| 15 | ForcedTaunt | 城墙：有护盾时强制嘲讽 |
+| 16 | RetainAllBattleCards | 蓄势待发：保留全部战斗牌，反击时替代打出 |
 
 ## MonsterDamageTargetMode
 

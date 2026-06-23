@@ -8,12 +8,17 @@ public sealed class StateRuntimeData
 	public int AppliedOrder { get; }
 	public int Stacks { get; set; }
 	public List<StateStackSegment> StackSegments { get; } = new List<StateStackSegment>();
+	public TurnStartResourceType TurnStartResource { get; set; }
+	public int TurnStartAmountPerStack { get; set; }
 
-	public StateRuntimeData(StateType type, int stacks, int appliedOrder)
+	public StateRuntimeData(StateType type, int stacks, int appliedOrder,
+		TurnStartResourceType turnStartResource = TurnStartResourceType.None, int turnStartAmountPerStack = 1)
 	{
 		Type = type;
 		AppliedOrder = appliedOrder;
 		Stacks = Math.Max(0, stacks);
+		TurnStartResource = turnStartResource;
+		TurnStartAmountPerStack = turnStartAmountPerStack > 0 ? turnStartAmountPerStack : 1;
 		if (Stacks > 0)
 		{
 			StackSegments.Add(new StateStackSegment(Stacks));
@@ -166,7 +171,8 @@ public static class StateSystem
 		return definition != null && definition.IsDebuff && !definition.IsElite;
 	}
 
-	public static void AddOrUpdateState(IUnitInstance unit, StateType type, int stacks)
+	public static void AddOrUpdateState(IUnitInstance unit, StateType type, int stacks,
+		TurnStartResourceType turnStartResource = TurnStartResourceType.None, int turnStartAmountPerStack = 1)
 	{
 		if (unit == null)
 		{
@@ -192,11 +198,17 @@ public static class StateSystem
 				existing.StackSegments.RemoveAll(segment => segment != null && segment.RemainingStacks > 0 && !segment.NeedCallback);
 				existing.StackSegments.Insert(0, new StateStackSegment(1));
 			}
+			if (type == StateType.TurnStartEffect && turnStartResource != TurnStartResourceType.None)
+			{
+				existing.TurnStartResource = turnStartResource;
+				existing.TurnStartAmountPerStack = turnStartAmountPerStack > 0 ? turnStartAmountPerStack : 1;
+			}
 			return;
 		}
 
 		int initialStacks = IsStackable(type) ? stacks : 1;
-		states[type] = new StateRuntimeData(type, initialStacks, System.Threading.Interlocked.Increment(ref nextAppliedOrder));
+		states[type] = new StateRuntimeData(type, initialStacks, System.Threading.Interlocked.Increment(ref nextAppliedOrder),
+			turnStartResource, turnStartAmountPerStack);
 	}
 
 	public static bool RegisterStateEndCallback(IUnitInstance unit, StateType type, int stacks, string stateCardUniqueInGameId, IUnitInstance ownerUnit)
@@ -327,7 +339,7 @@ public static class StateSystem
 		return orderedStateTypes;
 	}
 
-	public static int ModifyIncomingDamage(IUnitInstance source, IUnitInstance target, int baseDamage)
+	public static int ModifyIncomingDamage(Card card, IUnitInstance source, IUnitInstance target, int baseDamage)
 	{
 		if (target == null)
 		{
@@ -342,19 +354,23 @@ public static class StateSystem
 
 		if (TryGetStateStacks(target, StateType.Vulnerable, out int vulnerableStacks) && vulnerableStacks > 0)
 		{
-			// 易伤：受到伤害 +50%，按统一规则向下取整
 			damage = FloorByRule(damage * 1.5d);
 		}
 
 		if (source != null && TryGetStateStacks(source, StateType.Weak, out int weakStacks) && weakStacks > 0)
 		{
-			// 虚弱：造成的攻击伤害 -25%，按统一规则向下取整
 			damage = FloorByRule(damage * 0.75d);
 		}
 
 		if (source != null && TryGetStateStacks(source, StateType.AddAttack, out int AddAttackStacks) && AddAttackStacks > 0)
 		{
 			damage += AddAttackStacks;
+		}
+
+		if (card != null && card.HasKeyWord(CardKeyWord.Crit))
+		{
+			damage *= 2;
+			card.AppliedKeywords.RemoveAll(e => e.Keyword == CardKeyWord.Crit && e.Flags.HasFlag(KeywordFlag.RemoveAfterActivate));
 		}
 
 		return damage;
@@ -397,7 +413,19 @@ public static class StateSystem
 			throw new ArgumentNullException(nameof(unit));
 		}
 
-		if (card == null || card.Category != CardCategory.Attack)
+		if (card == null)
+		{
+			return;
+		}
+
+		if (TryGetStateStacks(unit, StateType.HpLossPerCardPlayed, out int hpLossStacks) && hpLossStacks > 0)
+		{
+			int hpLoss = hpLossStacks;
+			unit.HP = Math.Max(0, unit.HP - hpLoss);
+			AppendConsoleInfo($"{GetUnitLabel(unit)} 受到 HpLossPerCardPlayed 效果，失去 {hpLoss} 生命。");
+		}
+
+		if (card.Category != CardCategory.Attack)
 		{
 			return;
 		}
@@ -412,6 +440,39 @@ public static class StateSystem
 		{
 			AppendStateCardPlayedInfo(unit, StateType.CourageArmor, card, shieldResult);
 		}
+	}
+
+	public static void OnHpLost(IUnitInstance unit, int lostAmount)
+	{
+		if (unit == null || lostAmount <= 0)
+		{
+			return;
+		}
+
+		if (TryGetStateStacks(unit, StateType.GainAttackOnHpLoss, out int stacks) && stacks > 0)
+		{
+			AddOrUpdateState(unit, StateType.AddAttack, stacks);
+			AppendConsoleInfo($"{GetUnitLabel(unit)} 失去 {lostAmount} 生命，GainAttackOnHpLoss 触发，+{stacks} 攻击（AddAttack）。");
+		}
+	}
+
+	public static void OnMonsterAttackPlayer(IUnitInstance attacker, IUnitInstance target)
+	{
+		if (attacker == null || target == null)
+			return;
+		if (!attacker.States.TryGetValue(StateType.CounterAttackWhenAttacking, out StateRuntimeData stateData) || stateData == null)
+			return;
+		int triggedCount = 0;
+		foreach (var seg in stateData.StackSegments)
+		{
+			if (seg.OwnerUnit != null && seg.OwnerUnit.UniqueInGameId == target.UniqueInGameId && seg.RemainingStacks > 0)
+			{
+				EffectSystem.ApplyAttack(target, attacker);
+				triggedCount++;
+			}
+		}
+		if (triggedCount > 0)
+			AppendConsoleInfo($"{GetUnitLabel(attacker)} 攻击了 {GetUnitLabel(target)}，CounterAttackWhenAttacking 触发 {triggedCount} 次反击。");
 	}
 
 	private static int FloorByRule(double value)
@@ -463,11 +524,37 @@ public static class StateSystem
 			}
 		}
 
-		if (TryGetStateStacks(unit, StateType.ExtraEnergy, out int extraEnergyStacks) && extraEnergyStacks > 0)
+		if (TryGetStateStacks(unit, StateType.TurnStartEffect, out int turnStartStacks) && turnStartStacks > 0)
 		{
-			unit.Energy += extraEnergyStacks;
-			toRemove.Add(StateType.ExtraEnergy);
-			AppendStateTurnStartInfo(unit, StateType.ExtraEnergy, extraEnergyStacks);
+			TurnStartResourceType resource = GetTurnStartResource(unit);
+			int amountPerStack = GetTurnStartAmountPerStack(unit);
+			int total = amountPerStack * turnStartStacks;
+			switch (resource)
+			{
+				case TurnStartResourceType.ExtraEnergy:
+					unit.Energy += total;
+					AppendStateTurnStartInfo(unit, StateType.TurnStartEffect, total, "energy");
+					break;
+				case TurnStartResourceType.Shield:
+					for (int i = 0; i < total; i++)
+						EffectSystem.ApplyShield(unit, new int[] { 1 });
+					AppendStateTurnStartInfo(unit, StateType.TurnStartEffect, total, "shield");
+					break;
+			}
+			toRemove.Add(StateType.TurnStartEffect);
+		}
+
+		if (TryGetStateStacks(unit, StateType.ShieldGuard, out int shieldGuardStacks) && shieldGuardStacks > 0)
+		{
+			EffectSystem.ApplyShield(unit, new int[] { 3 });
+			toRemove.Add(StateType.ShieldGuard);
+			AppendStateTurnStartInfo(unit, StateType.ShieldGuard, shieldGuardStacks, "guard");
+		}
+
+		if (TryGetStateStacks(unit, StateType.ShieldCapEqualsHP, out int _))
+		{
+			if (unit.Shield > unit.HP)
+				unit.Shield = unit.HP;
 		}
 
 		foreach (StateType stateType in toRemove)
@@ -561,10 +648,29 @@ public static class StateSystem
 		return stateData.AppliedOrder;
 	}
 
-	private static void AppendStateTurnStartInfo(IUnitInstance unit, StateType type, int stacks)
+	private static TurnStartResourceType GetTurnStartResource(IUnitInstance unit)
+	{
+		if (unit?.States != null && unit.States.TryGetValue(StateType.TurnStartEffect, out StateRuntimeData data) && data != null)
+		{
+			return data.TurnStartResource;
+		}
+		return TurnStartResourceType.None;
+	}
+
+	private static int GetTurnStartAmountPerStack(IUnitInstance unit)
+	{
+		if (unit?.States != null && unit.States.TryGetValue(StateType.TurnStartEffect, out StateRuntimeData data) && data != null)
+		{
+			return data.TurnStartAmountPerStack;
+		}
+		return 1;
+	}
+
+	private static void AppendStateTurnStartInfo(IUnitInstance unit, StateType type, int stacks, string detail = null)
 	{
 		string unitLabel = unit == null ? "Unit" : $"Unit#{unit.UniqueInGameId}";
-		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} state {GetStateLabel(type)} triggered: gain {stacks} energy at turn start and remove this state.");
+		string detailSuffix = string.IsNullOrWhiteSpace(detail) ? "" : $" ({detail})";
+		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} state {GetStateLabel(type)} triggered{detailSuffix}: {stacks} stacks at turn start and remove this state.");
 	}
 
 	private static void AppendStateCardPlayedInfo(IUnitInstance unit, StateType type, Card card, EffectResult shieldResult)
@@ -575,6 +681,23 @@ public static class StateSystem
 			: string.IsNullOrWhiteSpace(card.CardName) ? $"CardId={card.CardId}" : card.CardName;
 		int gainedShield = shieldResult?.ShieldGained ?? 0;
 		BattleSytem.Current?.AppendPanelConsoleInfo($"{unitLabel} 的 {GetStateLabel(type)} 触发：打出攻击牌 {cardLabel} 后防御一次，获得 {gainedShield} 点护盾。");
+	}
+
+	private static string GetUnitLabel(IUnitInstance unit)
+	{
+		if (unit == null)
+		{
+			return "未知单位";
+		}
+
+		Unit typedUnit = unit as Unit;
+		string name = typedUnit?.Name ?? unit.GetType().Name;
+		return $"{name}(ID={unit.UniqueInGameId})";
+	}
+
+	private static void AppendConsoleInfo(string message)
+	{
+		BattleSytem.Current?.AppendPanelConsoleInfo(message);
 	}
 
 	private static string GetStateLabel(StateType type)

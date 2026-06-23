@@ -25,6 +25,9 @@ public partial class BattleSetupData : Resource
     [Export]
     public Godot.Collections.Dictionary<int, int> CharacterCardIds { get; set; } = new Godot.Collections.Dictionary<int, int>();
 
+    [Export]
+    public Godot.Collections.Dictionary<int, Godot.Collections.Dictionary<int, int>> CharacterCardIdsPerPlayer { get; set; } = new Godot.Collections.Dictionary<int, Godot.Collections.Dictionary<int, int>>();
+
     public void EnsureMonsterDictionaryInitialized()
     {
         MonsterIds ??= new Godot.Collections.Dictionary<int, int>();
@@ -333,6 +336,65 @@ public partial class BattleSetupData : Resource
         EnsureCharacterCardDictionaryInitialized();
         CharacterCardIds[cardId] = GetCharacterCardIdCount(cardId) + count;
         return count;
+    }
+
+    /// <summary>
+    /// 向指定角色添加卡牌（characterIndex 从 1 开始，0 表示全部角色）
+    /// </summary>
+    public int AddCharacterCardIdForPlayer(int characterIndex, int cardId, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        if (characterIndex <= 0)
+        {
+            return AddCharacterCardId(cardId, count);
+        }
+
+        EnsureCharacterOrderInitialized();
+        int zeroBasedIndex = characterIndex - 1;
+        if (zeroBasedIndex >= CharacterOrder.Count)
+        {
+            return 0;
+        }
+
+        CharacterCardIdsPerPlayer ??= new Godot.Collections.Dictionary<int, Godot.Collections.Dictionary<int, int>>();
+        if (!CharacterCardIdsPerPlayer.TryGetValue(zeroBasedIndex, out var playerCards))
+        {
+            playerCards = new Godot.Collections.Dictionary<int, int>();
+            CharacterCardIdsPerPlayer[zeroBasedIndex] = playerCards;
+        }
+
+        playerCards[cardId] = (playerCards.TryGetValue(cardId, out int current) ? current : 0) + count;
+        return count;
+    }
+
+    /// <summary>
+    /// 获取指定角色的卡牌ID列表（characterIndex 从 0 开始，-1 表示全部角色）
+    /// </summary>
+    public List<int> GetCharacterCardIdListForPlayer(int playerIndex)
+    {
+        List<int> result = new List<int>();
+
+        // 先添加全局卡牌（CharacterCardIds，适用于所有角色）
+        result.AddRange(GetCharacterCardIdList());
+
+        // 再添加该角色专属卡牌
+        if (CharacterCardIdsPerPlayer != null && CharacterCardIdsPerPlayer.TryGetValue(playerIndex, out var playerCards))
+        {
+            foreach (int cardId in playerCards.Keys)
+            {
+                int count = playerCards[cardId];
+                for (int i = 0; i < count; i++)
+                {
+                    result.Add(cardId);
+                }
+            }
+        }
+
+        return result;
     }
 
     public int RemoveCharacterCardId(int cardId, int count = 1)

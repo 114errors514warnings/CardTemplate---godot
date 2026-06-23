@@ -107,7 +107,9 @@ public partial class Card : Resource
 	public bool NeedTarget { get; set; } = false; // 是否需要目标
 
 	[Export]
-	public CardKeyWord CardKeyWord { get; set; } = CardKeyWord.None; // 卡牌关键词
+	public CardKeyWord CardKeyWord { get; set; } = CardKeyWord.None; // 卡牌关键词（CSV固有）
+
+	public List<AppliedKeywordEntry> AppliedKeywords { get; set; } = new List<AppliedKeywordEntry>(); // 运行时附加关键词
 
 	public CardConditionType[] ConditionParams { get; set; } = Array.Empty<CardConditionType>();
 
@@ -146,7 +148,14 @@ public partial class Card : Resource
 
 	public bool HasKeyWord(CardKeyWord keyWord)
 	{
-		return (CardKeyWord & keyWord) == keyWord;
+		if ((CardKeyWord & keyWord) == keyWord)
+			return true;
+		foreach (AppliedKeywordEntry entry in AppliedKeywords)
+		{
+			if (entry.Keyword == keyWord)
+				return true;
+		}
+		return false;
 	}
 
 	// 自动推导 NeedTarget：任意效果的 TargetType == SelectedTarget 则为 true
@@ -220,6 +229,7 @@ public partial class Card : Resource
 	protected virtual CardApplyResult ApplyEffect(IUnitInstance source, IUnitInstance target)
 	{
 		CardApplyResult lastResult = null;
+		int accumulatedShield = 0;
 
 		for (int i = 0; i < EffectTypes.Length; i++)
 		{
@@ -253,6 +263,8 @@ public partial class Card : Resource
 						break;
 				case EffectType.Shield:
 					result = ApplyShieldEffect(source, resolvedTargets, effectArgs);
+					if (result.EffectResult != null)
+						accumulatedShield += result.EffectResult.ShieldGained;
 					break;
 				case EffectType.AddState:
 					result = ApplyAddStateEffect(source, target, resolvedTargets, effectArgs);
@@ -278,6 +290,12 @@ public partial class Card : Resource
 				case EffectType.ShieldSlam:
 					result = ApplyShieldSlamEffect(source, resolvedTargets, effectArgs);
 					break;
+				case EffectType.AddKeyword:
+					result = ApplyAddKeywordEffect(source, resolvedTargets, effectArgs);
+					break;
+				case EffectType.MirrorShieldToAllies:
+					result = ApplyMirrorShieldToAlliesEffect(source, resolvedTargets, effectArgs, accumulatedShield);
+					break;
 				default:
 					string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 暂未实现。";
 					AppendConsoleError(errorMessage, true);
@@ -301,7 +319,7 @@ public partial class Card : Resource
 
 	private static bool IsCardOperationEffect(EffectType effectType)
 	{
-		return effectType == EffectType.UpgradeBattleCard || effectType == EffectType.UpgradePermanentCard;
+		return effectType == EffectType.UpgradeBattleCard || effectType == EffectType.UpgradePermanentCard || effectType == EffectType.AddKeyword;
 	}
 
 	private CardApplyResult ApplyDamageEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
@@ -317,7 +335,7 @@ public partial class Card : Resource
 			lastTarget = resolvedTarget;
 			for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)
 			{
-				lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, finalEffectArgs);
+			lastEffectResult = EffectSystem.ApplyAttack(source, resolvedTarget, finalEffectArgs, card: this);
 				effectResults.Add(lastEffectResult);
 				AccumulateDamageSummary(targetSummaries, resolvedTarget, lastEffectResult);
 			}
@@ -582,11 +600,20 @@ public partial class Card : Resource
 		}
 
 		int stacks = effectArgs.Length > 1 ? effectArgs[1] : 1;
+
+		TurnStartResourceType turnStartResource = TurnStartResourceType.None;
+		int turnStartAmount = 1;
+		if (stateType == StateType.TurnStartEffect && effectArgs.Length > 2)
+		{
+			turnStartResource = (TurnStartResourceType)effectArgs[2];
+			turnStartAmount = effectArgs.Length > 3 ? effectArgs[3] : 1;
+		}
+
 		IUnitInstance lastTarget = null;
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			StateSystem.AddOrUpdateState(resolvedTarget, stateType, stacks);
+			StateSystem.AddOrUpdateState(resolvedTarget, stateType, stacks, turnStartResource, turnStartAmount);
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget);
@@ -639,40 +666,48 @@ public partial class Card : Resource
 		int drawCount = effectArgs.Length > 0 ? effectArgs[0] : 0;
 		IUnitInstance lastTarget = null;
 
-		// DrawCard 效果作用于 source（抽牌者），而不是 resolvedTargets
-		if (source is CharacterInstance character)
+		if (resolvedTargets.Count == 0)
 		{
-			lastTarget = source;
-			int drawn = 0;
-			for (int i = 0; i < drawCount; i++)
-			{
-				if (character.drawpile.Count == 0)
-				{
-					if (character.discardpile.Count == 0)
-					{
-						break;
-					}
+			resolvedTargets = new List<IUnitInstance> { source };
+		}
 
-					// 将弃牌堆洗入抽牌堆
-					character.drawpile.AddRange(character.discardpile);
-					character.discardpile.Clear();
-					ShuffleList(character.drawpile);
-					AppendConsoleInfo("抽牌堆为空：已将弃牌堆随机洗牌后放回抽牌堆。");
+		foreach (IUnitInstance target in resolvedTargets)
+		{
+			if (target is CharacterInstance character)
+			{
+				if (StateSystem.TryGetStateStacks(character, StateType.DrawLock, out int _))
+				{
+					AppendConsoleInfo($"{GetUnitLabel(character)} 受 DrawLock 影响，跳过卡牌效果抽牌。");
+					continue;
 				}
 
-				character.handcards.Add(character.drawpile[0]);
-				character.drawpile.RemoveAt(0);
-				drawn++;
+				lastTarget = character;
+				int drawn = 0;
+				for (int i = 0; i < drawCount; i++)
+				{
+					if (character.drawpile.Count == 0)
+					{
+						if (character.discardpile.Count == 0)
+						{
+							break;
+						}
+
+						character.drawpile.AddRange(character.discardpile);
+						character.discardpile.Clear();
+						ShuffleList(character.drawpile);
+						AppendConsoleInfo("抽牌堆为空：已将弃牌堆随机洗牌后放回抽牌堆。");
+					}
+
+					character.handcards.Add(character.drawpile[0]);
+					character.drawpile.RemoveAt(0);
+					drawn++;
+				}
+
+				AppendConsoleInfo($"{GetUnitLabel(character)} 抽取 {drawn} 张牌");
 			}
-
-			AppendConsoleInfo($"{GetUnitLabel(source)} 抽取 {drawn} 张牌");
-		}
-		else
-		{
-			AppendConsoleInfo($"抽牌效果仅对角色有效");
 		}
 
-		return new CardApplyResult(true, this, source, lastTarget);
+		return new CardApplyResult(true, this, source, lastTarget ?? source);
 	}
 
 	private static void ShuffleList(List<Card> cards)
@@ -761,6 +796,66 @@ public partial class Card : Resource
 		return new CardApplyResult(true, this, source, lastTarget);
 	}
 
+	private CardApplyResult ApplyAddKeywordEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		if (effectArgs.Length < 2)
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 AddKeyword 参数不足，需要 CardOperationTargetType 和 keywordName。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, null, errorMessage: errorMessage);
+		}
+
+		int rawTargetType = effectArgs[0];
+		CardOperationTargetType cardOpTargetType = Enum.IsDefined(typeof(CardOperationTargetType), rawTargetType)
+			? (CardOperationTargetType)rawTargetType
+			: CardOperationTargetType.None;
+
+		int rawKeyword = effectArgs[1];
+		if (!Enum.IsDefined(typeof(CardKeyWord), rawKeyword))
+		{
+			string errorMessage = $"卡牌ID {CardId} 的 AddKeyword 中 CardKeyWord 值 {rawKeyword} 无效。";
+			AppendConsoleError(errorMessage, true);
+			return new CardApplyResult(false, this, source, null, errorMessage: errorMessage);
+		}
+
+		CardKeyWord keyword = (CardKeyWord)rawKeyword;
+		KeywordFlag keywordFlag = effectArgs.Length > 2 ? (KeywordFlag)effectArgs[2] : KeywordFlag.None;
+
+		int count = effectArgs.Length > 3 ? effectArgs[3] : 1;
+
+		if (source is CharacterInstance character)
+		{
+			List<Card> targetCards = BattleSytem.Current?.GetCardsForCardOperation(character, cardOpTargetType, count) ?? new List<Card>();
+			foreach (Card targetCard in targetCards)
+			{
+				targetCard.AppliedKeywords.Add(new AppliedKeywordEntry { Keyword = keyword, Flags = keywordFlag });
+			}
+
+			AppendConsoleInfo($"{GetUnitLabel(source)} 为 {targetCards.Count} 张卡牌添加了关键词 {keyword} (Flags={keywordFlag})");
+		}
+
+		return new CardApplyResult(true, this, source, source);
+	}
+
+	private CardApplyResult ApplyMirrorShieldToAlliesEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs, int priorShield = 0)
+	{
+		if (resolvedTargets.Count == 0)
+		{
+			return new CardApplyResult(true, this, source, source);
+		}
+
+		int totalShield = priorShield > 0 ? priorShield : (effectArgs.Length > 0 && effectArgs[0] > 0 ? effectArgs[0] : 0);
+
+		foreach (IUnitInstance ally in resolvedTargets)
+		{
+			EffectSystem.ApplyShield(ally, new int[] { totalShield });
+		}
+
+		AppendConsoleInfo($"{GetUnitLabel(source)} 将所有友方单位护盾增加 {totalShield}（前序累积护盾）");
+
+		return new CardApplyResult(true, this, source, resolvedTargets[resolvedTargets.Count - 1]);
+	}
+
 	private static string GetUnitLabel(IUnitInstance unit)
 	{
 		if (unit == null)
@@ -818,6 +913,9 @@ public partial class Card : Resource
 				break;
 			case EffectTargetType.AllUnits:
 				targets.AddRange(BattleSytem.Current?.GetAllUnits() ?? new List<IUnitInstance>());
+				break;
+			case EffectTargetType.AllAllies:
+				targets.AddRange(BattleSytem.Current?.GetAllyUnits(source) ?? new List<IUnitInstance>());
 				break;
 			case EffectTargetType.Auto:
 			default:

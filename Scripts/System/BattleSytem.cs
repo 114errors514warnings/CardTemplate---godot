@@ -236,6 +236,86 @@ public partial class BattleSytem : Node
         return result;
     }
 
+    public List<IUnitInstance> GetAllyUnits(IUnitInstance source)
+    {
+        List<IUnitInstance> allies = new List<IUnitInstance>();
+        if (source == null)
+        {
+            return allies;
+        }
+
+        if (source is CharacterInstance)
+        {
+            foreach (CharacterInstance player in GetAlivePlayers())
+            {
+                if (player != null && player.UniqueInGameId != source.UniqueInGameId)
+                {
+                    allies.Add(player);
+                }
+            }
+        }
+        else
+        {
+            if (Monsters != null)
+            {
+                foreach (MonsterInstance monster in Monsters.Values)
+                {
+                    if (monster != null && monster.HP > 0 && monster.UniqueInGameId != source.UniqueInGameId)
+                    {
+                        allies.Add(monster);
+                    }
+                }
+            }
+        }
+
+        return allies;
+    }
+
+    public List<Card> GetCardsForCardOperation(CharacterInstance player, CardOperationTargetType targetType, int count)
+    {
+        List<Card> result = new List<Card>();
+        if (player == null || count <= 0)
+        {
+            return result;
+        }
+
+        switch (targetType)
+        {
+            case CardOperationTargetType.SelectHandCards:
+            case CardOperationTargetType.RandomHandCards:
+                if (player.handcards != null && player.handcards.Count > 0)
+                {
+                    int take = Math.Min(count, player.handcards.Count);
+                    List<Card> shuffled = new List<Card>(player.handcards);
+                    ShuffleCardList(shuffled);
+                    for (int i = 0; i < take; i++)
+                    {
+                        result.Add(shuffled[i]);
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+
+        return result;
+    }
+
+    private static void ShuffleCardList(List<Card> cards)
+    {
+        if (cards == null || cards.Count <= 1)
+        {
+            return;
+        }
+
+        System.Random rng = new System.Random();
+        for (int i = cards.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (cards[i], cards[j]) = (cards[j], cards[i]);
+        }
+    }
+
     public int GetBattleLostHp(IUnitInstance unit)
     {
         if (unit == null)
@@ -281,10 +361,11 @@ public partial class BattleSytem : Node
             return;
         }
 
-        if (newHp < oldHp)
-        {
-            RecordHpLossEvent(unit, oldHp - newHp);
-        }
+		if (newHp < oldHp)
+		{
+			RecordHpLossEvent(unit, oldHp - newHp);
+			StateSystem.OnHpLost(unit, oldHp - newHp);
+		}
     }
 
     public int GetBattleCardsPlayedThisTurnCount(CharacterInstance player)
@@ -812,8 +893,9 @@ public partial class BattleSytem : Node
         if (canReuseExistingPlayers)
         {
             Players = existingPlayers.ToDictionary(player => player.UniqueInGameId, player => player);
-            foreach (CharacterInstance player in existingPlayers)
+            for (int idx = 0; idx < existingPlayers.Count; idx++)
             {
+                CharacterInstance player = existingPlayers[idx];
                 if (!characters.TryGetValue(player.id, out Character template))
                 {
                     AppendPanelConsoleError($"错误：角色ID {player.id} 未在缓存中找到，无法复用角色实例。");
@@ -822,7 +904,7 @@ public partial class BattleSytem : Node
 
                 ResetPlayerForNewBattle(player, template);
                 BindPlayerCallbacks(player);
-                EnsurePlayerDefaultDeckInitialized(player);
+                EnsurePlayerDefaultDeckInitialized(player, idx);
                 AppendPanelConsoleInfo($"已复用角色 {player.Name}（ID: {player.id}, UniqueInGameId: {player.UniqueInGameId}），保留默认卡组实例 {player.DefaultDeck.Count} 张。" );
             }
             return;
@@ -830,8 +912,9 @@ public partial class BattleSytem : Node
 
         Players = new Dictionary<int, CharacterInstance>();
 
-        foreach (int characterId in characterIds)
+        for (int idx = 0; idx < characterIds.Count; idx++)
         {
+            int characterId = characterIds[idx];
             if (!characters.TryGetValue(characterId, out var character))
             {
                 AppendPanelConsoleError($"错误：角色ID {characterId} 未在缓存中找到。");
@@ -840,7 +923,7 @@ public partial class BattleSytem : Node
 
             CharacterInstance player = new CharacterInstance(character);
             BindPlayerCallbacks(player);
-            EnsurePlayerDefaultDeckInitialized(player);
+            EnsurePlayerDefaultDeckInitialized(player, idx);
             Players[player.UniqueInGameId] = player;
             AppendPanelConsoleInfo($"已创建角色 {player.Name}（ID: {characterId}, UniqueInGameId: {player.UniqueInGameId}）。");
         }
@@ -898,7 +981,7 @@ public partial class BattleSytem : Node
         player.States?.Clear();
     }
 
-    private void EnsurePlayerDefaultDeckInitialized(CharacterInstance player)
+    private void EnsurePlayerDefaultDeckInitialized(CharacterInstance player, int playerIndex = -1)
     {
         if (player == null || player.DefaultDeck.Count > 0)
         {
@@ -906,7 +989,15 @@ public partial class BattleSytem : Node
         }
 
         List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdListByKey(player.id, LoadingSystem.CharacterDefaultDeckCsvPathKey, true);
-        List<int> configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
+        List<int> configuredCardIds;
+        if (playerIndex >= 0 && SetupData != null)
+        {
+            configuredCardIds = SetupData.GetCharacterCardIdListForPlayer(playerIndex);
+        }
+        else
+        {
+            configuredCardIds = SetupData == null ? new List<int>() : SetupData.GetCharacterCardIdList();
+        }
 
         foreach (int cardId in defaultCardIds)
         {
@@ -1331,9 +1422,17 @@ public partial class BattleSytem : Node
             return false;
         }
 
-        if (sourcePlayer.costs < card.EnergyCost)
+        int actualEnergyCost = card.EnergyCost;
+        if (IsBattleCard(card) && StateSystem.TryGetStateStacks(sourcePlayer, StateType.NextBattleCardFree, out int freeStacks) && freeStacks > 0)
         {
-            AppendPanelConsoleError($"错误：费用不足，打出卡牌ID {card.CardId} 需要 {card.EnergyCost} 点费用，当前仅有 {sourcePlayer.costs} 点。");
+            actualEnergyCost = 0;
+            StateSystem.RemoveState(sourcePlayer, StateType.NextBattleCardFree);
+            AppendPanelConsoleInfo($"{sourcePlayer.Name} 的 NextBattleCardFree 生效，本张战斗牌免费。");
+        }
+
+        if (sourcePlayer.costs < actualEnergyCost)
+        {
+            AppendPanelConsoleError($"错误：费用不足，打出卡牌ID {card.CardId} 需要 {actualEnergyCost} 点费用，当前仅有 {sourcePlayer.costs} 点。");
             return false;
         }
 
@@ -1457,6 +1556,13 @@ public partial class BattleSytem : Node
             player.discardpile.AddRange(toDiscard);
             player.handcards.Clear();
             player.handcards.AddRange(toKeep);
+
+            // 移除运行时关键词中标记为回合结束移除的条目
+            foreach (Card keptCard in toKeep)
+            {
+                keptCard.AppliedKeywords?.RemoveAll(e => e.Flags.HasFlag(KeywordFlag.RemoveAtTurnEnd));
+            }
+
             if (toDiscard.Count > 0)
                 AppendPanelConsoleInfo($"玩家 {player.Name} 回合结束：弃置手牌 {toDiscard.Count} 张{(toKeep.Count > 0 ? $"，保留 {toKeep.Count} 张" : string.Empty)}。");
             else if (toKeep.Count > 0)
@@ -1979,6 +2085,12 @@ public partial class BattleSytem : Node
     {
         if (player == null || count <= 0)
         {
+            return 0;
+        }
+
+        if (StateSystem.TryGetStateStacks(player, StateType.DrawLock, out int _))
+        {
+            AppendPanelConsoleInfo($"{player.Name} 受 DrawLock 影响，跳过抽牌。");
             return 0;
         }
 
@@ -2609,28 +2721,29 @@ public partial class BattleSytem : Node
     private void AppendPanelConsole(string message)
     {
         Node scene = GetTree().CurrentScene;
-        if (scene == null)
+        RichTextLabel console = null;
+        if (scene != null)
         {
+            console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
+            if (console == null)
+            {
+                console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
+            }
+        }
+
+        if (console != null)
+        {
+            if (!string.IsNullOrEmpty(console.Text))
+            {
+                console.Text += "\n";
+            }
+
+            console.Text += message;
             return;
         }
 
-        RichTextLabel console = scene.GetNodeOrNull<RichTextLabel>("ConsoleContainer/Console");
-        if (console == null)
-        {
-            console = scene.GetNodeOrNull<RichTextLabel>("UI_Main/ConsoleContainer/Console");
-        }
-
-        if (console == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(console.Text))
-        {
-            console.Text += "\n";
-        }
-
-        console.Text += message;
+        // Fallback: log to Godot console when no Console node exists (e.g. CardBattleScene)
+        GD.Print(message);
     }
 
     private void RegisterStateCardEndCallbacks(List<StateCardApplication> applications, Card sourceCard, IUnitInstance ownerUnit)
@@ -2783,6 +2896,9 @@ public partial class BattleSytem : Node
                 break;
             case EffectTargetType.AllUnits:
                 targets.AddRange(GetAllUnits() ?? new List<IUnitInstance>());
+                break;
+            case EffectTargetType.AllAllies:
+                targets.AddRange(GetAllyUnits(source) ?? new List<IUnitInstance>());
                 break;
             case EffectTargetType.Auto:
             default:

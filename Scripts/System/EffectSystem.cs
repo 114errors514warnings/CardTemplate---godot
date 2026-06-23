@@ -92,18 +92,19 @@ public sealed class EffectContext
 {
     public IUnitInstance Source { get; }
     public IUnitInstance Target { get; }
-    // 当前效果的参数数组，params[0]为第一个参数，依此类推
     public int[] Params { get; }
     public bool IsCounterAttack { get; }
     public bool SkipOutOfTurnMultiTarget { get; }
+    public Card Card { get; }
 
-    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false)
+    public EffectContext(IUnitInstance source, IUnitInstance target = null, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false, Card card = null)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
         Target = target;
         Params = effectParams ?? Array.Empty<int>();
         IsCounterAttack = isCounterAttack;
         SkipOutOfTurnMultiTarget = skipOutOfTurnMultiTarget;
+        Card = card;
     }
 
     public int GetParam(int index, int defaultValue = 0)
@@ -140,7 +141,7 @@ public sealed class AttackEffect : IEffect
         }
 
         int damage = Math.Max(0, context.Source.Attack + context.GetParam(0));
-        damage = StateSystem.ModifyIncomingDamage(context.Source, context.Target, damage);
+        damage = StateSystem.ModifyIncomingDamage(context.Card, context.Source, context.Target, damage);
         int targetShieldBefore = context.Target.Shield;
         int targetHpBefore = context.Target.HP;
 
@@ -154,6 +155,11 @@ public sealed class AttackEffect : IEffect
         }
 
         TryTriggerCounterAttack(context);
+
+        if (!context.IsCounterAttack && context.Source is MonsterInstance && context.Target is CharacterInstance)
+        {
+            StateSystem.OnMonsterAttackPlayer(context.Source, context.Target);
+        }
 
         return new EffectResult(
             Name,
@@ -390,7 +396,7 @@ public sealed class ShieldSlamEffect : IEffect
         }
 
         int damage = Math.Max(0, source.Attack + sourceValue + extraDamage);
-        damage = StateSystem.ModifyIncomingDamage(source, target, damage);
+        damage = StateSystem.ModifyIncomingDamage(null, source, target, damage);
 
         int targetShieldBefore = target.Shield;
         int targetHpBefore = target.HP;
@@ -435,9 +441,9 @@ public static class EffectSystem
         return effect.Apply(context);
     }
 
-    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false)
+    public static EffectResult ApplyAttack(IUnitInstance source, IUnitInstance target, int[] effectParams = null, bool isCounterAttack = false, bool skipOutOfTurnMultiTarget = false, Card card = null)
     {
-        return Apply(Attack, new EffectContext(source, target, effectParams, isCounterAttack, skipOutOfTurnMultiTarget));
+        return Apply(Attack, new EffectContext(source, target, effectParams, isCounterAttack, skipOutOfTurnMultiTarget, card));
     }
 
     public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)

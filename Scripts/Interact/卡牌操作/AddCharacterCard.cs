@@ -2,7 +2,7 @@ using Godot;
 
 public partial class AddCharacterCard : Button
 {
-	private const string ParameterFormat = "卡牌ID [增加数量]";
+	private const string ParameterFormat = "卡牌ID [增加数量] [角色index(1-3)]";
 
 	public override void _Ready()
 	{
@@ -42,7 +42,18 @@ public partial class AddCharacterCard : Button
 			}
 		}
 
-		AppendConsoleInfo($"新增角色卡牌 参数解析：卡牌ID={cardId}，增加数量={addCount}");
+		int characterIndex = 0;
+		if (arguments.Length >= 3)
+		{
+			if (!int.TryParse(arguments[2], out characterIndex) || characterIndex < 0 || characterIndex > 3)
+			{
+				AppendConsoleError($"错误：角色index '{arguments[2]}' 不是 0-3 的合法数字。0=全部角色，1-3=指定角色。");
+				return;
+			}
+		}
+
+		string targetHint = characterIndex <= 0 ? "全部角色" : $"角色{characterIndex}";
+		AppendConsoleInfo($"新增角色卡牌 参数解析：卡牌ID={cardId}，增加数量={addCount}，目标={targetHint}");
 
 		EnsureCardCacheLoaded();
 		if (!LoadingSystem.CardDictionary.ContainsKey(cardId))
@@ -65,12 +76,10 @@ public partial class AddCharacterCard : Button
 		}
 
 		BattleSetupData setupData = battleSytem.EnsureSetupData();
-		int actualAddedCount = setupData.AddCharacterCardId(cardId, addCount);
+		int actualAddedCount = setupData.AddCharacterCardIdForPlayer(characterIndex, cardId, addCount);
 		battleSytem.RefreshBattleInfoDisplay();
 
-		int sameTypeCount = setupData.GetCharacterCardIdCount(cardId);
-		int totalCount = setupData.GetTotalCharacterCardCount();
-		AppendConsoleInfo($"已添加角色卡牌ID {cardId} 共 {actualAddedCount} 个。该类型当前数量：{sameTypeCount}，角色卡牌总数：{totalCount}");
+		AppendConsoleInfo($"已为目标 {targetHint} 添加角色卡牌ID {cardId} 共 {actualAddedCount} 个。");
 	}
 
 	private string[] ParseArguments(string raw)
