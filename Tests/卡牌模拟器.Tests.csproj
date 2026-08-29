@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>卡牌模拟器.Tests</RootNamespace>
+    <IntermediateOutputPath>$(MSBuildThisFileDirectory)obj\</IntermediateOutputPath>
+    <OutputPath>$(MSBuildThisFileDirectory)bin\</OutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 引用已构建好的 dll 而非 ProjectReference，避免触发主项目重编、解决 Godot SDK 中间产物冲突 -->
+    <Reference Include="卡牌模拟器">
+      <HintPath>..\.godot\mono\temp\bin\Debug\卡牌模拟器.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Scripts\**\*.cs" />
+  </ItemGroup>
+
+</Project>

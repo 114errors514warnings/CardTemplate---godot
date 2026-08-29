@@ -26,14 +26,15 @@ public partial class CardBattleScene : Control
 	[Export] public PackedScene UnitViewScene;
 	[Export] public int MaxPlayerSlots = 3;
 	[Export] public int MaxMonsterSlots = 3;
+	[Export] public int MaxUnitsPerRow = 3;
 	[Export] public int PilePopupColumns = 4;
 
 	private BattleSytem battle;
 	private Label turnLabel;
 	private PanelContainer playersPanel;
 	private PanelContainer monstersPanel;
-	private HBoxContainer playersRow;
-	private HBoxContainer monstersRow;
+	private GridContainer playersRow;
+	private GridContainer monstersRow;
 	private Label currentHandOwnerLabel;
 	private HBoxContainer handCardsContainer;
 	private readonly Stack<Control> cardPool = new();
@@ -58,7 +59,7 @@ public partial class CardBattleScene : Control
 	private Line2D dragArrow;
 	private Button setupWindowButton;
 	private Button debugPanelButton;
-	private Control windowLayer;
+	private CanvasLayer windowLayer;
 	private Control floatLayer;
 	private Control setupWindow;
 	private Control debugPanelWindow;
@@ -90,8 +91,8 @@ public partial class CardBattleScene : Control
 		turnLabel = GetNodeOrNull<Label>("MainMargin/MainVBox/TopBar/TurnLabel");
 		playersPanel = GetNodeOrNull<PanelContainer>("MainMargin/MainVBox/ArenaRow/PlayersPanel");
 		monstersPanel = GetNodeOrNull<PanelContainer>("MainMargin/MainVBox/ArenaRow/MonstersPanel");
-		playersRow = GetNodeOrNull<HBoxContainer>("MainMargin/MainVBox/ArenaRow/PlayersPanel/Margin/VBox/PlayersRow");
-		monstersRow = GetNodeOrNull<HBoxContainer>("MainMargin/MainVBox/ArenaRow/MonstersPanel/Margin/VBox/MonstersRow");
+		playersRow = GetNodeOrNull<GridContainer>("MainMargin/MainVBox/ArenaRow/PlayersPanel/Margin/VBox/PlayersRow");
+		monstersRow = GetNodeOrNull<GridContainer>("MainMargin/MainVBox/ArenaRow/MonstersPanel/Margin/VBox/MonstersRow");
 		currentHandOwnerLabel = GetNodeOrNull<Label>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/HeaderRow/CurrentHandOwnerLabel");
 		handCardsContainer = GetNodeOrNull<HBoxContainer>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/ContentRow/HandCardsViewport/HandCards");
 		handCardsViewport = GetNodeOrNull<Control>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/ContentRow/HandCardsViewport");
@@ -116,7 +117,7 @@ public partial class CardBattleScene : Control
 		dragArrow = GetNodeOrNull<Line2D>("DragLayer/DragArrow");
 		setupWindowButton = GetNodeOrNull<Button>("MainMargin/MainVBox/TopBar/SetupWindowButton");
 		debugPanelButton = GetNodeOrNull<Button>("MainMargin/MainVBox/TopBar/DebugPanelButton");
-		windowLayer = GetNodeOrNull<Control>("WindowLayer");
+		windowLayer = GetNodeOrNull<CanvasLayer>("WindowLayer");
 		EnsureAuxiliaryWindows(); EnsureSetupDataInitialized();
 		if (!AutoStartBattle) { battle?.RefreshBattleInfoDisplay(); ShowSetupWindow(); }
 		else { initialMonsterOrder.Clear(); initialMonsterOrder.AddRange(BuildInitialMonsterIds()); battle?.OnInit(BuildInitialCharacterIds(), BuildInitialMonsterIds()); }
@@ -446,7 +447,11 @@ public partial class CardBattleScene : Control
 		unitViews.Clear();
 		ClearChildren(playersRow); ClearChildren(monstersRow);
 		var players = GetAllOrderedPlayers();
-		for (int i = 0; i < Math.Max(MaxPlayerSlots, players.Count); i++)
+		int playerSlotCount = Math.Max(MaxPlayerSlots, players.Count);
+		int playerColumns = Math.Max(1, Math.Min(MaxUnitsPerRow, playerSlotCount));
+		ApplyUnitAreaColumns(playersRow, playerColumns);
+		ApplyUnitAreaScale(playersRow, playerSlotCount);
+		for (int i = 0; i < playerSlotCount; i++)
 		{
 			if (i < players.Count)
 			{
@@ -469,7 +474,11 @@ public partial class CardBattleScene : Control
 		}
 		List<MonsterInstance> orderedMonsters = GetOrderedMonsters();
 		int actualMonsterCount = orderedMonsters.Count;
-		for (int mi = 0; mi < MaxMonsterSlots; mi++)
+		int monsterSlotCount = Math.Max(MaxMonsterSlots, actualMonsterCount);
+		int monsterColumns = Math.Max(1, Math.Min(MaxUnitsPerRow, monsterSlotCount));
+		ApplyUnitAreaColumns(monstersRow, monsterColumns);
+		ApplyUnitAreaScale(monstersRow, monsterSlotCount);
+		for (int mi = 0; mi < monsterSlotCount; mi++)
 		{
 			if (mi < actualMonsterCount)
 			{
@@ -490,6 +499,31 @@ public partial class CardBattleScene : Control
 				monstersRow.AddChild(CreateEmptyUnitSlot($"怪物槽位 {mi + 1}"));
 			}
 		}
+	}
+
+	private static void ApplyUnitAreaColumns(GridContainer grid, int columns)
+	{
+		if (grid == null) return;
+		int clamped = Math.Max(1, columns);
+		if (grid.Columns != clamped) grid.Columns = clamped;
+	}
+
+	// 单位数超出单行时按比例整体缩放，避免撑破窗口。
+	// 1~3 不缩；4=0.85；5~6=0.72；7~8=0.62；9+=0.54。
+	private void ApplyUnitAreaScale(GridContainer grid, int slotCount)
+	{
+		if (grid == null) return;
+		float scale = slotCount switch
+		{
+			<= 3 => 1.0f,
+			4 => 0.85f,
+			<= 6 => 0.72f,
+			<= 8 => 0.62f,
+			_ => 0.54f,
+		};
+		grid.Scale = new Vector2(scale, scale);
+		// 缩放后 pivot 居中，避免位置偏移
+		grid.PivotOffset = grid.Size * 0.5f;
 	}
 	private UnitInstanceView CreateUnitPanel(IUnitInstance unit, bool isPlayer, string title)
 	{

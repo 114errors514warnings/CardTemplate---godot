@@ -81,11 +81,13 @@ layout_mode = 2
 text = "角色区域"
 horizontal_alignment = 1
 
-[node name="PlayersRow" type="HBoxContainer" parent="MainMargin/MainVBox/ArenaRow/PlayersPanel/Margin/VBox"]
+[node name="PlayersRow" type="GridContainer" parent="MainMargin/MainVBox/ArenaRow/PlayersPanel/Margin/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+columns = 3
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
 
 [node name="MonstersPanel" type="PanelContainer" parent="MainMargin/MainVBox/ArenaRow"]
 custom_minimum_size = Vector2(480, 0)
@@ -109,11 +111,13 @@ layout_mode = 2
 text = "怪物区域"
 horizontal_alignment = 1
 
-[node name="MonstersRow" type="HBoxContainer" parent="MainMargin/MainVBox/ArenaRow/MonstersPanel/Margin/VBox"]
+[node name="MonstersRow" type="GridContainer" parent="MainMargin/MainVBox/ArenaRow/MonstersPanel/Margin/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+columns = 3
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
 
 [node name="BottomRow" type="HBoxContainer" parent="MainMargin/MainVBox"]
 custom_minimum_size = Vector2(0, 260)
@@ -315,11 +319,5 @@ layout_mode = 2
 text = "当前牌堆为空"
 horizontal_alignment = 1
 
-[node name="WindowLayer" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
+[node name="WindowLayer" type="CanvasLayer" parent="."]
+layer = 10
