@@ -1246,8 +1246,18 @@ public partial class BattleSytem : Node
             StateSystem.OnTurnStart(player);
             if (player.Shield > 0)
             {
-                AppendPanelConsoleInfo($"玩家回合开始：{player.Name} 护盾清零（{player.Shield}->0）。");
-                player.Shield = 0;
+                // 阵地 (ShieldCapEqualsHP) 例外：保留护盾但 cap 在当前 HP。
+                bool hasShieldCapState = StateSystem.TryGetStateStacks(player, StateType.ShieldCapEqualsHP, out int _);
+                if (hasShieldCapState)
+                {
+                    if (player.Shield > player.HP) player.Shield = player.HP;
+                    AppendPanelConsoleInfo($"玩家回合开始：{player.Name} 阵地生效，护盾保留 {player.Shield}（cap=HP {player.HP}）。");
+                }
+                else
+                {
+                    AppendPanelConsoleInfo($"玩家回合开始：{player.Name} 护盾清零（{player.Shield}->0）。");
+                    player.Shield = 0;
+                }
             }
 
             int drawCount = player.drawCardNum > 0 ? player.drawCardNum : 0;
@@ -1285,8 +1295,18 @@ public partial class BattleSytem : Node
 
             if (monster.Shield > 0)
             {
-                AppendPanelConsoleInfo($"怪物回合开始：{monster.Name}#{monster.UniqueInGameId} 护盾清零（{monster.Shield}->0）。");
-                monster.Shield = 0;
+                // 阵地 (ShieldCapEqualsHP) 例外：保留护盾但 cap 在当前 HP。
+                bool hasShieldCapState = StateSystem.TryGetStateStacks(monster, StateType.ShieldCapEqualsHP, out int _);
+                if (hasShieldCapState)
+                {
+                    if (monster.Shield > monster.HP) monster.Shield = monster.HP;
+                    AppendPanelConsoleInfo($"怪物回合开始：{monster.Name}#{monster.UniqueInGameId} 阵地生效，护盾保留 {monster.Shield}（cap=HP {monster.HP}）。");
+                }
+                else
+                {
+                    AppendPanelConsoleInfo($"怪物回合开始：{monster.Name}#{monster.UniqueInGameId} 护盾清零（{monster.Shield}->0）。");
+                    monster.Shield = 0;
+                }
             }
         }
 

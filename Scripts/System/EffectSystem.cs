@@ -265,6 +265,44 @@ public sealed class AttackEffect : IEffect
 
         EffectResult counterAttackResult = EffectSystem.ApplyAttack(context.Target, context.Source, isCounterAttack: true);
         BattleSytem.Current?.EnqueueDeferredCombatInfo($"反击触发：{counterAttackResult.BuildSummary()}");
+
+        // 蓄势待发 (RetainAllBattleCards) 替代反击：自动免费打出施法者手牌中的第一张战斗牌。
+        TryTriggerRetainAllBattleCardsCounter(context);
+    }
+
+    private static void TryTriggerRetainAllBattleCardsCounter(EffectContext context)
+    {
+        if (context == null || context.IsCounterAttack) return;
+        if (context.Target is not CharacterInstance counterAttacker) return;
+        if (!StateSystem.TryGetStateStacks(counterAttacker, StateType.RetainAllBattleCards, out int retainStacks) || retainStacks <= 0) return;
+
+        BattleSytem battle = BattleSytem.Current;
+        if (battle == null) return;
+
+        Card firstBattleCard = null;
+        for (int i = 0; i < counterAttacker.handcards.Count; i++)
+        {
+            Card c = counterAttacker.handcards[i];
+            if (c != null && c.Category == CardCategory.Attack) { firstBattleCard = c; break; }
+        }
+        if (firstBattleCard == null)
+        {
+            BattleSytem.Current?.EnqueueDeferredCombatInfo($"蓄势待发：{counterAttacker.Name} 手牌中无战斗牌可替代打出。");
+            return;
+        }
+
+        // 临时设 free override：蓄势待发反击免费出第一张战斗牌（出牌后还原）。
+        System.Func<IUnitInstance, int> prevOverride = firstBattleCard.EnergyCostOverride;
+        firstBattleCard.EnergyCostOverride = _ => 0;
+        try
+        {
+            battle.PlayHandCard(counterAttacker, firstBattleCard, context.Source);
+            BattleSytem.Current?.EnqueueDeferredCombatInfo($"蓄势待发：{counterAttacker.Name} 反击替代为免费打出 {firstBattleCard.CardName}");
+        }
+        finally
+        {
+            firstBattleCard.EnergyCostOverride = prevOverride;
+        }
     }
 
     private static bool IsOutOfTurn(IUnitInstance unit)

@@ -60,6 +60,7 @@ namespace CardSimulator
 		DamageByBattleLostHp, // 额外造成自身本局已失去生命值的伤害
 		AddKeyword = 14,            // 为卡牌添加运行时关键词
 		MirrorShieldToAllies = 15,  // 将前续Shield效果的累积护盾复制到全体友方
+		RearrangeMonsterTargets = 16, // 到我身后：将所有怪物单攻意图重定向到施法者，每改一个目标获得 1 点护盾
 	}
 
 	public enum CardOperationTargetType

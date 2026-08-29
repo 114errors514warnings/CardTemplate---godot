@@ -93,7 +93,47 @@ public partial class Card : Resource
 	
 	[Export]
 	public int EnergyCost { get; set; } = 0; // 消耗能量
-	
+
+	// 运行时动态费用委托（实例级）：用于实现"按本局失去生命次数降费"等机制。
+	// 返回 null/异常时回退到 EnergyCost + 静态工厂。
+	// 签名取 IUnitInstance（而非 CharacterInstance）以便单测可传入 TestUnitInstance 桩。
+	public System.Func<IUnitInstance, int> EnergyCostOverride { get; set; } = null;
+
+	// 静态工厂：按 CardId 注册的动态费用计算器，签名为 (player) => cost。
+	// 死亡之舞 (11002010) 用此机制按本局失去生命次数降费。
+	private static readonly System.Collections.Generic.Dictionary<int, System.Func<IUnitInstance, int>> CostOverrideFactories
+		= new System.Collections.Generic.Dictionary<int, System.Func<IUnitInstance, int>>();
+
+	public static void RegisterCostOverrideFactory(int cardId, System.Func<IUnitInstance, int> factory)
+	{
+		if (factory == null) { CostOverrideFactories.Remove(cardId); return; }
+		CostOverrideFactories[cardId] = factory;
+	}
+
+	// 计算当前实际消耗费用：实例 override → 静态工厂 → EnergyCost。
+	public int GetCurrentEnergyCost(IUnitInstance currentPlayer = null)
+	{
+		try
+		{
+			if (EnergyCostOverride != null && currentPlayer != null)
+			{
+				return EnergyCostOverride.Invoke(currentPlayer);
+			}
+		}
+		catch { /* fall through */ }
+
+		try
+		{
+			if (currentPlayer != null && CostOverrideFactories.TryGetValue(CardId, out var factory))
+			{
+				return factory.Invoke(currentPlayer);
+			}
+		}
+		catch { /* fall through */ }
+
+		return EnergyCost;
+	}
+
 	[Export]
 	public CardCategory Category { get; set; } // 卡牌种类（通过枚举限定）
 
@@ -295,6 +335,9 @@ public partial class Card : Resource
 					break;
 				case EffectType.MirrorShieldToAllies:
 					result = ApplyMirrorShieldToAlliesEffect(source, resolvedTargets, effectArgs, accumulatedShield);
+					break;
+				case EffectType.RearrangeMonsterTargets:
+					result = ApplyRearrangeMonsterTargetsEffect(source, resolvedTargets);
 					break;
 				default:
 					string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 暂未实现。";
@@ -833,6 +876,55 @@ public partial class Card : Resource
 
 			AppendConsoleInfo($"{GetUnitLabel(source)} 为 {targetCards.Count} 张卡牌添加了关键词 {keyword} (Flags={keywordFlag})");
 		}
+
+		return new CardApplyResult(true, this, source, source);
+	}
+
+	private CardApplyResult ApplyRearrangeMonsterTargetsEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets)
+	{
+		// 效果：将所有怪物的单攻目标重定向到 source，每改一个目标 source 获得 1 点护盾。
+		if (source is not CharacterInstance caster)
+		{
+			AppendConsoleError($"到我身后：source 必须是玩家角色，actual={source?.GetType().Name}", true);
+			return new CardApplyResult(false, this, source, source, errorMessage: "RearrangeMonsterTargets 仅对玩家有效。");
+		}
+
+		BattleSytem battle = BattleSytem.Current;
+		if (battle?.Monsters == null)
+		{
+			return new CardApplyResult(true, this, source, source);
+		}
+
+		int rearrangedCount = 0;
+		foreach (MonsterInstance monster in battle.Monsters.Values)
+		{
+			if (monster == null || monster.HP <= 0) continue;
+			// 只对"单攻意图"的怪物生效（SelectedIntention 里有 Damage 段）
+			bool hasDamage = false;
+			if (monster.SelectedIntention != null)
+			{
+				foreach (int[] effect in monster.SelectedIntention)
+				{
+					if (effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage)
+					{
+						hasDamage = true;
+						break;
+					}
+				}
+			}
+			if (!hasDamage) continue;
+			if (monster.SelectedIntentionTargetUniqueInGameId != caster.UniqueInGameId)
+			{
+				monster.SetSelectedIntentionTarget(caster.UniqueInGameId);
+				rearrangedCount++;
+			}
+		}
+
+		if (rearrangedCount > 0)
+		{
+			EffectSystem.ApplyShield(caster, new int[] { rearrangedCount });
+		}
+		AppendConsoleInfo($"{GetUnitLabel(caster)} 施展 '到我身后'：重定向 {rearrangedCount} 个怪物单攻目标，获得 {rearrangedCount} 点护盾。");
 
 		return new CardApplyResult(true, this, source, source);
 	}

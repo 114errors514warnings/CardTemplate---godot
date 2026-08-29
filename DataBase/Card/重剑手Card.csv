@@ -25,3 +25,7 @@ CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
 31002005,燃血,State,1,AddState,1回合内，每次生命减少时获得1点攻击；失去1点生命,1;11;1,
 31002006,持盾防守,State,1,AddState|AddState,下回合开始前防御+3且不能打出战斗牌,1;13;1|1;18;1,,NoBattleCardPlayedThisTurn
 11002009,紧咬不放,Attack,2,Damage|AddState,额外造成4点伤害，对目标施加反击触发，消耗,2;4|2;12;1,Exhaust
+11002010,死亡之舞,Attack,3,DamageByBattleLostHp,额外造成你本局失去生命点数的伤害，每失去一次生命该牌消耗能量-1（最低0）,2;0,
+21002012,到我身后！,Skill,1,RearrangeMonsterTargets,将所有敌人单体攻击目标改为自己，每改一个目标防御1次,0,
+31002007,城墙,State,1,AddState,拥有护盾时，敌人单体攻击仅会以你为目标（多人时随机）;回合开始时护盾不清零，cap=HP,1;15;1|1;14;1,
+31002008,蓄势待发,State,1,AddState,本回合保留所有战斗牌；反击时免费打出第一张战斗牌作为替代,1;16;1,

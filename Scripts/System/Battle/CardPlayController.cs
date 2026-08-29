@@ -162,7 +162,7 @@ public sealed class CardPlayController
             return false;
         }
 
-        int actualEnergyCost = card.EnergyCost;
+        int actualEnergyCost = card.GetCurrentEnergyCost(sourcePlayer);
         if (IsBattleCard(card) && StateSystem.TryGetStateStacks(sourcePlayer, StateType.NextBattleCardFree, out int freeStacks) && freeStacks > 0)
         {
             actualEnergyCost = 0;
@@ -213,23 +213,24 @@ public sealed class CardPlayController
             statePileTarget = stateCardApplications[0].TargetUnit;
         }
 
-        sourcePlayer.costs -= card.EnergyCost;
+        int costToDeduct = actualEnergyCost;
+        sourcePlayer.costs -= costToDeduct;
         sourcePlayer.handcards.RemoveAt(handIndex);
         if (statePileTarget != null)
         {
             statePileTarget.StatePile.Add(card);
             statePipeline.RegisterStateCardEndCallbacks(stateCardApplications, card, sourcePlayer);
-            console.Info($"玩家 {sourcePlayer.Name} 打出状态牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {sourcePlayer.costs}。卡牌已移入 {unitRegistry.BuildUnitLabel(statePileTarget)} 的状态牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张。目标状态牌堆当前 {statePileTarget.StatePile.Count} 张。");
+            console.Info($"玩家 {sourcePlayer.Name} 打出状态牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {costToDeduct}，剩余费用 {sourcePlayer.costs}。卡牌已移入 {unitRegistry.BuildUnitLabel(statePileTarget)} 的状态牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张。目标状态牌堆当前 {statePileTarget.StatePile.Count} 张。");
         }
         else if (card.HasKeyWord(CardKeyWord.Exhaust))
         {
             sourcePlayer.ExhaustPile.Add(card);
-            console.Info($"玩家 {sourcePlayer.Name} 打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {sourcePlayer.costs}。卡牌已移入消耗牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张，消耗牌堆当前 {sourcePlayer.ExhaustPile.Count} 张。");
+            console.Info($"玩家 {sourcePlayer.Name} 打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {costToDeduct}，剩余费用 {sourcePlayer.costs}。卡牌已移入消耗牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张，消耗牌堆当前 {sourcePlayer.ExhaustPile.Count} 张。");
         }
         else
         {
             sourcePlayer.discardpile.Add(card);
-            console.Info($"玩家 {sourcePlayer.Name} 打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {card.EnergyCost}，剩余费用 {sourcePlayer.costs}。卡牌已移入弃牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张，弃牌堆当前 {sourcePlayer.discardpile.Count} 张。");
+            console.Info($"玩家 {sourcePlayer.Name} 打出卡牌 CardId={card.CardId}，UniqueInGameId={card.UniqueInGameId}，消耗费用 {costToDeduct}，剩余费用 {sourcePlayer.costs}。卡牌已移入弃牌堆。手牌剩余 {sourcePlayer.handcards.Count} 张，弃牌堆当前 {sourcePlayer.discardpile.Count} 张。");
         }
 
         if (applyResult.EffectResult != null)

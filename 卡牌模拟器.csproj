@@ -3,6 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- Godot SDK 默认会通过 Implicit ItemGroup 引入两次 .godot\mono\temp\obj\Debug\卡牌模拟器.AssemblyInfo.cs，导致 CS0579 重复。关闭自动生成避免冲突。 -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>

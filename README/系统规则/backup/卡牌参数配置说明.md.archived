@@ -1,3 +1,5 @@
+> ⚠️ **本文档已迁移（2026-08-29）**。内容已合并到 [卡牌与配置/卡牌参数.md](卡牌与配置/卡牌参数.md)。详见 [README.md 总览](README.md) 附录 A。下方为原文保留。
+
 # 卡牌参数配置说明
 
 ## 一、CardId 编号规则
@@ -137,7 +139,7 @@ CSV 表头：`CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,C
 | 1 | NoBattleCardPlayedThisTurn | 本回合内，该牌所属角色尚未打出过战斗牌 |
 
 - `ConditionParams` 是 `Card` 自身的出牌条件成员；只要该列非空，系统就会在实际出牌前校验全部条件。
-- 当前“战斗牌”的口径为：`Attack` 和 `Skill`；`State` 牌不计入该条件的已出牌次数。
+- 当前"战斗牌"的口径为：`Attack` 和 `Skill`；`State` 牌不计入该条件的已出牌次数。
 - 条件关键词会在实际出牌前校验；任一条件不满足时，该牌本次不能打出。
 
 示例：
@@ -170,7 +172,7 @@ CSV 表头：`CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,C
 
 ### 2. NeedTarget 推导规则
 
-- 只要任意效果的目标类型为 `SelectedTarget(2)`，该牌会自动被系统视为“需要目标”的卡牌。
+- 只要任意效果的目标类型为 `SelectedTarget(2)`，该牌会自动被系统视为"需要目标"的卡牌。
 - UI 调试出牌时，若卡牌需要目标但未传入目标，出牌会失败。
 
 ### 3. 状态牌与状态牌堆

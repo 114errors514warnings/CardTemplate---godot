@@ -478,6 +478,21 @@ internal sealed class MonsterIntentionService
             return null;
         }
 
+        // 城墙 (ForcedTaunt) 优先级最高：从拥有 ForcedTaunt 状态且护盾>0 的玩家中随机选。
+        List<CharacterInstance> taunters = null;
+        for (int i = 0; i < alivePlayers.Count; i++)
+        {
+            CharacterInstance player = alivePlayers[i];
+            if (player == null) continue;
+            if (player.Shield <= 0) continue;
+            if (!StateSystem.TryGetStateStacks(player, StateType.ForcedTaunt, out int stacks) || stacks <= 0) continue;
+            (taunters ??= new List<CharacterInstance>()).Add(player);
+        }
+        if (taunters != null && taunters.Count > 0)
+        {
+            return taunters[BattleSytem.RandomGenerator.Next(taunters.Count)];
+        }
+
         return alivePlayers[BattleSytem.RandomGenerator.Next(alivePlayers.Count)];
     }
 }

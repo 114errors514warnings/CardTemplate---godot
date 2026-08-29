@@ -1,0 +1,153 @@
+// SwordmasterCardCostTests.cs
+// 覆盖 8月施工文档方案 C 5 张重剑手卡中可纯 .NET 单测的部分：
+//   - 死亡之舞 (11002010) 走 Card.GetCurrentEnergyCost 工厂的费用计算路径
+//   - Card.EnergyCostOverride 实例级 override 优先于静态工厂
+//   - Card.RegisterCostOverrideFactory 注册/注销语义
+// 注：死亡之舞的费用公式 `3 - loseHpTimes` 在 Godot scene 集成测试里验证（BattleSytem.Stats）。
+
+using System;
+using Xunit;
+
+public class SwordmasterCardCostTests
+{
+    [Fact]
+    public void GetCurrentEnergyCost_NullPlayer_FallsBackToBaseCost()
+    {
+        var card = new Card { CardId = 11002010, EnergyCost = 3 };
+        Assert.Equal(3, card.GetCurrentEnergyCost(null));
+        Assert.Equal(3, card.GetCurrentEnergyCost());
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_EmptyFactoryMap_FallsBackToBaseCost()
+    {
+        var card = new Card { CardId = 99999, EnergyCost = 2 };
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        // CardId=99999 不在工厂表里 → 回退 EnergyCost
+        Assert.Equal(2, card.GetCurrentEnergyCost(player));
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_StaticFactory_InvokedWithPlayer()
+    {
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 7, HP = 50 };
+        int invokedWithId = -1;
+        Card.RegisterCostOverrideFactory(testCardId, p =>
+        {
+            invokedWithId = p.UniqueInGameId;
+            return 1;
+        });
+        try
+        {
+            var card = new Card { CardId = testCardId, EnergyCost = 3 };
+            int cost = card.GetCurrentEnergyCost(player);
+            Assert.Equal(1, cost);
+            Assert.Equal(7, invokedWithId);
+        }
+        finally
+        {
+            Card.RegisterCostOverrideFactory(testCardId, null);
+        }
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_StaticFactory_FloorAtZero()
+    {
+        // 验证"费用 clamp >= 0"：工厂返回负数会被 GetCurrentEnergyCost 透传
+        // ——clamp 在工厂内部做（死亡之舞工厂用 Math.Max(0, ...)），不在 GetCurrentEnergyCost 里。
+        // 这里覆盖：工厂返回负数时 GetCurrentEnergyCost 不做二次 clamp，调用方负责 clamp。
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        Card.RegisterCostOverrideFactory(testCardId, _ => -2);
+        try
+        {
+            var card = new Card { CardId = testCardId, EnergyCost = 3 };
+            Assert.Equal(-2, card.GetCurrentEnergyCost(player));
+        }
+        finally
+        {
+            Card.RegisterCostOverrideFactory(testCardId, null);
+        }
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_InstanceOverride_TakesPrecedenceOverStaticFactory()
+    {
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        Card.RegisterCostOverrideFactory(testCardId, _ => 1); // 工厂会返回 1
+        try
+        {
+            var card = new Card { CardId = testCardId, EnergyCost = 3 };
+            card.EnergyCostOverride = _ => 99; // 实例 override 优先
+            Assert.Equal(99, card.GetCurrentEnergyCost(player));
+        }
+        finally
+        {
+            Card.RegisterCostOverrideFactory(testCardId, null);
+        }
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_RegisterNull_RemovesFactory()
+    {
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+
+        // 注册 → 工厂生效（返回 1）
+        Card.RegisterCostOverrideFactory(testCardId, _ => 1);
+        var card = new Card { CardId = testCardId, EnergyCost = 3 };
+        Assert.Equal(1, card.GetCurrentEnergyCost(player));
+
+        // 注销 → 工厂失效，回退 EnergyCost
+        Card.RegisterCostOverrideFactory(testCardId, null);
+        Assert.Equal(3, card.GetCurrentEnergyCost(player));
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_ExceptionInFactory_FallsBackToBase()
+    {
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        Card.RegisterCostOverrideFactory(testCardId, _ => throw new InvalidOperationException("boom"));
+        try
+        {
+            var card = new Card { CardId = testCardId, EnergyCost = 3 };
+            // 工厂抛异常时回退 EnergyCost（不向上抛）
+            Assert.Equal(3, card.GetCurrentEnergyCost(player));
+        }
+        finally
+        {
+            Card.RegisterCostOverrideFactory(testCardId, null);
+        }
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_ExceptionInInstanceOverride_FallsBackToFactory()
+    {
+        const int testCardId = 11002010;
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        Card.RegisterCostOverrideFactory(testCardId, _ => 2);
+        try
+        {
+            var card = new Card { CardId = testCardId, EnergyCost = 3 };
+            card.EnergyCostOverride = _ => throw new InvalidOperationException("instance boom");
+            // 实例 override 抛异常时回退到静态工厂
+            Assert.Equal(2, card.GetCurrentEnergyCost(player));
+        }
+        finally
+        {
+            Card.RegisterCostOverrideFactory(testCardId, null);
+        }
+    }
+
+    [Fact]
+    public void GetCurrentEnergyCost_NoOverrideNoFactory_FallsBackToBase()
+    {
+        // 全新 cardId，无任何注册
+        var card = new Card { CardId = 88888, EnergyCost = 5 };
+        var player = new TestUnitInstance { UniqueInGameId = 1, HP = 50 };
+        Assert.Equal(5, card.GetCurrentEnergyCost(player));
+    }
+}

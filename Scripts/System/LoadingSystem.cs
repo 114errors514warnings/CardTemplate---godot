@@ -112,6 +112,15 @@ public partial class LoadingSystem : Node
 		}
 
 		LoadAllCardsFromFolder("res://DataBase/Card/");
+
+		// 注册"按本局失去生命次数降费"的死亡之舞 (CardId=11002010)：
+		// 实际费用 = max(0, EnergyCost - loseHpTimes)
+		Card.RegisterCostOverrideFactory(11002010, player =>
+		{
+			int loseHpTimes = BattleSytem.Current?.GetBattleHpLossEventCount(player) ?? 0;
+			int baseCost = 3;
+			return System.Math.Max(0, baseCost - loseHpTimes);
+		});
 	}
 
 	private static void EnsureFilePathRegistryLoaded()
