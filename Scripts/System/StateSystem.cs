@@ -150,7 +150,7 @@ public static class StateSystem
 	public static bool IsPermanent(StateType type)
 	{
 		StateDefinition definition = GetStateDefinition(type);
-		return definition == null || definition.IsPermanent;
+		return definition == null || definition.DecayTiming == StateDecayTiming.Never;
 	}
 
 	public static bool IsDebuff(StateType type)
@@ -172,7 +172,8 @@ public static class StateSystem
 	}
 
 	public static void AddOrUpdateState(IUnitInstance unit, StateType type, int stacks,
-		TurnStartResourceType turnStartResource = TurnStartResourceType.None, int turnStartAmountPerStack = 1)
+		TurnStartResourceType turnStartResource = TurnStartResourceType.None, int turnStartAmountPerStack = 1,
+		IUnitInstance ownerUnit = null)
 	{
 		if (unit == null)
 		{
@@ -196,7 +197,7 @@ public static class StateSystem
 				existing.Stacks = 1;
 				// 不可叠层状态重复添加时，保留历史回调段，避免旧状态牌丢失回收机会。
 				existing.StackSegments.RemoveAll(segment => segment != null && segment.RemainingStacks > 0 && !segment.NeedCallback);
-				existing.StackSegments.Insert(0, new StateStackSegment(1));
+				existing.StackSegments.Insert(0, new StateStackSegment(1, false, "", ownerUnit));
 			}
 			if (type == StateType.TurnStartEffect && turnStartResource != TurnStartResourceType.None)
 			{
@@ -207,8 +208,14 @@ public static class StateSystem
 		}
 
 		int initialStacks = IsStackable(type) ? stacks : 1;
-		states[type] = new StateRuntimeData(type, initialStacks, System.Threading.Interlocked.Increment(ref nextAppliedOrder),
+		StateRuntimeData newData = new StateRuntimeData(type, initialStacks, System.Threading.Interlocked.Increment(ref nextAppliedOrder),
 			turnStartResource, turnStartAmountPerStack);
+		if (ownerUnit != null && newData.StackSegments.Count > 0)
+		{
+			// 首次构造时为最新匿名段设 ownerUnit（用于紧咬不放等"对 ownerUnit 反击"语义）。
+			newData.StackSegments[0].OwnerUnit = ownerUnit;
+		}
+		states[type] = newData;
 	}
 
 	public static bool RegisterStateEndCallback(IUnitInstance unit, StateType type, int stacks, string stateCardUniqueInGameId, IUnitInstance ownerUnit)
@@ -498,31 +505,8 @@ public static class StateSystem
 			return;
 		}
 
-		List<StateType> toRemove = new List<StateType>();
-		List<StateEndedContext> callbacks = new List<StateEndedContext>();
-		foreach (KeyValuePair<StateType, StateRuntimeData> pair in unit.States)
-		{
-			int decayAmount = GetTurnStartDecayAmount(pair.Key);
-			if (decayAmount <= 0)
-			{
-				continue;
-			}
-
-			for (int count = 0; count < decayAmount && pair.Value.Stacks > 0; count++)
-			{
-				StateEndedContext endedContext = pair.Value.ConsumeOneStack(unit, StateEndReason.Expired);
-				if (endedContext != null)
-				{
-					callbacks.Add(endedContext);
-				}
-			}
-
-			if (pair.Value.Stacks <= 0)
-			{
-				callbacks.AddRange(pair.Value.ConsumeAllCallbacks(unit, StateEndReason.Expired));
-				toRemove.Add(pair.Key);
-			}
-		}
+		// 衰减逻辑已迁移到 StateDecayProcessor（按 DecayTiming 触发）
+		// 此函数只处理"回合开始时"的状态机制效果（给资源 / 护盾 / cap）
 
 		if (TryGetStateStacks(unit, StateType.TurnStartEffect, out int turnStartStacks) && turnStartStacks > 0)
 		{
@@ -541,14 +525,14 @@ public static class StateSystem
 					AppendStateTurnStartInfo(unit, StateType.TurnStartEffect, total, "shield");
 					break;
 			}
-			toRemove.Add(StateType.TurnStartEffect);
+			// 移除由 StateDecayProcessor.ProcessDecayAtTiming(DecayMode=ClearAll) 处理
 		}
 
 		if (TryGetStateStacks(unit, StateType.ShieldGuard, out int shieldGuardStacks) && shieldGuardStacks > 0)
 		{
 			EffectSystem.ApplyShield(unit, new int[] { 3 });
-			toRemove.Add(StateType.ShieldGuard);
 			AppendStateTurnStartInfo(unit, StateType.ShieldGuard, shieldGuardStacks, "guard");
+			// 移除由 StateDecayProcessor.ProcessDecayAtTiming(DecayMode=ClearAll) 处理
 		}
 
 		if (TryGetStateStacks(unit, StateType.ShieldCapEqualsHP, out int _))
@@ -556,13 +540,6 @@ public static class StateSystem
 			if (unit.Shield > unit.HP)
 				unit.Shield = unit.HP;
 		}
-
-		foreach (StateType stateType in toRemove)
-		{
-			unit.States.Remove(stateType);
-		}
-
-		InvokeStateEndedCallbacks(unit, callbacks);
 	}
 
 	private static bool HasAnyBoundCallback(StateRuntimeData stateData)
@@ -714,12 +691,12 @@ public static class StateSystem
 	private static int GetTurnStartDecayAmount(StateType type)
 	{
 		StateDefinition definition = GetStateDefinition(type);
-		if (definition == null || definition.IsPermanent)
+		if (definition == null || definition.DecayTiming == StateDecayTiming.Never)
 		{
 			return 0;
 		}
 
-		return definition.TurnStartDecayAmount;
+		return definition.StacksToRemove;
 	}
 
 	private static StateDefinition GetStateDefinition(StateType type)

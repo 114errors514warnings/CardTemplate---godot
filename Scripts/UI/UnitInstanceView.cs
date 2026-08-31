@@ -255,36 +255,6 @@ public partial class UnitInstanceView : PanelContainer
 		healthBar.AddChild(deadLabel);
 	}
 
-	public void ShowFloatingDamage(int damage)
-    {
-        if (damage <= 0) return;
-        if (BoundUnit == null) return;
-
-        Label floatingLabel = new Label();
-        floatingLabel.Text = damage.ToString();
-        floatingLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        floatingLabel.VerticalAlignment = VerticalAlignment.Center;
-        floatingLabel.AddThemeFontSizeOverride("font_size", 36);
-        floatingLabel.AddThemeColorOverride("font_color", Colors.White);
-        floatingLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 1));
-        floatingLabel.AddThemeConstantOverride("outline_size", 2);
-        floatingLabel.SetAnchorsPreset(LayoutPreset.Center);
-        floatingLabel.Position = new Vector2(0, -30);
-
-        AddChild(floatingLabel);
-
-        Tween tween = CreateTween();
-        tween.SetParallel(true);
-        tween.TweenProperty(floatingLabel, "position", new Vector2(0, -100), 0.8f);
-        tween.TweenProperty(floatingLabel, "modulate", new Color(1, 1, 1, 0), 0.8f);
-        tween.Finished += () =>
-        {
-            if (floatingLabel != null && IsInstanceValid(floatingLabel))
-            {
-                floatingLabel.QueueFree();
-            }
-        };
-    }
 
     public void SetHealthLabelText(string text)
     {
@@ -294,6 +264,18 @@ public partial class UnitInstanceView : PanelContainer
             healthLabel.HorizontalAlignment = HorizontalAlignment.Center;
             healthLabel.VerticalAlignment = VerticalAlignment.Center;
         }
+    }
+
+    /// <summary>
+    /// 结算时高亮放大：on=true 时 Scale=1.15，false 时恢复 1.0；走 tween 平滑过渡。
+    /// </summary>
+    public void SetHighlighted(bool on)
+    {
+        float targetScale = on ? 1.15f : 1.0f;
+        Tween tween = CreateTween();
+        tween.SetTrans(Tween.TransitionType.Sine);
+        tween.SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(this, "scale", new Vector2(targetScale, targetScale), 0.4);
     }
 
     private void EnsureNodes()
@@ -368,18 +350,7 @@ public partial class UnitInstanceView : PanelContainer
     {
         if (LoadingSystem.StateDictionary.TryGetValue(stateType, out StateDefinition definition) && !string.IsNullOrWhiteSpace(definition.Name))
         {
-            return stateType switch
-            {
-                StateType.Vulnerable => "\u6613\u4f24",
-                StateType.Weak => "\u865a\u5f31",
-                StateType.CounterAttack => "\u53cd\u51fb",
-                StateType.WhirlwindSlash => "\u65cb\u98ce\u65a9",
-                StateType.AddAttack => "\u52a0\u653b",
-                StateType.ExtraEnergy => "\u989d\u5916\u80fd\u91cf",
-                StateType.Void => "\u865a\u65e0",
-                StateType.CourageArmor => "\u52c7\u6c14\u94e0\u7532",
-                _ => definition.Name,
-            };
+            return definition.Name;
         }
         return stateType.ToString();
     }

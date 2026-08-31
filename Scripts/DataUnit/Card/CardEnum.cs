@@ -61,6 +61,7 @@ namespace CardSimulator
 		AddKeyword = 14,            // 为卡牌添加运行时关键词
 		MirrorShieldToAllies = 15,  // 将前续Shield效果的累积护盾复制到全体友方
 		RearrangeMonsterTargets = 16, // 到我身后：将所有怪物单攻意图重定向到施法者，每改一个目标获得 1 点护盾
+		HpLoss = 17,                // 纯扣血（不叠加 source.Attack，公式 = target.HP -= extraHp）
 	}
 
 	public enum CardOperationTargetType
@@ -103,6 +104,39 @@ namespace CardSimulator
 		None = 0,
 		ExtraEnergy = 1,   // 下回合额外获得能量
 		Shield = 2,        // 下回合防御（额外护盾）
+	}
+
+	/// <summary>
+	/// 状态衰减 / 自动移除的触发时机。
+	/// 决定 StateDecayProcessor 在哪个节点处理该状态的 stacks 衰减。
+	/// </summary>
+	public enum StateDecayTiming
+	{
+		/// <summary>永久状态（替代 IsPermanent=true），任何时机都不衰减</summary>
+		Never = 0,
+		/// <summary>任意回合开始时（玩家+怪物都触发）</summary>
+		OnTurnStart = 1,
+		/// <summary>任意回合结束时（玩家+怪物都触发）</summary>
+		OnTurnEnd = 2,
+		/// <summary>打出攻击牌后（玩家+怪物都触发）</summary>
+		OnAttackPlayed = 3,
+		/// <summary>受到伤害后（HP 实际减少时）</summary>
+		OnDamaged = 4,
+	}
+
+	/// <summary>
+	/// 状态衰减方式。决定 StateDecayProcessor 触发时按哪种规则移除 stacks。
+	/// </summary>
+	public enum StateDecayMode
+	{
+		/// <summary>不衰减（与 DecayTiming=Never 配合表示永久）</summary>
+		None = 0,
+		/// <summary>按 StacksToRemove 层数衰减</summary>
+		Flat = 1,
+		/// <summary>衰减一半（向上取整）</summary>
+		Half = 2,
+		/// <summary>全部清除（无视 StacksToRemove）</summary>
+		ClearAll = 3,
 	}
 
 	// 每个效果独立的目标选择方式

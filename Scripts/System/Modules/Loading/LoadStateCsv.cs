@@ -6,6 +6,11 @@ using CardSimulator;
 [GlobalClass]
 public partial class LoadStateCsv : Node
 {
+	/// <summary>
+	/// CSV 列定义（按顺序）：
+	/// [0] StateType, [1] Name, [2] IsStackable, [3] IsDebuff, [4] IsElite,
+	/// [5] DecayTiming, [6] DecayMode, [7] StacksToRemove, [8] EffectDescription
+	/// </summary>
 	private const int MinFieldCount = 5;
 
 	public static StateDefinition[] LoadStatesFromCSV(string filePath)
@@ -66,34 +71,63 @@ public partial class LoadStateCsv : Node
 				return null;
 			}
 
-			if (!TryParseBoolean(fields[3], out bool isPermanent))
-			{
-				GD.PrintErr($"Invalid IsPermanent value: {fields[3]}");
-				return null;
-			}
-
-			if (!int.TryParse(fields[4], out int turnStartDecayAmount) || turnStartDecayAmount < 0)
-			{
-				GD.PrintErr($"Invalid TurnStartDecayAmount value: {fields[4]}");
-				return null;
-			}
-
 			bool isDebuff = false;
 			bool isElite = false;
 
-			if (fields.Length > 5 && !string.IsNullOrWhiteSpace(fields[5]) && !TryParseBoolean(fields[5], out isDebuff))
+			if (fields.Length > 3 && !string.IsNullOrWhiteSpace(fields[3]) && !TryParseBoolean(fields[3], out isDebuff))
 			{
-				GD.PrintErr($"Invalid IsDebuff value: {fields[5]}");
+				GD.PrintErr($"Invalid IsDebuff value: {fields[3]}");
 				return null;
 			}
 
-			if (fields.Length > 6 && !string.IsNullOrWhiteSpace(fields[6]) && !TryParseBoolean(fields[6], out isElite))
+			if (fields.Length > 4 && !string.IsNullOrWhiteSpace(fields[4]) && !TryParseBoolean(fields[4], out isElite))
 			{
-				GD.PrintErr($"Invalid IsElite value: {fields[6]}");
+				GD.PrintErr($"Invalid IsElite value: {fields[4]}");
 				return null;
 			}
 
-			return new StateDefinition(stateType, fields[1], isStackable, isPermanent, turnStartDecayAmount, isDebuff, isElite);
+			StateDecayTiming decayTiming = StateDecayTiming.OnTurnStart;
+			if (fields.Length > 5 && !string.IsNullOrWhiteSpace(fields[5]))
+			{
+				if (!Enum.TryParse(fields[5], true, out decayTiming))
+				{
+					GD.PrintErr($"Invalid DecayTiming value: {fields[5]}, using OnTurnStart");
+					decayTiming = StateDecayTiming.OnTurnStart;
+				}
+			}
+
+			StateDecayMode decayMode = StateDecayMode.None;
+			if (fields.Length > 6 && !string.IsNullOrWhiteSpace(fields[6]))
+			{
+				if (!Enum.TryParse(fields[6], true, out decayMode))
+				{
+					GD.PrintErr($"Invalid DecayMode value: {fields[6]}, using None");
+					decayMode = StateDecayMode.None;
+				}
+			}
+
+			int stacksToRemove = 0;
+			if (fields.Length > 7 && !string.IsNullOrWhiteSpace(fields[7]))
+			{
+				if (!int.TryParse(fields[7], out stacksToRemove) || stacksToRemove < 0)
+				{
+					GD.PrintErr($"Invalid StacksToRemove value: {fields[7]}, using 0");
+					stacksToRemove = 0;
+				}
+			}
+
+			string effectDescription = fields.Length > 8 ? fields[8] : string.Empty;
+
+			return new StateDefinition(
+				stateType,
+				fields[1],
+				isStackable,
+				decayTiming,
+				decayMode,
+				stacksToRemove,
+				isDebuff,
+				isElite,
+				effectDescription);
 		}
 		catch (Exception ex)
 		{

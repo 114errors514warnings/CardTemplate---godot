@@ -13,13 +13,17 @@ public sealed class CardOperationRequest
     public CardOperationTargetType TargetType { get; }
     public int Count { get; }
     public bool RequireKilledTarget { get; }
+    public CardKeyWord Keyword { get; }
+    public KeywordFlag KeywordFlag { get; }
 
-    public CardOperationRequest(EffectType effectType, CardOperationTargetType targetType, int count, bool requireKilledTarget)
+    public CardOperationRequest(EffectType effectType, CardOperationTargetType targetType, int count, bool requireKilledTarget, CardKeyWord keyword = CardKeyWord.None, KeywordFlag keywordFlag = KeywordFlag.None)
     {
         EffectType = effectType;
         TargetType = targetType;
         Count = count;
         RequireKilledTarget = requireKilledTarget;
+        Keyword = keyword;
+        KeywordFlag = keywordFlag;
     }
 }
 
@@ -259,6 +263,12 @@ public sealed class CardPlayController
         {
             battle.InvokeRefreshBattleInfoDisplay();
             return true;
+        }
+
+        // 玩家出攻击牌后：按 DecayTiming=OnAttackPlayed 处理状态
+        if (card.Category == CardCategory.Attack)
+        {
+            StateDecayProcessor.ProcessDecayAtTiming(sourcePlayer, DecayTrigger.OnAttackPlayed);
         }
 
         battle.InvokeRefreshBattleInfoDisplay();
@@ -740,7 +750,9 @@ public sealed class CardPlayController
         for (int index = 0; index < card.EffectTypes.Length; index++)
         {
             EffectType effectType = card.EffectTypes[index];
-            if (effectType != EffectType.UpgradeBattleCard && effectType != EffectType.UpgradePermanentCard)
+            if (effectType != EffectType.UpgradeBattleCard
+                && effectType != EffectType.UpgradePermanentCard
+                && effectType != EffectType.AddKeyword)
             {
                 continue;
             }
@@ -767,7 +779,20 @@ public sealed class CardPlayController
             }
 
             bool requireKilledTarget = rawEffectParams.Length > 2 && rawEffectParams[2] > 0;
-            requests.Add(new CardOperationRequest(effectType, targetType, count, requireKilledTarget));
+            CardKeyWord keyword = CardKeyWord.None;
+            KeywordFlag keywordFlag = KeywordFlag.None;
+            if (effectType == EffectType.AddKeyword && rawEffectParams.Length > 3)
+            {
+                if (Enum.IsDefined(typeof(CardKeyWord), rawEffectParams[1]))
+                {
+                    keyword = (CardKeyWord)rawEffectParams[1];
+                }
+                if (rawEffectParams.Length > 4 && Enum.IsDefined(typeof(KeywordFlag), rawEffectParams[3]))
+                {
+                    keywordFlag = (KeywordFlag)rawEffectParams[3];
+                }
+            }
+            requests.Add(new CardOperationRequest(effectType, targetType, count, requireKilledTarget, keyword, keywordFlag));
         }
 
         return true;
@@ -989,6 +1014,10 @@ public sealed class CardPlayController
                         return false;
                     }
                     upgradedParts.Add(permanentUpgradePart);
+                    break;
+                case EffectType.AddKeyword:
+                    targetCard.AppliedKeywords.Add(new AppliedKeywordEntry { Keyword = request.Keyword, Flags = request.KeywordFlag });
+                    upgradedParts.Add($"{unitRegistry.BuildCardLabel(targetCard)} 添加关键词 {request.Keyword} (Flags={request.KeywordFlag})");
                     break;
                 default:
                     resultMessage = $"错误：暂不支持的卡牌操作效果：{request.EffectType}。";

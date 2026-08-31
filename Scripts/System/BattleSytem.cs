@@ -26,6 +26,13 @@ public partial class BattleSytem : Node
 
     public static BattleSytem Current { get; private set; }
 
+    // 战斗事件总线（静态，解耦 EffectSystem 与 CardBattleScene）
+    public static event System.Action<IUnitInstance, int> OnDamageApplied;   // (target, hpDamage)
+    public static void RaiseOnDamageApplied(IUnitInstance target, int hpDamage) => OnDamageApplied?.Invoke(target, hpDamage);
+    public static event System.Action OnPlayerTurnStart;   // 触发"己方回合"横幅
+    public static event System.Action OnMonsterTurnStart;  // 触发"敌方回合"横幅 + 0.5s 间隔起点
+    public static event System.Action<int, bool> OnMonsterIntentionHighlight; // (uniqueInGameId, on) 结算高亮
+
     internal static readonly Random RandomGenerator = new Random();
 
     // ============================================================
@@ -1222,6 +1229,13 @@ public partial class BattleSytem : Node
         }
 
         AppendPanelConsoleInfo("玩家回合结束。进入怪物回合。");
+
+        // 玩家回合结束时按 DecayTiming 衰减（如勇气铠甲 OnTurnEnd）
+        foreach (CharacterInstance player in GetAlivePlayers())
+        {
+            StateDecayProcessor.ProcessDecayAtTiming(player, DecayTrigger.OnTurnEnd);
+        }
+
         NotifyBattleSceneRefresh();
         StartMonsterTurn();
     }
@@ -1239,11 +1253,14 @@ public partial class BattleSytem : Node
             return;
         }
 
+        OnPlayerTurnStart?.Invoke();
         IsPlayerTurn = true;
         ResetBattleCardsPlayedThisTurnCounts(alivePlayers);
         foreach (CharacterInstance player in alivePlayers)
         {
             StateSystem.OnTurnStart(player);
+            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
+            StateDecayProcessor.ProcessDecayAtTiming(player, DecayTrigger.OnTurnStart);
             if (player.Shield > 0)
             {
                 // 阵地 (ShieldCapEqualsHP) 例外：保留护盾但 cap 在当前 HP。
@@ -1280,6 +1297,8 @@ public partial class BattleSytem : Node
             return;
         }
 
+        OnMonsterTurnStart?.Invoke();
+
         List<int> orderedKeys = Monsters == null ? new List<int>() : new List<int>(Monsters.Keys);
         orderedKeys.Sort();
 
@@ -1292,6 +1311,8 @@ public partial class BattleSytem : Node
             }
 
             StateSystem.OnTurnStart(monster);
+            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
+            StateDecayProcessor.ProcessDecayAtTiming(monster, DecayTrigger.OnTurnStart);
 
             if (monster.Shield > 0)
             {
@@ -1313,6 +1334,10 @@ public partial class BattleSytem : Node
         NotifyBattleSceneRefresh();
         AppendPanelConsoleInfo($"怪物回合开始：本轮行动怪物数量 {orderedKeys.Count}。");
 
+        // 横幅（1.0s）结束后等 0.5s 才开始结算
+        await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
+
+        int highlightedId = -1;
         for (int i = 0; i < orderedKeys.Count; i++)
         {
             int uniqueInGameId = orderedKeys[i];
@@ -1321,11 +1346,17 @@ public partial class BattleSytem : Node
                 continue;
             }
 
+            // 上一只恢复 + 当前只放大：高亮持续到下一只开始结算
+            if (highlightedId != -1) OnMonsterIntentionHighlight?.Invoke(highlightedId, false);
+            OnMonsterIntentionHighlight?.Invoke(uniqueInGameId, true);
+            highlightedId = uniqueInGameId;
+
             ExecuteMonsterIntention(monster);
             NotifyBattleSceneRefresh();
 
             if (CheckBattleEndAndHandle())
             {
+                if (highlightedId != -1) OnMonsterIntentionHighlight?.Invoke(highlightedId, false);
                 return;
             }
 
@@ -1336,12 +1367,24 @@ public partial class BattleSytem : Node
             }
         }
 
+        // 最后一只结算后恢复
+        if (highlightedId != -1) OnMonsterIntentionHighlight?.Invoke(highlightedId, false);
+
         NotifyBattleSceneRefresh();
         SelectIntentionsForAllMonsters();
         UiRefresher.RequestRefresh();
         if (CheckBattleEndAndHandle())
         {
             return;
+        }
+
+        // 怪物回合结束时按 DecayTiming 衰减
+        foreach (var kvp in Monsters)
+        {
+            if (kvp.Value != null && kvp.Value.HP > 0)
+            {
+                StateDecayProcessor.ProcessDecayAtTiming(kvp.Value, DecayTrigger.OnTurnEnd);
+            }
         }
 
         StartPlayerTurn();
@@ -1658,7 +1701,12 @@ public partial class BattleSytem : Node
         }
     }
 
-    private void ExecuteMonsterIntention(MonsterInstance monster) => MonsterIntentionService.ExecuteMonsterIntention(monster);
+    private void ExecuteMonsterIntention(MonsterInstance monster)
+    {
+        MonsterIntentionService.ExecuteMonsterIntention(monster);
+        // 怪物攻击意图执行后：按 DecayTiming=OnAttackPlayed 处理状态（如旋风斩状态触发的群攻由 MonsterIntentionService 内部完成）
+        StateDecayProcessor.ProcessDecayAtTiming(monster, DecayTrigger.OnAttackPlayed);
+    }
 
     private void ShowDamageNumbersForCardPlay(Card.CardApplyResult applyResult)
     {

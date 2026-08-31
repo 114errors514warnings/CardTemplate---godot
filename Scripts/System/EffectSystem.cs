@@ -154,6 +154,17 @@ public sealed class AttackEffect : IEffect
             context.Target.HP = Math.Max(0, context.Target.HP - hpDamage);
         }
 
+        if (hpDamage > 0)
+        {
+            BattleSytem.RaiseOnDamageApplied(context.Target, hpDamage);
+        }
+
+        // 受到伤害后：按 DecayTiming=OnDamaged 处理目标状态（如反击触发、燃血+1 攻击等）
+        if (hpDamage > 0 && context.Target != null)
+        {
+            StateDecayProcessor.ProcessDecayAtTiming(context.Target, DecayTrigger.OnDamaged);
+        }
+
         TryTriggerCounterAttack(context);
 
         if (!context.IsCounterAttack && context.Source is MonsterInstance && context.Target is CharacterInstance)
@@ -161,7 +172,7 @@ public sealed class AttackEffect : IEffect
             StateSystem.OnMonsterAttackPlayer(context.Source, context.Target);
         }
 
-        return new EffectResult(
+        EffectResult attackResult = new EffectResult(
             Name,
             context.Source,
             context.Target,
@@ -172,6 +183,11 @@ public sealed class AttackEffect : IEffect
             targetShieldAfter: context.Target.Shield,
             targetHpBefore: targetHpBefore,
             targetHpAfter: context.Target.HP);
+
+        BattleSytem.Current?.EnqueueDeferredCombatInfo(
+            $"攻击：来源={context.Source?.UniqueInGameId ?? 0} 攻击 目标={context.Target?.UniqueInGameId ?? 0}，造成 {damage} 伤害（护盾抵扣 {absorbedByShield}，HP 伤害 {hpDamage}），目标 HP {targetHpBefore}->{context.Target.HP}");
+
+        return attackResult;
     }
 
     private static bool ShouldHitAllEnemies(EffectContext context)
@@ -357,6 +373,86 @@ public sealed class ShieldEffect : IEffect
     }
 }
 
+/// <summary>
+/// 不叠加目标防御力的护盾分配效果（用于大地"把累积护盾复制给友军"等场景）。
+/// 公式 = target.Shield += extraShield（不叠加 target.Defend）。
+/// </summary>
+public sealed class DistributeShieldEffect : IEffect
+{
+    public string Name => "DistributeShield";
+
+    public EffectResult Apply(EffectContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+
+        IUnitInstance target = context.Target ?? context.Source;
+        if (target == null)
+        {
+            return new EffectResult(Name, context.Source, context.Target);
+        }
+
+        int shieldGain = Math.Max(0, context.GetParam(0));
+        int targetShieldBefore = target.Shield;
+        if (shieldGain == 0)
+        {
+            return new EffectResult(Name, context.Source, target, sourceShieldBefore: targetShieldBefore, sourceShieldAfter: target.Shield);
+        }
+
+        target.Shield += shieldGain;
+        return new EffectResult(
+            Name,
+            context.Source,
+            target,
+            totalValue: shieldGain,
+            shieldGained: shieldGain,
+            sourceShieldBefore: targetShieldBefore,
+            sourceShieldAfter: target.Shield);
+    }
+}
+
+/// <summary>
+/// 纯扣血效果（用于燃血等"按固定值扣血"场景）。
+/// 公式 = target.HP -= extraHp（**不**叠加 source.Attack，与 ApplyAttack 公式不同）。
+/// </summary>
+public sealed class HpLossEffect : IEffect
+{
+    public string Name => "HpLoss";
+
+    public EffectResult Apply(EffectContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+
+        IUnitInstance target = context.Target ?? context.Source;
+        if (target == null)
+        {
+            return new EffectResult(Name, context.Source, context.Target);
+        }
+
+        int hpLoss = Math.Max(0, context.GetParam(0));
+        if (hpLoss == 0)
+        {
+            return new EffectResult(Name, context.Source, target, targetHpBefore: target.HP, targetHpAfter: target.HP);
+        }
+
+        int targetHpBefore = target.HP;
+        target.HP = Math.Max(0, target.HP - hpLoss);
+        return new EffectResult(
+            Name,
+            context.Source,
+            target,
+            totalValue: hpLoss,
+            hpDamage: hpLoss,
+            targetHpBefore: targetHpBefore,
+            targetHpAfter: target.HP);
+    }
+}
+
 public sealed class AddCostEffect : IEffect
 {
     public string Name => "AddCost";
@@ -466,6 +562,8 @@ public static class EffectSystem
 {
     public static readonly IEffect Attack = new AttackEffect();
     public static readonly IEffect Shield = new ShieldEffect();
+    public static readonly IEffect DistributeShield = new DistributeShieldEffect();
+    public static readonly IEffect HpLoss = new HpLossEffect();
     public static readonly IEffect AddCost = new AddCostEffect();
     public static readonly IEffect ShieldSlam = new ShieldSlamEffect();
 
@@ -487,6 +585,16 @@ public static class EffectSystem
     public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)
     {
         return Apply(Shield, new EffectContext(source, effectParams: effectParams));
+    }
+
+    public static EffectResult ApplyDistributeShield(IUnitInstance target, int extraShield)
+    {
+        return Apply(DistributeShield, new EffectContext(target, target, new int[] { extraShield }));
+    }
+
+    public static EffectResult ApplyHpLoss(IUnitInstance target, int hpLoss)
+    {
+        return Apply(HpLoss, new EffectContext(target, target, new int[] { hpLoss }));
     }
 
     public static EffectResult ApplyAddCost(IUnitInstance source, int[] effectParams = null)

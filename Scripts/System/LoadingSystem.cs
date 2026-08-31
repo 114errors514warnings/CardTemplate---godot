@@ -210,6 +210,15 @@ public partial class LoadingSystem : Node
 		return LoadStates(GetFilePathByKey(pathKey), useCache);
 	}
 
+	/// <summary>
+	/// 强制重读状态 CSV 并覆盖缓存。CardBattleScene 启动时调用，避开静态缓存的"启动时一次性读"陷阱。
+	/// </summary>
+	public static Dictionary<StateType, StateDefinition> ReloadStates()
+	{
+		stateCache.Clear();
+		return LoadStatesByKey(useCache: true);
+	}
+
 	public static Dictionary<int, Character> LoadCharactersByKey(string pathKey = CharacterCsvPathKey, bool useCache = true)
 	{
 		return LoadCharacters(GetFilePathByKey(pathKey), useCache);

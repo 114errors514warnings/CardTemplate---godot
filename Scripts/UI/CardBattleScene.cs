@@ -64,6 +64,8 @@ public partial class CardBattleScene : Control
 	private Control setupWindow;
 	private Control debugPanelWindow;
 	private bool pendingExternalRefresh;
+	private bool isBannerActive;
+	private Control handPanelRoot;
 	private readonly List<int> initialMonsterOrder = new();
 	private readonly Dictionary<int, UnitViewRefs> unitViews = new();
 	private readonly Dictionary<ulong, (CharacterInstance owner, Card card)> cardViewMap = new();
@@ -83,6 +85,10 @@ public partial class CardBattleScene : Control
 
 	public override void _Ready()
 	{
+		// 强制重读状态 CSV（不依赖 LoadingSystem.stateCache 启动时缓存）：
+		// 开发期间改通用State.csv 后，重启 Godot 即可看到新 Name / EffectDescription。
+		LoadingSystem.ReloadStates();
+
 		CardDisplayScene ??= GD.Load<PackedScene>("res://Scenes/Card/CardDisplayPrefab.tscn");
 		SetupWindowScene ??= GD.Load<PackedScene>("res://Scenes/UI/BattleSetupWindow.tscn");
 		DebugPanelScene ??= GD.Load<PackedScene>("res://Scenes/UI/BattleDebugPanelWindow.tscn");
@@ -106,6 +112,7 @@ public partial class CardBattleScene : Control
 		energyLabel = GetNodeOrNull<Label>("MainMargin/MainVBox/BottomRow/LeftButtons/EnergyLabel");
 		
 		endTurnButton = GetNodeOrNull<Button>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/HeaderRow/EndTurnButton");
+		handPanelRoot = GetNodeOrNull<Control>("MainMargin/MainVBox/BottomRow/HandPanel");
 		pileOverlay = GetNodeOrNull<Control>("PileOverlay");
 		pileTabButtons = GetNodeOrNull<HBoxContainer>("PileOverlay/Window/Content/Header/PileTabButtons");
 		pileTitleLabel = GetNodeOrNull<Label>("PileOverlay/Window/Content/PileTitle");
@@ -123,6 +130,10 @@ public partial class CardBattleScene : Control
 		else { initialMonsterOrder.Clear(); initialMonsterOrder.AddRange(BuildInitialMonsterIds()); battle?.OnInit(BuildInitialCharacterIds(), BuildInitialMonsterIds()); }
 		RefreshAllUi(); BindUiEvents(); ApplyArenaPanelStyle();
 		CreateFloatLayer();
+		BattleSytem.OnDamageApplied += ShowDamageNumberOnUnit;
+		BattleSytem.OnPlayerTurnStart += ShowPlayerTurnBanner;
+		BattleSytem.OnMonsterTurnStart += ShowMonsterTurnBanner;
+		BattleSytem.OnMonsterIntentionHighlight += SetMonsterHighlight;
 	}
 
 	public override void _Process(double delta)
@@ -706,18 +717,9 @@ public partial class CardBattleScene : Control
 	{
 		if (stateTooltipLabel == null) return;
 		string stateName = GetStateDisplayName(stateType);
-		string duration = BuildStateDurationText(stateType, stacks);
-		string effect = stateType switch
-		{
-			StateType.Vulnerable => $"{duration}\u53D7\u5230\u7684\u4F24\u5BB3\u589E\u52A050%",
-			StateType.Weak => $"{duration}\u9020\u6210\u7684\u653B\u51FB\u4F24\u5BB3\u964D\u4F4E25%",
-			StateType.CounterAttack => $"{duration}\u5728\u56DE\u5408\u5916\u53D7\u5230\u653B\u51FB\u65F6\uFF0C\u5BF9\u6765\u6E90\u8FDB\u884C\u4E00\u6B21\u53CD\u51FB",
-			StateType.WhirlwindSlash => $"{duration}\u56DE\u5408\u5916\u7684\u653B\u51FB\u4F1A\u4F5C\u7528\u4E8E\u6240\u6709\u654C\u4EBA",
-			StateType.AddAttack => $"\u5F53\u524D\u989D\u5916\u653B\u51FB\u4F24\u5BB3 +{stacks}",
-			StateType.ExtraEnergy => $"\u4E0B\u56DE\u5408\u989D\u5916\u83B7\u5F97 {stacks} \u70B9\u80FD\u91CF",
-			StateType.CourageArmor => $"{duration}\u6BCF\u6253\u51FA\u4E00\u5F20\u653B\u51FB\u724C\u540E\u9632\u5FA1\u4E00\u6B21",
-			_ => $"{stateName}\u6548\u679C\u4EE5\u5F53\u524D\u89C4\u5219\u5B9E\u73B0\u4E3A\u51C6",
-		};
+		string effect = LoadingSystem.StateDictionary.TryGetValue(stateType, out var def) && !string.IsNullOrWhiteSpace(def.EffectDescription)
+			? def.EffectDescription
+			: $"{stateName}\u6548\u679C\u4EE5\u5F53\u524D\u89C4\u5219\u5B9E\u73B0\u4E3A\u51C6";
 		stateTooltipLabel.Text = $"{stateName}\n{effect}";
 		if (stateTooltip != null) stateTooltip.Visible = true;
 	}
@@ -782,26 +784,68 @@ public partial class CardBattleScene : Control
 	{
 		if (LoadingSystem.StateDictionary.TryGetValue(stateType, out var def) && !string.IsNullOrWhiteSpace(def.Name))
 		{
-			return stateType switch
-			{
-				StateType.Vulnerable => "\u6613\u4F24",
-				StateType.Weak => "\u865A\u5F31",
-				StateType.CounterAttack => "\u53CD\u51FB",
-				StateType.WhirlwindSlash => "\u65CB\u98CE\u65A9",
-				StateType.AddAttack => "\u52A0\u653B",
-				StateType.ExtraEnergy => "\u989D\u5916\u80FD\u91CF",
-				StateType.Void => "\u865A\u65E0",
-				StateType.CourageArmor => "\u52C7\u6C14\u94E0\u7532",
-				_ => def.Name,
-			};
+			return def.Name;
 		}
 		return stateType.ToString();
 	}
-	private static string BuildStateDurationText(StateType stateType, int stacks)
+
+	// ── 回合切换横幅 ──────────────────────────────────────
+	private void ShowPlayerTurnBanner() => _ = ShowTurnBannerAsync("\u5DF2\u65B9\u56DE\u5408");
+	private void ShowMonsterTurnBanner() => _ = ShowTurnBannerAsync("\u654C\u65B9\u56DE\u5408");
+
+	private async System.Threading.Tasks.Task ShowTurnBannerAsync(string text, double holdDuration = 1.0)
 	{
-		if (!LoadingSystem.StateDictionary.TryGetValue(stateType, out var def) || def == null || def.IsPermanent || def.TurnStartDecayAmount <= 0)
-			return string.Empty;
-		int remaining = Math.Max(1, (int)Math.Ceiling((double)Math.Max(1, stacks) / def.TurnStartDecayAmount));
-		return $"\u5728{remaining}\u56DE\u5408\u5185";
+		if (floatLayer == null) return;
+		Control banner = BuildTurnBannerNode(text);
+		floatLayer.AddChild(banner);
+		isBannerActive = true;
+		if (handPanelRoot != null) handPanelRoot.MouseFilter = Control.MouseFilterEnum.Ignore;
+
+		await ToSignal(GetTree().CreateTimer(holdDuration), SceneTreeTimer.SignalName.Timeout);
+
+		// 淡出
+		Tween fadeOut = banner.CreateTween();
+		fadeOut.TweenProperty(banner, "modulate:a", 0.0f, 0.2);
+		await ToSignal(fadeOut, Tween.SignalName.Finished);
+
+		isBannerActive = false;
+		if (handPanelRoot != null) handPanelRoot.MouseFilter = Control.MouseFilterEnum.Stop;
+		banner.QueueFree();
+	}
+
+	private Control BuildTurnBannerNode(string text)
+	{
+		var root = new Control { Name = "TurnBanner" };
+		root.MouseFilter = Control.MouseFilterEnum.Stop;
+		root.SetAnchorsPreset(LayoutPreset.FullRect);
+		root.Modulate = new Color(1, 1, 1, 0);
+
+		var bg = new ColorRect { Color = new Color(0, 0, 0, 0.55f) };
+		bg.Name = "Bg";
+		bg.MouseFilter = Control.MouseFilterEnum.Ignore;
+		bg.SetAnchorsPreset(LayoutPreset.FullRect);
+		root.AddChild(bg);
+
+		var label = new Label { Text = text };
+		label.Name = "Label";
+		label.MouseFilter = Control.MouseFilterEnum.Ignore;
+		label.HorizontalAlignment = HorizontalAlignment.Center;
+		label.VerticalAlignment = VerticalAlignment.Center;
+		label.AddThemeFontSizeOverride("font_size", 96);
+		label.AddThemeColorOverride("font_color", Colors.White);
+		label.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.8f));
+		label.SetAnchorsPreset(LayoutPreset.FullRect);
+		root.AddChild(label);
+
+		return root;
+	}
+
+	// ── 怪物结算高亮（结算时图片放大） ──────────────────
+	public void SetMonsterHighlight(int uniqueInGameId, bool on)
+	{
+		if (unitViews.TryGetValue(uniqueInGameId, out var view) && view?.Root != null)
+		{
+			view.Root.SetHighlighted(on);
+		}
 	}
 }

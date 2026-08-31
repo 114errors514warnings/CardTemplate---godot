@@ -309,6 +309,9 @@ public partial class Card : Resource
 				case EffectType.AddState:
 					result = ApplyAddStateEffect(source, target, resolvedTargets, effectArgs);
 					break;
+				case EffectType.HpLoss:
+					result = ApplyHpLossEffect(source, resolvedTargets, effectArgs);
+					break;
 				case EffectType.ClearState:
 					result = ApplyClearStateEffect(source, target, resolvedTargets, effectArgs);
 					break;
@@ -331,7 +334,9 @@ public partial class Card : Resource
 					result = ApplyShieldSlamEffect(source, resolvedTargets, effectArgs);
 					break;
 				case EffectType.AddKeyword:
-					result = ApplyAddKeywordEffect(source, resolvedTargets, effectArgs);
+					// AddKeyword 走 CardPlayController.TryExecuteCardOperations 选牌流程（在 PlayHandCard 中处理），
+					// 避免在 Card.Apply 阶段直接调 GetCardsForCardOperation 把"选"当"随机"。
+					result = new CardApplyResult(true, this, source, source);
 					break;
 				case EffectType.MirrorShieldToAllies:
 					result = ApplyMirrorShieldToAlliesEffect(source, resolvedTargets, effectArgs, accumulatedShield);
@@ -540,6 +545,22 @@ public partial class Card : Resource
 		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
 	}
 
+	private CardApplyResult ApplyHpLossEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int[] finalEffectArgs = GetShieldBaseArguments(effectArgs);
+		int hpLoss = finalEffectArgs.Length > 0 ? finalEffectArgs[0] : 0;
+		List<EffectResult> effectResults = new List<EffectResult>();
+		IUnitInstance lastTarget = null;
+		EffectResult lastEffectResult = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			lastEffectResult = EffectSystem.ApplyHpLoss(resolvedTarget, hpLoss);
+			effectResults.Add(lastEffectResult);
+		}
+		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
 	private static int[] GetShieldBaseArguments(int[] effectArgs)
 	{
 		if (effectArgs == null || effectArgs.Length == 0)
@@ -656,7 +677,7 @@ public partial class Card : Resource
 		foreach (IUnitInstance resolvedTarget in resolvedTargets)
 		{
 			lastTarget = resolvedTarget;
-			StateSystem.AddOrUpdateState(resolvedTarget, stateType, stacks, turnStartResource, turnStartAmount);
+			StateSystem.AddOrUpdateState(resolvedTarget, stateType, stacks, turnStartResource, turnStartAmount, source);
 		}
 
 		return new CardApplyResult(true, this, source, lastTarget);
@@ -940,7 +961,7 @@ public partial class Card : Resource
 
 		foreach (IUnitInstance ally in resolvedTargets)
 		{
-			EffectSystem.ApplyShield(ally, new int[] { totalShield });
+			EffectSystem.ApplyDistributeShield(ally, totalShield);
 		}
 
 		AppendConsoleInfo($"{GetUnitLabel(source)} 将所有友方单位护盾增加 {totalShield}（前序累积护盾）");
