@@ -1258,9 +1258,8 @@ public partial class BattleSytem : Node
         ResetBattleCardsPlayedThisTurnCounts(alivePlayers);
         foreach (CharacterInstance player in alivePlayers)
         {
-            StateSystem.OnTurnStart(player);
-            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
-            StateDecayProcessor.ProcessDecayAtTiming(player, DecayTrigger.OnTurnStart);
+            // 先清上一回合遗留护盾（阵地例外）→ 后 OnTurnStart 发放新护盾/资源 → 再 ProcessDecay 移除状态。
+            // 这样 TurnStartEffect（预判下回合护盾）发放的护盾能保留，不会被清零。
             if (player.Shield > 0)
             {
                 // 阵地 (ShieldCapEqualsHP) 例外：保留护盾但 cap 在当前 HP。
@@ -1276,6 +1275,10 @@ public partial class BattleSytem : Node
                     player.Shield = 0;
                 }
             }
+
+            StateSystem.OnTurnStart(player);
+            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
+            StateDecayProcessor.ProcessDecayAtTiming(player, DecayTrigger.OnTurnStart);
 
             int drawCount = player.drawCardNum > 0 ? player.drawCardNum : 0;
             int drawn = DrawCardsToHand(player, drawCount);
@@ -1310,10 +1313,7 @@ public partial class BattleSytem : Node
                 continue;
             }
 
-            StateSystem.OnTurnStart(monster);
-            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
-            StateDecayProcessor.ProcessDecayAtTiming(monster, DecayTrigger.OnTurnStart);
-
+            // 先清上一回合遗留护盾（阵地例外）→ 后 OnTurnStart 发放新护盾/资源 → 再 ProcessDecay 移除状态。
             if (monster.Shield > 0)
             {
                 // 阵地 (ShieldCapEqualsHP) 例外：保留护盾但 cap 在当前 HP。
@@ -1329,6 +1329,10 @@ public partial class BattleSytem : Node
                     monster.Shield = 0;
                 }
             }
+
+            StateSystem.OnTurnStart(monster);
+            // 先 OnTurnStart（给资源/护盾/cap）→ 后 ProcessDecayAtTiming（按 DecayMode=ClearAll 移除）
+            StateDecayProcessor.ProcessDecayAtTiming(monster, DecayTrigger.OnTurnStart);
         }
 
         NotifyBattleSceneRefresh();
@@ -1367,8 +1371,12 @@ public partial class BattleSytem : Node
             }
         }
 
-        // 最后一只结算后恢复
-        if (highlightedId != -1) OnMonsterIntentionHighlight?.Invoke(highlightedId, false);
+        // 最后一只结算完成后，保持高亮再等 0.5s 结束怪物回合，轮到玩家回合。
+        if (highlightedId != -1)
+        {
+            await ToSignal(GetTree().CreateTimer(0.5f), SceneTreeTimer.SignalName.Timeout);
+            OnMonsterIntentionHighlight?.Invoke(highlightedId, false);
+        }
 
         NotifyBattleSceneRefresh();
         SelectIntentionsForAllMonsters();

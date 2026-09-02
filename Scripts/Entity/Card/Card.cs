@@ -277,7 +277,9 @@ public partial class Card : Resource
 			EffectType effectType = EffectTypes[i];
 			if (IsCardOperationEffect(effectType))
 			{
-				lastResult = new CardApplyResult(true, this, source, target);
+				// 卡牌操作效果不产生即时结算，保留上一条真实效果（如 Damage）的 EffectResult，
+				// 供 DidApplyResultKillTarget（淬炼击杀检测）使用；若前面无真实效果则给空结果兜底。
+				lastResult ??= new CardApplyResult(true, this, source, target);
 				continue;
 			}
 

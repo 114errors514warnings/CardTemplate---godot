@@ -374,6 +374,12 @@ public static class StateSystem
 			damage += AddAttackStacks;
 		}
 
+		// 持盾防守：拥有 ShieldGuard 状态时，本回合攻击 -1。
+		if (source != null && TryGetStateStacks(source, StateType.ShieldGuard, out int _))
+		{
+			damage -= 1;
+		}
+
 		if (card != null && card.HasKeyWord(CardKeyWord.Crit))
 		{
 			damage *= 2;
@@ -525,13 +531,6 @@ public static class StateSystem
 					AppendStateTurnStartInfo(unit, StateType.TurnStartEffect, total, "shield");
 					break;
 			}
-			// 移除由 StateDecayProcessor.ProcessDecayAtTiming(DecayMode=ClearAll) 处理
-		}
-
-		if (TryGetStateStacks(unit, StateType.ShieldGuard, out int shieldGuardStacks) && shieldGuardStacks > 0)
-		{
-			EffectSystem.ApplyShield(unit, new int[] { 3 });
-			AppendStateTurnStartInfo(unit, StateType.ShieldGuard, shieldGuardStacks, "guard");
 			// 移除由 StateDecayProcessor.ProcessDecayAtTiming(DecayMode=ClearAll) 处理
 		}
 

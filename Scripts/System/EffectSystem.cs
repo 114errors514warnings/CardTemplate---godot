@@ -355,6 +355,13 @@ public sealed class ShieldEffect : IEffect
         }
 
         int shieldGain = Math.Max(0, context.Source.Defend + context.GetParam(0));
+        // 持盾防守：拥有 ShieldGuard 状态时，Defend 属性 +3，本回合后续每个防御效果多 3 格挡。
+        if (context.Source != null
+            && StateSystem.TryGetStateStacks(context.Source, StateType.ShieldGuard, out int _))
+        {
+            shieldGain += 3;
+        }
+        shieldGain = Math.Max(0, shieldGain);
         int sourceShieldBefore = context.Source.Shield;
         if (shieldGain == 0)
         {
