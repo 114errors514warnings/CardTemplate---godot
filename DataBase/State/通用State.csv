@@ -12,11 +12,11 @@ StateType,Name,IsStackable,IsDebuff,IsElite,DecayTiming,DecayMode,StacksToRemove
 10,回合开始效果,TRUE,FALSE,FALSE,OnTurnStart,ClearAll,0,回合开始时获得资源
 11,燃血,TRUE,FALSE,FALSE,OnTurnStart,Flat,1,失去生命时获得1点攻击
 12,紧咬不放,FALSE,FALSE,FALSE,Never,None,0,攻击施加者时触发其反击
-13,持盾防守,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,下回合防御+3、攻击-1、禁战斗牌
+13,持盾防守,FALSE,FALSE,FALSE,OnTurnEnd,ClearAll,0,下回合防御+3、攻击-1、禁战斗牌
 14,阵地,FALSE,FALSE,FALSE,Never,None,0,回合开始时至多保留等同你当前生命值的护盾值
 15,城墙,FALSE,FALSE,FALSE,Never,None,0,当你拥有护盾时，敌人的单体攻击仅会以你为目标
 16,蓄势待发,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,在本回合保留你的所有战斗牌，当你反击时，打出手牌中的第一张战斗牌作为替代
 17,强撑,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,每打出一张牌失去1点生命
-18,禁战斗牌,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,禁止打出战斗牌（回合始移除）
+18,禁战斗牌,FALSE,FALSE,FALSE,OnTurnEnd,ClearAll,0,禁止打出战斗牌（回合结束移除）
 19,战术支援,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,本回合不能再抽牌
 20,统一战线,FALSE,FALSE,FALSE,OnTurnStart,ClearAll,0,本回合的下一张战斗牌免费

@@ -64,6 +64,8 @@ public partial class CardBattleScene : Control
 	private Control setupWindow;
 	private Control debugPanelWindow;
 	private bool pendingExternalRefresh;
+	// 当前结算高亮的怪物 id（刷新重建单位面板后需重放放大）。
+	private int highlightedMonsterUniqueId = -1;
 	private bool isBannerActive;
 	private Control handPanelRoot;
 	private readonly List<int> initialMonsterOrder = new();
@@ -510,6 +512,12 @@ public partial class CardBattleScene : Control
 				monstersRow.AddChild(CreateEmptyUnitSlot($"怪物槽位 {mi + 1}"));
 			}
 		}
+
+		// 刷新重建面板后，若当前有结算高亮中的怪物，重新对其放大，保证高亮持续。
+		if (highlightedMonsterUniqueId != -1 && unitViews.TryGetValue(highlightedMonsterUniqueId, out var highlightedView) && highlightedView?.Root != null)
+		{
+			highlightedView.Root.SetHighlighted(true);
+		}
 	}
 
 	private static void ApplyUnitAreaColumns(GridContainer grid, int columns)
@@ -843,6 +851,7 @@ public partial class CardBattleScene : Control
 	// ── 怪物结算高亮（结算时图片放大） ──────────────────
 	public void SetMonsterHighlight(int uniqueInGameId, bool on)
 	{
+		highlightedMonsterUniqueId = on ? uniqueInGameId : (highlightedMonsterUniqueId == uniqueInGameId ? -1 : highlightedMonsterUniqueId);
 		if (unitViews.TryGetValue(uniqueInGameId, out var view) && view?.Root != null)
 		{
 			view.Root.SetHighlighted(on);

@@ -186,6 +186,13 @@ public sealed class CardPlayController
             return false;
         }
 
+        // 持盾防守：拥有 BattleCardBlocked 状态时不能打出战斗牌（攻击牌/战斗牌，状态牌除外）。
+        if (IsBattleCard(card) && StateSystem.TryGetStateStacks(sourcePlayer, StateType.BattleCardBlocked, out int _))
+        {
+            console.Error($"{sourcePlayer.Name} 因持盾防守状态无法打出战斗牌（卡牌ID {card.CardId}）。");
+            return false;
+        }
+
         if (!TryBuildCardOperationRequests(card, out List<CardOperationRequest> cardOperationRequests, out string cardOperationError))
         {
             console.Error(cardOperationError);
@@ -771,26 +778,34 @@ public sealed class CardPlayController
                 return false;
             }
 
-            int count = rawEffectParams.Length > 1 ? rawEffectParams[1] : 1;
+            int count;
+            bool requireKilledTarget;
+            CardKeyWord keyword = CardKeyWord.None;
+            KeywordFlag keywordFlag = KeywordFlag.None;
+            if (effectType == EffectType.AddKeyword)
+            {
+                // AddKeyword 参数： [0]=目标类型, [1]=关键词, [2]=关键词Flag, [3]=数量(默认1)
+                count = rawEffectParams.Length > 3 ? rawEffectParams[3] : 1;
+                requireKilledTarget = false;
+                if (rawEffectParams.Length > 1 && Enum.IsDefined(typeof(CardKeyWord), rawEffectParams[1]))
+                {
+                    keyword = (CardKeyWord)rawEffectParams[1];
+                }
+                if (rawEffectParams.Length > 2 && Enum.IsDefined(typeof(KeywordFlag), rawEffectParams[2]))
+                {
+                    keywordFlag = (KeywordFlag)rawEffectParams[2];
+                }
+            }
+            else
+            {
+                // UpgradeBattleCard / UpgradePermanentCard 参数： [0]=目标类型, [1]=数量(默认1), [2]=requireKilledTarget
+                count = rawEffectParams.Length > 1 ? rawEffectParams[1] : 1;
+                requireKilledTarget = rawEffectParams.Length > 2 && rawEffectParams[2] > 0;
+            }
             if (count <= 0)
             {
                 errorMessage = $"卡牌 {unitRegistry.BuildCardLabel(card)} 的卡牌操作效果 {effectType} 目标数量必须大于 0。";
                 return false;
-            }
-
-            bool requireKilledTarget = rawEffectParams.Length > 2 && rawEffectParams[2] > 0;
-            CardKeyWord keyword = CardKeyWord.None;
-            KeywordFlag keywordFlag = KeywordFlag.None;
-            if (effectType == EffectType.AddKeyword && rawEffectParams.Length > 3)
-            {
-                if (Enum.IsDefined(typeof(CardKeyWord), rawEffectParams[1]))
-                {
-                    keyword = (CardKeyWord)rawEffectParams[1];
-                }
-                if (rawEffectParams.Length > 4 && Enum.IsDefined(typeof(KeywordFlag), rawEffectParams[3]))
-                {
-                    keywordFlag = (KeywordFlag)rawEffectParams[3];
-                }
             }
             requests.Add(new CardOperationRequest(effectType, targetType, count, requireKilledTarget, keyword, keywordFlag));
         }
