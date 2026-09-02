@@ -3,11 +3,13 @@
 importer="csv_translation"
 type="Translation"
 uid="uid://cv66mxc8mlgjf"
-valid=false
 
 [deps]
 
+files=["res://README/角色设计/卡牌表格/重剑手.费用.translation", "res://README/角色设计/卡牌表格/重剑手.类型.translation", "res://README/角色设计/卡牌表格/重剑手.等级.translation", "res://README/角色设计/卡牌表格/重剑手.条件.translation", "res://README/角色设计/卡牌表格/重剑手.关键词.translation", "res://README/角色设计/卡牌表格/重剑手.效果.translation", "res://README/角色设计/卡牌表格/重剑手.备注.translation"]
+
 source_file="res://README/角色设计/卡牌表格/重剑手.csv"
+dest_files=["res://README/角色设计/卡牌表格/重剑手.费用.translation", "res://README/角色设计/卡牌表格/重剑手.类型.translation", "res://README/角色设计/卡牌表格/重剑手.等级.translation", "res://README/角色设计/卡牌表格/重剑手.条件.translation", "res://README/角色设计/卡牌表格/重剑手.关键词.translation", "res://README/角色设计/卡牌表格/重剑手.效果.translation", "res://README/角色设计/卡牌表格/重剑手.备注.translation"]
 
 [params]
 
