@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bqhlw68f37ixd"
+
+[deps]
+
+files=["res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation"]
+
+source_file="res://DataBase/Stage/第一层/普通事件.csv"
+dest_files=["res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation", "res://DataBase/Stage/第一层/普通事件.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

@@ -4,3 +4,5 @@ Data.State.Common,res://DataBase/State/通用State.csv
 Data.Unit.Character,res://DataBase/Unit/Character.csv
 Data.Unit.Monster,res://DataBase/Unit/Monster.csv
 Data.Unit.CharacterDefaultDeck,res://DataBase/Unit/Character/CharacterDefaultDeck.csv
+Data.Map.DropTable,res://DataBase/Map/DropTable.csv
+Data.Card.CharacterRewardPool,res://DataBase/Card/CharacterRewardPool.csv

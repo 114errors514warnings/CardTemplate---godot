@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dkr4c1w26i4mk"
+
+[deps]
+
+files=["res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation"]
+
+source_file="res://DataBase/Stage/第一层/高危敌袭.csv"
+dest_files=["res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation", "res://DataBase/Stage/第一层/高危敌袭.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

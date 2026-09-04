@@ -17,6 +17,12 @@ public partial class LoadingSystem : Node
 	public const string CharacterCsvPathKey = "Data.Unit.Character";
 	public const string MonsterCsvPathKey = "Data.Unit.Monster";
 	public const string CharacterDefaultDeckCsvPathKey = "Data.Unit.CharacterDefaultDeck";
+	/// <summary>掉落物表路径 key（FilePathRegistry）。</summary>
+	public const string DropTableCsvPathKey = "Data.Map.DropTable";
+	/// <summary>角色卡池来源表路径 key（FilePathRegistry）。</summary>
+	public const string CharacterRewardPoolCsvPathKey = "Data.Card.CharacterRewardPool";
+	/// <summary>Stage 配置根目录：不逐文件注册，按 <层>/<节点类型>.csv 读取。</summary>
+	public const string StageRootDir = "res://DataBase/Stage/";
 
 	private static Dictionary<string, string> filePathRegistryCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -39,6 +45,22 @@ public partial class LoadingSystem : Node
 	/// 缓存角色默认卡组，Key 为角色ID，Value 为卡牌ID→数量字典
 	/// </summary>
 	private static Dictionary<int, Dictionary<int, int>> characterDefaultDeckCache = new Dictionary<int, Dictionary<int, int>>();
+
+	/// <summary>
+	/// 缓存掉落物表条目
+	/// </summary>
+	private static List<DropTableEntry> dropTableCache = new List<DropTableEntry>();
+
+	/// <summary>
+	/// 缓存角色卡池来源行（CharacterRewardPool.csv）
+	/// </summary>
+	private static List<CharacterRewardSource> characterRewardPoolCache = new List<CharacterRewardSource>();
+
+	/// <summary>
+	/// 缓存 Stage 遭遇配置：key = 层目录名（第一层…），value = 类型 → 行列表
+	/// </summary>
+	private static Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>> stageEncounterCache =
+		new Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>>();
 
 	/// <summary>
 	/// 缓存状态配置，Key 为 StateType
@@ -85,6 +107,18 @@ public partial class LoadingSystem : Node
 	public static Dictionary<StateType, StateDefinition> StateDictionary
 	{
 		get { return stateCache; }
+	}
+
+	/// <summary>掉落物表条目（LoadDropTablesByKey 后可用）。</summary>
+	public static List<DropTableEntry> DropTableEntries
+	{
+		get { return dropTableCache; }
+	}
+
+	/// <summary>角色卡池来源行（LoadCharacterRewardPoolByKey 后可用）。</summary>
+	public static List<CharacterRewardSource> CharacterRewardSources
+	{
+		get { return characterRewardPoolCache; }
 	}
 
 	public override void _Ready()
@@ -586,5 +620,146 @@ public partial class LoadingSystem : Node
 		}
 
 		return cardIds;
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// P0#9：Stage 遭遇 / 掉落表 / 角色卡池（方案见 2026.08/P0#9 施工文档）
+	// ─────────────────────────────────────────────────────────────
+
+	/// <summary>加载掉落物表（FilePathRegistry: Data.Map.DropTable）。</summary>
+	public static List<DropTableEntry> LoadDropTablesByKey(string pathKey = DropTableCsvPathKey, bool useCache = true)
+	{
+		if (useCache && dropTableCache.Count > 0)
+		{
+			return dropTableCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		dropTableCache = string.IsNullOrWhiteSpace(path) ? new List<DropTableEntry>() : LoadDropTableCsv.LoadEntriesFromCSV(path);
+		return dropTableCache;
+	}
+
+	/// <summary>加载角色卡池来源表（FilePathRegistry: Data.Card.CharacterRewardPool）。</summary>
+	public static List<CharacterRewardSource> LoadCharacterRewardPoolByKey(string pathKey = CharacterRewardPoolCsvPathKey, bool useCache = true)
+	{
+		if (useCache && characterRewardPoolCache.Count > 0)
+		{
+			return characterRewardPoolCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		characterRewardPoolCache = string.IsNullOrWhiteSpace(path)
+			? new List<CharacterRewardSource>()
+			: LoadCharacterRewardPoolCsv.LoadSourcesFromCSV(path);
+		return characterRewardPoolCache;
+	}
+
+	/// <summary>
+	/// 加载 Stage 三层 × 节点类型遭遇配置。文件缺失/仅表头 = 空行表（视为无配置）。
+	/// </summary>
+	public static Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>> LoadStageEncounters(bool useCache = true)
+	{
+		if (useCache && stageEncounterCache.Count > 0)
+		{
+			return stageEncounterCache;
+		}
+
+		Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>> fresh =
+			new Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>>();
+		foreach (string layer in MapNodeTypeUtil.LayerNames)
+		{
+			Dictionary<MapNodeType, List<StageEncounterRow>> byType =
+				new Dictionary<MapNodeType, List<StageEncounterRow>>();
+			foreach (MapNodeType type in MapNodeTypeUtil.StageConfigTypes)
+			{
+				string fileName = MapNodeTypeUtil.GetStageConfigFileName(type);
+				if (string.IsNullOrWhiteSpace(fileName))
+				{
+					continue;
+				}
+
+				string path = $"{StageRootDir}{layer}/{fileName}.csv";
+				byType[type] = LoadStageEncounterCsv.LoadRowsFromCSV(path, layer, type);
+			}
+
+			fresh[layer] = byType;
+		}
+
+		stageEncounterCache = fresh;
+		return stageEncounterCache;
+	}
+
+	/// <summary>按层取某类型全部 Stage 行（未加载或不存在返回空表）。</summary>
+	public static List<StageEncounterRow> GetStageEncounterRows(string layer, MapNodeType nodeType)
+	{
+		if (stageEncounterCache.Count == 0)
+		{
+			LoadStageEncounters();
+		}
+
+		if (!string.IsNullOrWhiteSpace(layer)
+			&& stageEncounterCache.TryGetValue(layer, out Dictionary<MapNodeType, List<StageEncounterRow>> byType)
+			&& byType != null
+			&& byType.TryGetValue(nodeType, out List<StageEncounterRow> rows))
+		{
+			return rows;
+		}
+
+		return new List<StageEncounterRow>();
+	}
+
+	/// <summary>
+	/// 按选取规则从某层某类型挑一行遭遇；返回 null = 无配置（点击不触发）。
+	/// 普通敌袭应传 ResolveNormalCombatDifficultyByEncounterCount 的结果。
+	/// </summary>
+	public static StageEncounterRow TryPickStageEncounter(string layer, MapNodeType nodeType, StageDifficulty? ruleDifficulty, System.Random rng)
+	{
+		List<StageEncounterRow> rows = GetStageEncounterRows(layer, nodeType);
+		bool requireUsable = StageEncounterPicker.IsCombatLikeType(nodeType);
+		return StageEncounterPicker.Pick(rows, ruleDifficulty, rng, requireUsable);
+	}
+
+	/// <summary>获取某角色可获得的卡牌模板 id 集合（通用 + 角色专属，来源 CharacterRewardPool.csv）。</summary>
+	public static List<int> GetCharacterRewardCardIds(int characterId)
+	{
+		if (characterRewardPoolCache.Count == 0)
+		{
+			LoadCharacterRewardPoolByKey();
+		}
+
+		List<int> ids = new List<int>();
+		foreach (CharacterRewardSource source in characterRewardPoolCache)
+		{
+			if (source == null || source.CharacterId != characterId || string.IsNullOrWhiteSpace(source.CardSource))
+			{
+				continue;
+			}
+
+			string path = "res://DataBase/Card/" + source.CardSource.TrimStart('/');
+			Card[] cards = LoadCardCsv.LoadCardsFromCSV(path);
+			foreach (Card card in cards)
+			{
+				if (card != null && !ids.Contains(card.CardId))
+				{
+					ids.Add(card.CardId);
+				}
+			}
+		}
+
+		return ids;
+	}
+
+	/// <summary>主流程入口统一预热（主界面 _Ready 调用，避免首次访问缓存为空）。</summary>
+	public static void EnsureAllDataLoaded()
+	{
+		EnsureFilePathRegistryLoaded();
+		EnsureAllCardsLoaded();
+		LoadCharactersByKey();
+		LoadMonstersByKey();
+		LoadCharacterDefaultDecksByKey();
+		LoadStatesByKey();
+		LoadDropTablesByKey();
+		LoadCharacterRewardPoolByKey();
+		LoadStageEncounters();
 	}
 }

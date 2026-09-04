@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://ye56x2fhg48s"
+
+[deps]
+
+files=["res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation"]
+
+source_file="res://DataBase/Stage/第一层/商人.csv"
+dest_files=["res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation", "res://DataBase/Stage/第一层/商人.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

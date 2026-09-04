@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bu6edvtekxrbt"
+
+[deps]
+
+files=["res://DataBase/Map/DropTable.Category.translation", "res://DataBase/Map/DropTable.RewardParam.translation", "res://DataBase/Map/DropTable.Amount.translation", "res://DataBase/Map/DropTable.Weight.translation"]
+
+source_file="res://DataBase/Map/DropTable.csv"
+dest_files=["res://DataBase/Map/DropTable.Category.translation", "res://DataBase/Map/DropTable.RewardParam.translation", "res://DataBase/Map/DropTable.Amount.translation", "res://DataBase/Map/DropTable.Weight.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

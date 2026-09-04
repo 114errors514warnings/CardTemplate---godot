@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://djeoj0vos76os"
+
+[deps]
+
+files=["res://DataBase/Stage/第一层/普通敌袭.Difficulty.translation", "res://DataBase/Stage/第一层/普通敌袭.MonsterIds.translation", "res://DataBase/Stage/第一层/普通敌袭.DropTableId.translation", "res://DataBase/Stage/第一层/普通敌袭.Weight.translation", "res://DataBase/Stage/第一层/普通敌袭.Note.translation"]
+
+source_file="res://DataBase/Stage/第一层/普通敌袭.csv"
+dest_files=["res://DataBase/Stage/第一层/普通敌袭.Difficulty.translation", "res://DataBase/Stage/第一层/普通敌袭.MonsterIds.translation", "res://DataBase/Stage/第一层/普通敌袭.DropTableId.translation", "res://DataBase/Stage/第一层/普通敌袭.Weight.translation", "res://DataBase/Stage/第一层/普通敌袭.Note.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

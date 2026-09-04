@@ -28,6 +28,39 @@ public partial class BattleSetupData : Resource
     [Export]
     public Godot.Collections.Dictionary<int, Godot.Collections.Dictionary<int, int>> CharacterCardIdsPerPlayer { get; set; } = new Godot.Collections.Dictionary<int, Godot.Collections.Dictionary<int, int>>();
 
+    /// <summary>
+    /// 每槽全量永久卡组快照（CardId + PermanentUpgradeLevel，零基槽位）。
+    /// 运行局（P0#9 RunBattleScene）提供后，将用它替代「默认卡组 + 配置卡」重建 DefaultDeck。
+    /// 非 [Export]，仅供程序化注入。
+    /// </summary>
+    public Dictionary<int, List<RunDeckEntry>> PlayerFullDecks { get; } = new Dictionary<int, List<RunDeckEntry>>();
+
+    public void SetPlayerFullDeckSnapshot(int playerIndexZeroBased, IEnumerable<RunDeckEntry> entries)
+    {
+        List<RunDeckEntry> list = new List<RunDeckEntry>();
+        if (entries != null)
+        {
+            list.AddRange(entries);
+        }
+
+        PlayerFullDecks[playerIndexZeroBased] = list;
+    }
+
+    public bool TryGetPlayerFullDeckSnapshot(int playerIndexZeroBased, out List<RunDeckEntry> entries)
+    {
+        if (PlayerFullDecks != null
+            && PlayerFullDecks.TryGetValue(playerIndexZeroBased, out List<RunDeckEntry> stored)
+            && stored != null
+            && stored.Count > 0)
+        {
+            entries = stored;
+            return true;
+        }
+
+        entries = null;
+        return false;
+    }
+
     public void EnsureMonsterDictionaryInitialized()
     {
         MonsterIds ??= new Godot.Collections.Dictionary<int, int>();

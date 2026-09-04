@@ -823,6 +823,29 @@ public partial class BattleSytem : Node
             return;
         }
 
+        // P0#9 运行局注入：存在整副永久卡组快照时直接用快照重建（含每张的永久升级级数）
+        if (playerIndex >= 0
+            && SetupData != null
+            && SetupData.TryGetPlayerFullDeckSnapshot(playerIndex, out List<RunDeckEntry> deckSnapshot))
+        {
+            foreach (RunDeckEntry entry in deckSnapshot)
+            {
+                if (!LoadingSystem.CardDictionary.TryGetValue(entry.CardId, out Card template))
+                {
+                    AppendPanelConsoleError($"错误：角色 {player.id} 快照卡组中的卡牌ID {entry.CardId} 未在缓存中找到，已跳过。");
+                    continue;
+                }
+
+                Card deckCard = template.CreateDeckInstance();
+                deckCard.PermanentUpgradeLevel = entry.PermanentUpgradeLevel > 0 ? entry.PermanentUpgradeLevel : 0;
+                player.DefaultDeck.Add(deckCard);
+            }
+
+            player.cards?.Clear();
+            player.cards?.AddRange(player.DefaultDeck);
+            return;
+        }
+
         List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdListByKey(player.id, LoadingSystem.CharacterDefaultDeckCsvPathKey, true);
         List<int> configuredCardIds;
         if (playerIndex >= 0 && SetupData != null)
@@ -838,7 +861,7 @@ public partial class BattleSytem : Node
         {
             if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
             {
-                AppendPanelConsoleError($"错误：角色 {player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。" );
+                AppendPanelConsoleError($"错误：角色 {player.id} 默认卡组中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
                 continue;
             }
 
@@ -849,7 +872,7 @@ public partial class BattleSytem : Node
         {
             if (!LoadingSystem.CardDictionary.TryGetValue(cardId, out Card template))
             {
-                AppendPanelConsoleError($"错误：新增配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。" );
+                AppendPanelConsoleError($"错误：新增配置中的卡牌ID {cardId} 未在缓存中找到，已跳过。");
                 continue;
             }
 

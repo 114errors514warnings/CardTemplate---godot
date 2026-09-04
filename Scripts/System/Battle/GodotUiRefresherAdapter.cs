@@ -18,9 +18,33 @@ internal sealed class GodotUiRefresherAdapter : IBattleUiRefresher
     {
         battle.InvokeRefreshBattleInfoDisplay();
         Node scene = battle.GetTree()?.CurrentScene;
-        if (scene is CardBattleScene cardBattleScene)
+        CardBattleScene cardBattleScene = FindCardBattleScene(scene);
+        cardBattleScene?.RequestExternalUiRefresh();
+    }
+
+    // P0#9：运行局(RunBattleScene)把原战斗场景作为子节点实例化，
+    // CurrentScene 不再直接是 CardBattleScene，这里递归查找。
+    private static CardBattleScene FindCardBattleScene(Node root)
+    {
+        if (root == null)
         {
-            cardBattleScene.RequestExternalUiRefresh();
+            return null;
         }
+
+        if (root is CardBattleScene direct)
+        {
+            return direct;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            CardBattleScene found = FindCardBattleScene(child);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 }

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cm175rnweg8st"
+
+[deps]
+
+files=["res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation"]
+
+source_file="res://DataBase/Stage/第二层/Boss.csv"
+dest_files=["res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation", "res://DataBase/Stage/第二层/Boss.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

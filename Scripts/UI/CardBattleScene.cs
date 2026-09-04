@@ -35,6 +35,7 @@ public partial class CardBattleScene : Control
 	private PanelContainer monstersPanel;
 	private GridContainer playersRow;
 	private GridContainer monstersRow;
+	private ScrollContainer monsterScroll;
 	private Label currentHandOwnerLabel;
 	private HBoxContainer handCardsContainer;
 	private readonly Stack<Control> cardPool = new();
@@ -101,6 +102,9 @@ public partial class CardBattleScene : Control
 		monstersPanel = GetNodeOrNull<PanelContainer>("MainMargin/MainVBox/ArenaRow/MonstersPanel");
 		playersRow = GetNodeOrNull<GridContainer>("MainMargin/MainVBox/ArenaRow/PlayersPanel/Margin/VBox/PlayersRow");
 		monstersRow = GetNodeOrNull<GridContainer>("MainMargin/MainVBox/ArenaRow/MonstersPanel/Margin/VBox/MonstersRow");
+		// 仅怪物较多时用 ScrollContainer 兜底：只包怪物网格，角色区与其他 UI 保持原布局尺寸不变
+		WrapUnitGridInScroll(monstersRow);
+		monsterScroll = monstersRow != null ? monstersRow.GetParent() as ScrollContainer : null;
 		currentHandOwnerLabel = GetNodeOrNull<Label>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/HeaderRow/CurrentHandOwnerLabel");
 		handCardsContainer = GetNodeOrNull<HBoxContainer>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/ContentRow/HandCardsViewport/HandCards");
 		handCardsViewport = GetNodeOrNull<Control>("MainMargin/MainVBox/BottomRow/HandPanel/Margin/VBox/ContentRow/HandCardsViewport");
@@ -463,7 +467,7 @@ public partial class CardBattleScene : Control
 		int playerSlotCount = Math.Max(MaxPlayerSlots, players.Count);
 		int playerColumns = Math.Max(1, Math.Min(MaxUnitsPerRow, playerSlotCount));
 		ApplyUnitAreaColumns(playersRow, playerColumns);
-		ApplyUnitAreaScale(playersRow, playerSlotCount);
+		ApplyUnitAreaScale(playersRow, playerSlotCount, playerColumns);
 		for (int i = 0; i < playerSlotCount; i++)
 		{
 			if (i < players.Count)
@@ -488,9 +492,9 @@ public partial class CardBattleScene : Control
 		List<MonsterInstance> orderedMonsters = GetOrderedMonsters();
 		int actualMonsterCount = orderedMonsters.Count;
 		int monsterSlotCount = Math.Max(MaxMonsterSlots, actualMonsterCount);
-		int monsterColumns = Math.Max(1, Math.Min(MaxUnitsPerRow, monsterSlotCount));
+		int monsterColumns = GetAdaptiveMonsterColumns(monsterSlotCount);
 		ApplyUnitAreaColumns(monstersRow, monsterColumns);
-		ApplyUnitAreaScale(monstersRow, monsterSlotCount);
+		ApplyUnitAreaScale(monstersRow, monsterSlotCount, monsterColumns);
 		for (int mi = 0; mi < monsterSlotCount; mi++)
 		{
 			if (mi < actualMonsterCount)
@@ -513,6 +517,14 @@ public partial class CardBattleScene : Control
 			}
 		}
 
+		// 多行布局时压缩单位内部元素，避免最小尺寸撑破视口
+		CompactMonsterRows(monstersRow, monsterSlotCount, monsterColumns);
+		// 刷新后怪物区滚动回顶部，避免滚动位置残留
+		if (monsterScroll != null)
+		{
+			monsterScroll.ScrollVertical = 0;
+		}
+
 		// 刷新重建面板后，若当前有结算高亮中的怪物，重新对其放大，保证高亮持续。
 		if (highlightedMonsterUniqueId != -1 && unitViews.TryGetValue(highlightedMonsterUniqueId, out var highlightedView) && highlightedView?.Root != null)
 		{
@@ -527,22 +539,119 @@ public partial class CardBattleScene : Control
 		if (grid.Columns != clamped) grid.Columns = clamped;
 	}
 
-	// 单位数超出单行时按比例整体缩放，避免撑破窗口。
-	// 1~3 不缩；4=0.85；5~6=0.72；7~8=0.62；9+=0.54。
-	private void ApplyUnitAreaScale(GridContainer grid, int slotCount)
+	// 固定画布内：不做整行视觉 Scale（避免双重缩小/模糊），
+	// 尺寸控制交给 CompactMonsterRows 的最小尺寸收敛 + ScrollContainer 兜底。
+	private void ApplyUnitAreaScale(GridContainer grid, int slotCount, int columns)
 	{
 		if (grid == null) return;
-		float scale = slotCount switch
-		{
-			<= 3 => 1.0f,
-			4 => 0.85f,
-			<= 6 => 0.72f,
-			<= 8 => 0.62f,
-			_ => 0.54f,
-		};
-		grid.Scale = new Vector2(scale, scale);
-		// 缩放后 pivot 居中，避免位置偏移
+		grid.Scale = Vector2.One;
 		grid.PivotOffset = grid.Size * 0.5f;
+	}
+
+	private static void WrapUnitGridInScroll(GridContainer grid)
+	{
+		if (grid == null || grid.GetParent() is ScrollContainer)
+		{
+			return;
+		}
+
+		Node parent = grid.GetParent();
+		if (parent == null)
+		{
+			return;
+		}
+
+		int index = grid.GetIndex();
+		parent.RemoveChild(grid);
+
+		ScrollContainer scroll = new ScrollContainer
+		{
+			Name = grid.Name + "Scroll",
+			HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+			VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+		};
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+
+		parent.AddChild(scroll);
+		int insertIndex = Mathf.Clamp(index, 0, Math.Max(0, parent.GetChildCount() - 1));
+		parent.MoveChild(scroll, insertIndex);
+		scroll.AddChild(grid);
+		grid.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+	}
+
+	private static int GetAdaptiveMonsterColumns(int slotCount)
+	{
+		if (slotCount <= 3) return 3;
+		if (slotCount <= 6) return 3;
+		// 7+：尽量两行（5 列 × 2 行最多容纳 10 只）
+		return 5;
+	}
+
+	private void CompactMonsterRows(GridContainer grid, int slotCount, int columns)
+	{
+		if (grid == null || columns <= 0) return;
+		int rows = (slotCount + columns - 1) / columns;
+		if (rows <= 1) return;
+
+		// 固定画布内：尽量一屏两行以内；尺寸受宽/高双约束，
+		// 下限 0.5 保证可读，极少数超出的部分交给 ScrollContainer 滚动兜底。
+		const float areaWidth = 660f;
+		const float areaHeight = 400f;
+		float widthFactor = columns * 210f > 0 ? areaWidth / (columns * 210f) : 1f;
+		float heightFactor = rows * 360f > 0 ? areaHeight / (rows * 360f) : 1f;
+		float factor = Mathf.Clamp(Mathf.Min(widthFactor, heightFactor), 0.5f, 1f);
+		foreach (Node child in grid.GetChildren())
+		{
+			if (child is UnitInstanceView view)
+			{
+				ShrinkUnitPanelContents(view, factor);
+			}
+		}
+	}
+
+	private static void ShrinkUnitPanelContents(UnitInstanceView view, float factor)
+	{
+		if (view == null || factor <= 0f || factor >= 0.99f) return;
+
+		view.CustomMinimumSize = new Vector2(210f * factor, 360f * factor);
+		view.Size = view.CustomMinimumSize;
+
+		Control portrait = view.GetNodeOrNull<Control>("Margin/Body/PortraitCenter/Portrait");
+		if (portrait != null)
+		{
+			portrait.CustomMinimumSize = new Vector2(100f * factor, 170f * factor);
+			portrait.Size = portrait.CustomMinimumSize;
+		}
+
+		Control intention = view.GetNodeOrNull<Control>("Margin/Body/IntentionLabel");
+		if (intention != null)
+		{
+			intention.CustomMinimumSize = new Vector2(180f * factor, 120f * factor);
+			intention.Size = intention.CustomMinimumSize;
+		}
+
+		Control stateCenter = view.GetNodeOrNull<Control>("Margin/Body/StateCenter");
+		if (stateCenter != null)
+		{
+			stateCenter.CustomMinimumSize = new Vector2(0f, 40f * factor);
+		}
+
+		MarginContainer margin = view.GetNodeOrNull<MarginContainer>("Margin");
+		if (margin != null)
+		{
+			int m = Mathf.Max(2, (int)(10f * factor));
+			margin.AddThemeConstantOverride("margin_left", m);
+			margin.AddThemeConstantOverride("margin_top", m);
+			margin.AddThemeConstantOverride("margin_right", m);
+			margin.AddThemeConstantOverride("margin_bottom", m);
+		}
+
+		VBoxContainer body = view.GetNodeOrNull<VBoxContainer>("Margin/Body");
+		if (body != null)
+		{
+			body.AddThemeConstantOverride("separation", Mathf.Max(2, (int)(10f * factor)));
+		}
 	}
 	private UnitInstanceView CreateUnitPanel(IUnitInstance unit, bool isPlayer, string title)
 	{

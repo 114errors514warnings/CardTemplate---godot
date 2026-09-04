@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cggspp656fs7y"
+
+[deps]
+
+files=["res://README/材料、道具、装备设计/道具.类型.translation", "res://README/材料、道具、装备设计/道具.稀有度.translation", "res://README/材料、道具、装备设计/道具.效果.translation", "res://README/材料、道具、装备设计/道具.生效范围.translation", "res://README/材料、道具、装备设计/道具.制作需求.translation", "res://README/材料、道具、装备设计/道具.en.translation"]
+
+source_file="res://README/材料、道具、装备设计/道具.csv"
+dest_files=["res://README/材料、道具、装备设计/道具.类型.translation", "res://README/材料、道具、装备设计/道具.稀有度.translation", "res://README/材料、道具、装备设计/道具.效果.translation", "res://README/材料、道具、装备设计/道具.生效范围.translation", "res://README/材料、道具、装备设计/道具.制作需求.translation", "res://README/材料、道具、装备设计/道具.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

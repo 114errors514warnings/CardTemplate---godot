@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dttaxcwe55jeh"
+
+[deps]
+
+files=["res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation"]
+
+source_file="res://DataBase/Stage/第二层/普通敌袭.csv"
+dest_files=["res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation", "res://DataBase/Stage/第二层/普通敌袭.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

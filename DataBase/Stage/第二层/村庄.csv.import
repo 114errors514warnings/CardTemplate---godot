@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dj7u03j0wqi5i"
+
+[deps]
+
+files=["res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation"]
+
+source_file="res://DataBase/Stage/第二层/村庄.csv"
+dest_files=["res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation", "res://DataBase/Stage/第二层/村庄.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

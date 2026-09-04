@@ -1,0 +1,4 @@
+Name,Difficulty,MonsterIds,DropTableId,Weight,Note
+普通敌袭-低等,Low,3001|3001,2001,1,占位组合（待数值对齐）
+普通敌袭-中等,Mid,3003,2001,1,占位组合（待数值对齐）
+普通敌袭-高等,High,3005|3003,2001,1,占位组合（待数值对齐）
