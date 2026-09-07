@@ -43,6 +43,10 @@ public class RunSaveSnapshotTests
         data.SettlementEncounterName = "普通敌袭-中等";
         data.SettlementDropTableId = 2001;
         data.SettlementCandidateCardIds = new List<int> { 11002005, 21002004, 31002006 };
+		data.Materials[101] = 2;
+		data.Items[201] = 1;
+		data.Equipment[301] = 1;
+		data.SettlementClaimedRewardKeys.Add("1:Gold:0:50");
         return data;
     }
 
@@ -93,6 +97,10 @@ public class RunSaveSnapshotTests
         Assert.Equal(3, restored.SettlementCandidateCardIds.Count);
         Assert.Equal(11002005, restored.SettlementCandidateCardIds[0]);
         Assert.Equal(42, restored.MapState.VisitedNodeIds[2]);
+		Assert.Equal(2, restored.Materials[101]);
+		Assert.Equal(1, restored.Items[201]);
+		Assert.Equal(1, restored.Equipment[301]);
+		Assert.Contains("1:Gold:0:50", restored.SettlementClaimedRewardKeys);
     }
 
     [Fact]

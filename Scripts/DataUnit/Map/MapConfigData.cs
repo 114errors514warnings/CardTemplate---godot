@@ -17,6 +17,7 @@ public enum DropCategory
 	Material = 2,
 	Item = 3,
 	Key = 4,
+	Equipment = 5,
 }
 
 /// <summary>DataBase/Stage/&lt;层&gt;/&lt;节点类型&gt;.csv 的一行。</summary>

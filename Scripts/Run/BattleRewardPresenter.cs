@@ -129,9 +129,30 @@ public static class BattleRewardPresenter
 				return $"道具 {entry.RewardParam} ×{entry.Amount}";
 			case DropCategory.Key:
 				return $"钥匙 +{entry.Amount}";
+			case DropCategory.Equipment:
+				return $"装备 {entry.RewardParam} ×{entry.Amount}";
 			default:
 				return entry.Category.ToString();
 		}
+	}
+
+	public static void ApplyRewardEntryToRun(DropTableEntry entry, RunSaveData run)
+	{
+		if (entry == null || run == null || entry.Category == DropCategory.Card) return;
+		switch (entry.Category)
+		{
+			case DropCategory.Gold: run.Gold += entry.Amount; break;
+			case DropCategory.Key: run.Keys += entry.Amount; break;
+			case DropCategory.Material: AddCount(run.Materials, entry.RewardParam, entry.Amount); break;
+			case DropCategory.Item: AddCount(run.Items, entry.RewardParam, entry.Amount); break;
+			case DropCategory.Equipment: AddCount(run.Equipment, entry.RewardParam, entry.Amount); break;
+		}
+	}
+
+	private static void AddCount(Dictionary<int, int> values, int id, int amount)
+	{
+		if (values == null || amount <= 0) return;
+		values[id] = values.TryGetValue(id, out int old) ? old + amount : amount;
 	}
 
 	/// <summary>把已配置奖励落到局内：金币累加（卡牌与材料由调用方单独处理）。</summary>
@@ -149,16 +170,7 @@ public static class BattleRewardPresenter
 				continue;
 			}
 
-			switch (entry.Category)
-			{
-				case DropCategory.Gold:
-					run.Gold += entry.Amount;
-					break;
-				case DropCategory.Key:
-					run.Keys += entry.Amount;
-					break;
-				// Material / Item：本期仅计入计数用的占位逻辑（无背包系统），仅打日志由 UI 层处理
-			}
+			ApplyRewardEntryToRun(entry, run);
 		}
 	}
 

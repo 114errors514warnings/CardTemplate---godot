@@ -91,6 +91,12 @@ public partial class RunBattleScene : Control
 	private void StartConfiguredBattle(RunSession session)
 	{
 		BattleSetupData data = battle.EnsureSetupData();
+		// RunBattleScene 是运行局的唯一配置来源；清除场景中预置的调试角色/怪物，
+		// 否则第三槽位等情况下会把默认角色挤到实际战斗顺序前面。
+		data.CharacterOrder.Clear();
+		data.CharacterIds.Clear();
+		data.CharacterId = 0;
+		data.MonsterIds.Clear();
 
 		// 角色（允许重复）
 		foreach (RunCharacterSlotSave slot in session.Current.CharacterSlots)
@@ -357,6 +363,47 @@ public partial class RunBattleScene : Control
 		title.AddThemeColorOverride("font_color", victory ? Colors.LightYellow : Colors.IndianRed);
 		vbox.AddChild(title);
 
+		RunSession session = RunSession.Instance;
+		int settlementDropTableId = session?.Current?.SettlementDropTableId ?? 0;
+		List<DropTableEntry> rewardRows = victory
+			? BattleRewardPresenter.GetEntriesForTable(LoadingSystem.DropTableEntries, settlementDropTableId)
+			: new List<DropTableEntry>();
+		HBoxContainer rewardTabs = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+		rewardTabs.AddThemeConstantOverride("separation", 10);
+		vbox.AddChild(rewardTabs);
+		VBoxContainer cardSection = new VBoxContainer { Visible = false };
+		cardSection.AddThemeConstantOverride("separation", 12);
+		vbox.AddChild(cardSection);
+
+		for (int rewardIndex = 0; rewardIndex < rewardRows.Count; rewardIndex++)
+		{
+			DropTableEntry entry = rewardRows[rewardIndex];
+			if (entry == null) continue;
+			Button rewardTab = new Button { Text = entry.Category == DropCategory.Card ? "卡牌" : BattleRewardPresenter.FormatRewardLine(entry) };
+			rewardTab.CustomMinimumSize = new Vector2(150, 48);
+			rewardTabs.AddChild(rewardTab);
+			if (entry.Category == DropCategory.Card)
+			{
+				rewardTab.Pressed += () => cardSection.Visible = true;
+				continue;
+			}
+
+			string rewardKey = $"{rewardIndex}:{entry.Category}:{entry.RewardParam}:{entry.Amount}";
+			bool claimed = session?.Current?.SettlementClaimedRewardKeys?.Contains(rewardKey) == true;
+			rewardTab.Disabled = claimed;
+			if (claimed) rewardTab.Text += "（已领取）";
+			rewardTab.Pressed += () =>
+			{
+				RunSession currentSession = RunSession.Instance;
+				if (currentSession?.Current == null || currentSession.Current.SettlementClaimedRewardKeys.Contains(rewardKey)) return;
+				BattleRewardPresenter.ApplyRewardEntryToRun(entry, currentSession.Current);
+				currentSession.Current.SettlementClaimedRewardKeys.Add(rewardKey);
+				currentSession.Save();
+				rewardTab.Text = BattleRewardPresenter.FormatRewardLine(entry) + "（已领取）";
+				rewardTab.Disabled = true;
+			};
+		}
+
 		chosenCardId = 0;
 		Button confirmReturn = null;
 		bool hasPickableCards = victory && hasCardReward && candidateIds.Count > 0;
@@ -365,20 +412,27 @@ public partial class RunBattleScene : Control
 		{
 			Label hint = new Label { Text = "请选择一张卡牌加入永久卡组：", HorizontalAlignment = HorizontalAlignment.Center };
 			hint.AddThemeFontSizeOverride("font_size", 18);
-			vbox.AddChild(hint);
+			cardSection.AddChild(hint);
 
 			HBoxContainer cardRowBox = new HBoxContainer();
 			cardRowBox.Alignment = BoxContainer.AlignmentMode.Center;
 			cardRowBox.AddThemeConstantOverride("separation", 12);
-			vbox.AddChild(cardRowBox);
+			cardSection.AddChild(cardRowBox);
 
 			List<Button> cardButtons = new List<Button>();
 			foreach (int cardId in candidateIds)
 			{
 				Card template = LoadingSystem.CardDictionary.TryGetValue(cardId, out Card c) ? c : null;
+				int ownerSlot = RunSession.Instance?.Current == null ? -1 : BattleRewardPresenter.FindOwningSlotIndex(RunSession.Instance.Current, cardId);
+				string ownerName = "未知角色";
+				if (ownerSlot >= 0 && ownerSlot < RunSession.Instance.Current.CharacterSlots.Count)
+				{
+					int ownerCharacterId = RunSession.Instance.Current.CharacterSlots[ownerSlot].CharacterId;
+					ownerName = LoadingSystem.CharacterDictionary.TryGetValue(ownerCharacterId, out Character owner) ? owner.Name : $"角色 {ownerCharacterId}";
+				}
 				string text = template == null
 					? $"卡牌ID {cardId}"
-					: $"{template.CardName}\n费用 {template.EnergyCost}　类型 {template.Category}";
+					: $"归属：{ownerName}\n{template.CardName}\n费用 {template.EnergyCost}　类型 {template.Category}";
 				Button cardButton = new Button { Text = text, ToggleMode = true };
 				cardButton.CustomMinimumSize = new Vector2(210, 110);
 				cardButton.AddThemeFontSizeOverride("font_size", 15);
@@ -419,7 +473,8 @@ public partial class RunBattleScene : Control
 			};
 			noReward.AddThemeFontSizeOverride("font_size", 18);
 			noReward.AddThemeColorOverride("font_color", Colors.OrangeRed);
-			vbox.AddChild(noReward);
+			cardSection.Visible = true;
+			cardSection.AddChild(noReward);
 		}
 
 		confirmReturn = new Button
@@ -454,9 +509,6 @@ public partial class RunBattleScene : Control
 
 		StageEncounterRow row = session.PendingEncounter ?? session.BuildPendingEncounterRowFromSave();
 		int dropTableId = row != null ? row.DropTableId : session.Current.SettlementDropTableId;
-
-		// 领取阶段统一落账（金币/钥匙等），避免重复/提前领取
-		BattleRewardPresenter.ApplyNonCardRewardsToRun(dropTableId, session.Current, LoadingSystem.DropTableEntries);
 
 		if (chosenCardId > 0)
 		{

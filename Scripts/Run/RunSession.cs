@@ -301,6 +301,7 @@ public partial class RunSession : Node
 		Current.SettlementEncounterName = encounterName ?? string.Empty;
 		Current.SettlementDropTableId = dropTableId;
 		Current.SettlementCandidateCardIds = candidateCardIds == null ? new List<int>() : new List<int>(candidateCardIds);
+		Current.SettlementClaimedRewardKeys = new List<string>();
 		Save();
 	}
 
@@ -316,6 +317,7 @@ public partial class RunSession : Node
 		Current.SettlementEncounterName = string.Empty;
 		Current.SettlementDropTableId = 0;
 		Current.SettlementCandidateCardIds.Clear();
+		Current.SettlementClaimedRewardKeys.Clear();
 		Current.PendingEncounterLayer = string.Empty;
 		Current.PendingEncounterNodeType = 0;
 		Current.PendingEncounterName = string.Empty;

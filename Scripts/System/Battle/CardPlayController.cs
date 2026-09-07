@@ -348,6 +348,11 @@ public sealed class CardPlayController
             resultMessage = $"错误：手牌顺序 {handIndex + 1} 对应卡牌为空。";
             return false;
         }
+		if (!IsSelectableCardForRequest(pendingCardSelectionContext.SourceCard, selectedCard))
+		{
+			resultMessage = $"错误：{unitRegistry.BuildCardLabel(selectedCard)} 不符合当前效果的选牌条件。";
+			return false;
+		}
 
         if (pendingCardSelectionContext.SelectedCards.Any(card => string.Equals(card?.UniqueInGameId, selectedCard.UniqueInGameId, StringComparison.Ordinal)))
         {
@@ -884,6 +889,12 @@ public sealed class CardPlayController
 
             if (request.TargetType == CardOperationTargetType.SelectHandCards)
             {
+				int available = sourcePlayer?.handcards?.Count(card => card != null && card != sourceCard && IsSelectableCardForRequest(sourceCard, card)) ?? 0;
+                if (available < request.Count)
+                {
+                    messageParts.Add($"卡牌操作跳过：来源={unitRegistry.BuildCardLabel(sourceCard)}，可选择手牌 {available} 张，不足 {request.Count} 张。");
+                    continue;
+                }
                 pendingCardSelectionContext = new PendingCardSelectionContext(sourcePlayer, sourceCard, requests.Skip(index).ToList());
                 enteredPendingSelection = true;
                 string prompt = GetPendingCardSelectionPrompt();
@@ -929,6 +940,17 @@ public sealed class CardPlayController
                     return false;
                 }
                 if (!string.IsNullOrWhiteSpace(applyMessage)) messageParts.Add(applyMessage);
+				// 同一来源卡的连续“选择手牌”效果复用同一次选择（蓄力的暴击+保留），
+				// 避免玩家被要求再次选择同一张牌。
+				CardOperationRequest nextRequest = pendingCardSelectionContext.RequestIndex + 1 < pendingCardSelectionContext.Requests.Count
+					? pendingCardSelectionContext.Requests[pendingCardSelectionContext.RequestIndex + 1]
+					: null;
+				if (nextRequest != null && nextRequest.TargetType == CardOperationTargetType.SelectHandCards && nextRequest.Count == currentRequest.Count)
+				{
+					if (!TryApplyCardOperationToCards(pendingCardSelectionContext.SourcePlayer, pendingCardSelectionContext.SourceCard, nextRequest, pendingCardSelectionContext.SelectedCards, out string chainedMessage)) return false;
+					if (!string.IsNullOrWhiteSpace(chainedMessage)) messageParts.Add(chainedMessage);
+					pendingCardSelectionContext.RequestIndex++;
+				}
                 pendingCardSelectionContext.RequestIndex++;
                 pendingCardSelectionContext.SelectedCards.Clear();
                 continue;
@@ -1091,7 +1113,13 @@ public sealed class CardPlayController
         EffectResult effectResult = applyResult.EffectResult;
         return effectResult.Target != null
             && effectResult.TargetHpBefore > 0
-            && effectResult.TargetHpAfter <= 0
-            && effectResult.HpDamage > 0;
+            && effectResult.TargetHpAfter <= 0;
     }
+
+	private static bool IsSelectableCardForRequest(Card sourceCard, Card candidate)
+	{
+		if (candidate == null || ReferenceEquals(sourceCard, candidate)) return false;
+		// 蓄力文案明确限定“战斗牌”（Attack）。其他选牌效果保持通用行为。
+		return sourceCard?.CardId != 21002009 || candidate.Category == CardCategory.Attack;
+	}
 }

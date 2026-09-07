@@ -60,6 +60,8 @@ public partial class CardBattleScene : Control
 	private Line2D dragArrow;
 	private Button setupWindowButton;
 	private Button debugPanelButton;
+	private Button pauseButton;
+	private CanvasLayer pauseLayer;
 	private CanvasLayer windowLayer;
 	private Control floatLayer;
 	private Control setupWindow;
@@ -130,6 +132,7 @@ public partial class CardBattleScene : Control
 		dragArrow = GetNodeOrNull<Line2D>("DragLayer/DragArrow");
 		setupWindowButton = GetNodeOrNull<Button>("MainMargin/MainVBox/TopBar/SetupWindowButton");
 		debugPanelButton = GetNodeOrNull<Button>("MainMargin/MainVBox/TopBar/DebugPanelButton");
+		CreatePauseMenu();
 		windowLayer = GetNodeOrNull<CanvasLayer>("WindowLayer");
 		EnsureAuxiliaryWindows(); EnsureSetupDataInitialized();
 		if (!AutoStartBattle) { battle?.RefreshBattleInfoDisplay(); ShowSetupWindow(); }
@@ -155,6 +158,64 @@ public partial class CardBattleScene : Control
 		UpdateDragState();
 	}
 
+	public override void _ExitTree()
+	{
+		if (GetTree() != null) GetTree().Paused = false;
+		BattleSytem.OnDamageApplied -= ShowDamageNumberOnUnit;
+		BattleSytem.OnPlayerTurnStart -= ShowPlayerTurnBanner;
+		BattleSytem.OnMonsterTurnStart -= ShowMonsterTurnBanner;
+		BattleSytem.OnMonsterIntentionHighlight -= SetMonsterHighlight;
+		base._ExitTree();
+	}
+
+	private void CreatePauseMenu()
+	{
+		HBoxContainer topBar = GetNodeOrNull<HBoxContainer>("MainMargin/MainVBox/TopBar");
+		if (topBar == null) return;
+		pauseButton = new Button { Text = "暂停", CustomMinimumSize = new Vector2(100, 42) };
+		pauseButton.Pressed += ShowPauseMenu;
+		topBar.AddChild(pauseButton);
+
+		pauseLayer = new CanvasLayer { Layer = 100, Visible = false, ProcessMode = ProcessModeEnum.Always };
+		AddChild(pauseLayer);
+		ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.72f), MouseFilter = MouseFilterEnum.Stop };
+		dim.SetAnchorsPreset(LayoutPreset.FullRect);
+		pauseLayer.AddChild(dim);
+		CenterContainer center = new CenterContainer();
+		center.SetAnchorsPreset(LayoutPreset.FullRect);
+		pauseLayer.AddChild(center);
+		PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(360, 300) };
+		center.AddChild(panel);
+		VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+		box.AddThemeConstantOverride("separation", 16);
+		panel.AddChild(box);
+		Label title = new Label { Text = "游戏已暂停", HorizontalAlignment = HorizontalAlignment.Center };
+		title.AddThemeFontSizeOverride("font_size", 30);
+		box.AddChild(title);
+		Button resume = new Button { Text = "继续", CustomMinimumSize = new Vector2(260, 48) };
+		Button mainMenu = new Button { Text = "返回主菜单", CustomMinimumSize = new Vector2(260, 48) };
+		Button quit = new Button { Text = "退出游戏", CustomMinimumSize = new Vector2(260, 48) };
+		resume.Pressed += HidePauseMenu;
+		mainMenu.Pressed += () => { GetTree().Paused = false; GetTree().ChangeSceneToFile("res://Scenes/MainMenu/MainMenuScene.tscn"); };
+		quit.Pressed += () => { GetTree().Paused = false; GetTree().Quit(); };
+		box.AddChild(resume);
+		box.AddChild(mainMenu);
+		box.AddChild(quit);
+	}
+
+	private void ShowPauseMenu()
+	{
+		if (pauseLayer == null) return;
+		pauseLayer.Visible = true;
+		GetTree().Paused = true;
+	}
+
+	private void HidePauseMenu()
+	{
+		GetTree().Paused = false;
+		if (pauseLayer != null) pauseLayer.Visible = false;
+	}
+
 	private void SyncMonsterOrderFromBattle()
 	{
 		if (battle == null || !battle.IsBattleStarted || battle.Monsters == null || battle.Monsters.Count == 0)
@@ -171,10 +232,10 @@ public partial class CardBattleScene : Control
 
 	public void ShowDamageNumberOnUnit(IUnitInstance unit, int damage)
 	{
-		if (unit == null || damage <= 0 || floatLayer == null) return;
+		if (!IsInstanceValid(this) || unit == null || damage <= 0 || floatLayer == null || !IsInstanceValid(floatLayer)) return;
 
 		Vector2 screenPos;
-		if (unitViews.TryGetValue(unit.UniqueInGameId, out var view) && view?.Root != null)
+			if (unitViews.TryGetValue(unit.UniqueInGameId, out var view) && view?.Root != null && IsInstanceValid(view.Root))
 		{
 			screenPos = view.Root.GlobalPosition + view.Root.Size * new Vector2(0.5f, 0.07f);
 		}
@@ -752,8 +813,16 @@ public partial class CardBattleScene : Control
 			cv.AddThemeStyleboxOverride("panel", MakeCardBorderStyle());
 			cv.GuiInput += (ev) =>
 			{
-				if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left && CanDrag())
-					OnHandCardGuiInput(player, card);
+				if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+				{
+					if (battle != null && battle.HasPendingCardSelection)
+					{
+						int handIndex = player.handcards.IndexOf(card);
+						if (handIndex >= 0) battle.TrySelectPendingHandCard(handIndex, out _);
+						RefreshAllUi();
+					}
+					else if (CanDrag()) OnHandCardGuiInput(player, card);
+				}
 			};
 			cardViewMap[cv.GetInstanceId()] = (player, card);
 			handCardsContainer.AddChild(cv);

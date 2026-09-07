@@ -26,6 +26,9 @@ public sealed class RunSaveData
 
 	public int Gold;
 	public int Keys;
+	public Dictionary<int, int> Materials { get; set; } = new Dictionary<int, int>();
+	public Dictionary<int, int> Items { get; set; } = new Dictionary<int, int>();
+	public Dictionary<int, int> Equipment { get; set; } = new Dictionary<int, int>();
 
 	public RunMapStateSave MapState { get; set; } = new RunMapStateSave();
 
@@ -41,6 +44,8 @@ public sealed class RunSaveData
 	public string SettlementEncounterName = string.Empty;
 	public int SettlementDropTableId;
 	public List<int> SettlementCandidateCardIds { get; set; } = new List<int>();
+	/// <summary>已点击领取的非卡牌奖励键，防止结算读档后重复领取。</summary>
+	public List<string> SettlementClaimedRewardKeys { get; set; } = new List<string>();
 }
 
 public sealed class RunCharacterSlotSave

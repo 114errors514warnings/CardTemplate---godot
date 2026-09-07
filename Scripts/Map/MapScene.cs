@@ -289,12 +289,13 @@ public partial class MapScene : Control
 				DrawPolygonHex(center, radius, baseColor, null, 1.5f);
 			}
 
-			bool showCheckMark = node.Visited && node.NodeId != currentNodeId;
+			// 探索状态与玩家当前位置相互独立：已经探索的节点即使当前仍停留其上也显示对勾。
+			bool showCheckMark = node.Visited;
 			Vector2 sz = font.GetStringSize(NodeGlyphs[node.Type], HorizontalAlignment.Left, -1, glyphSize);
 			Vector2 textPos = center - new Vector2(sz.X * 0.5f, sz.Y * 0.5f);
 			if (showCheckMark)
 			{
-				// 已结算且已离开：文字上移一点，在节点中间画对勾
+				// 已探索：文字上移一点，在节点中间画对勾；当前位置另由白框和箭头表示。
 				textPos -= new Vector2(0, HexSize * 0.30f);
 			}
 
