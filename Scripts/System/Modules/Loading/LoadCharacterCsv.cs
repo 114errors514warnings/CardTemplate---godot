@@ -10,7 +10,7 @@ public partial class LoadCharacterCsv : Node
 {
 	/// <summary>
 	/// 从CSV文件加载所有角色
-	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum
+	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum,MovesPerTurn（可选）
 	/// </summary>
 	/// <param name="filePath">CSV文件路径</param>
 	/// <returns>角色数组</returns>
@@ -67,7 +67,9 @@ public partial class LoadCharacterCsv : Node
 			int iniDefend = int.Parse(fields[4]);
 			int drawCardNum = int.Parse(fields[5]);
 
-			return new Character(id, name, maxHp, iniAttack, iniDefend, drawCardNum);
+			int movesPerTurn = fields.Length > 6 && !string.IsNullOrWhiteSpace(fields[6]) ? int.Parse(fields[6]) : 0;
+			if (movesPerTurn < 0) throw new FormatException("MovesPerTurn 不能为负数。");
+			return new Character(id, name, maxHp, iniAttack, iniDefend, drawCardNum) { MovesPerTurn = movesPerTurn };
 		}
 		catch (Exception ex)
 		{

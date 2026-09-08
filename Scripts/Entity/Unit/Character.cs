@@ -8,6 +8,8 @@ public class Character : Unit
     // Skill 类型在当前项目中未定义，已注释相关成员。
     // public List<Skill> skill;
     public int drawCardNum;
+    // 新战场每回合基础移动次数；旧配置未提供时为 0。
+    public int MovesPerTurn;
 
     public Character(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int drawCardNum)
         : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend)
@@ -18,6 +20,7 @@ public class Character : Unit
     public Character(Character c) : base(c)
     {
         drawCardNum = c.drawCardNum;
+        MovesPerTurn = c.MovesPerTurn;
     }
 }
 

@@ -6,10 +6,10 @@ uid="uid://bd3bd6ouke4bq"
 
 [deps]
 
-files=["res://DataBase/Card/CharacterRewardPool.CardSource.translation"]
+files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/Card/CharacterRewardPool.CardSource.translation"]
 
-source_file="res://DataBase/Card/CharacterRewardPool.csv"
-dest_files=["res://DataBase/Card/CharacterRewardPool.CardSource.translation"]
+source_file="res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/Card/CharacterRewardPool.csv"
+dest_files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/Card/CharacterRewardPool.CardSource.translation"]
 
 [params]
 

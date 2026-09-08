@@ -6,10 +6,10 @@ uid="uid://b2li36qtjcn4r"
 
 [deps]
 
-files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation"]
+files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation", "res://DataBase/Unit/Character.MovesPerTurn.translation"]
 
 source_file="res://DataBase/Unit/Character.csv"
-dest_files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation"]
+dest_files=["res://DataBase/Unit/Character.Name.translation", "res://DataBase/Unit/Character.MAX_HP.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.Ini.translation", "res://DataBase/Unit/Character.drawCardNum.translation", "res://DataBase/Unit/Character.MovesPerTurn.translation"]
 
 [params]
 
