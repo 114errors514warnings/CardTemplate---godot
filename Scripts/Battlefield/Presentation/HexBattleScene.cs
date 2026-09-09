@@ -11,7 +11,6 @@ public partial class HexBattleScene : Control
     public BattlefieldSession Session { get; private set; }
     public BattlefieldView MapView { get; private set; }
     private Label resources;
-    private Label message;
     private Label title;
     private Button moveButton;
     private readonly Button[] tabs = new Button[3];
@@ -68,7 +67,7 @@ public partial class HexBattleScene : Control
     private readonly Dictionary<ulong, GroundObject> itemNodeMap = new();
     // —— 调试面板（EnableDebugPanel 为真时才创建）——
     private HexBattleDebugPanel debugPanel;
-    [Export] public bool EnableDebugPanel;
+    [Export] public bool EnableDebugPanel = true;
 
     public override void _Ready()
     {
@@ -137,7 +136,7 @@ public partial class HexBattleScene : Control
         Place(topRight, 0.78f, 0.02f, 0.985f, 0.075f);
         AddChild(topRight);
         AddButton(topRight, "定位当前角色", () => MapView.CenterSelected()).CustomMinimumSize = new Vector2(120, 0);
-        if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.Visible = !debugPanel.Visible; }).CustomMinimumSize = new Vector2(88, 0);
+        if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.ToggleVisible(); }).CustomMinimumSize = new Vector2(88, 0);
         AddButton(topRight, "暂停", () => SetPaused(true)).CustomMinimumSize = new Vector2(88, 0);
 
         // ── 右侧：当前格道具（可拖拽 prefab）──
@@ -207,7 +206,8 @@ public partial class HexBattleScene : Control
         // ── 底部中央：角色 Tab + 手牌卡面 ──
         var handPanel = new VBoxContainer(); handPanel.AddThemeConstantOverride("separation", 6);
         // 手牌与左右装备、操作列同处底部带状区域，不侵占中部战场。
-        Place(handPanel, 0.23f, 0.65f, 0.84f, 0.89f);
+        // 适当缩短手牌区（右边界 0.84→0.72），为右侧“结束回合/移动”按钮腾出空间。
+        Place(handPanel, 0.23f, 0.65f, 0.72f, 0.89f);
         AddChild(handPanel);
         var tabRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; tabRow.AddThemeConstantOverride("separation", 6); handPanel.AddChild(tabRow);
         for (int i = 0; i < 3; i++)
@@ -244,8 +244,9 @@ public partial class HexBattleScene : Control
         dragLayer.AddChild(dragLine);
 
         // ── 底部（手牌右侧）：结束回合 / 移动 竖排 ──
+        // 两个按钮整体左移（0.845~0.895 → 0.73~0.865），并拓宽，避免与右侧“右手”装备栏重叠。
         var actionCol = new VBoxContainer(); actionCol.AddThemeConstantOverride("separation", 8);
-        Place(actionCol, 0.845f, 0.68f, 0.895f, 0.89f);
+        Place(actionCol, 0.73f, 0.68f, 0.865f, 0.89f);
         AddChild(actionCol);
         AddButton(actionCol, "结束回合", () =>
         {
@@ -266,10 +267,7 @@ public partial class HexBattleScene : Control
         moveButton.CustomMinimumSize = new Vector2(0, 44);
         moveButton.SizeFlagsVertical = SizeFlags.ExpandFill;
 
-        // ── 底部提示行 ──
-        message = Label("", 14, new Color("eed9aa"));
-        Place(message, 0.23f, 0.91f, 0.98f, 0.95f);
-        AddChild(message);
+        // （底部信息栏已移除：ShowMessage 统一走 GD.Print 控制台日志。）
 
         tooltip = new PanelContainer { Visible = false, MouseFilter = MouseFilterEnum.Ignore, ZIndex = 20 };
         tooltipText = new Label { MouseFilter = MouseFilterEnum.Ignore, AutowrapMode = TextServer.AutowrapMode.WordSmart,
@@ -541,7 +539,9 @@ public partial class HexBattleScene : Control
             CallDeferred(nameof(RefreshHand));
             return;
         }
-        if (draggedCard != null) CancelCardDrag();
+        // 拖拽进行中不重建手牌：避免 Notify 刷新打断拖拽、也避免出牌结算时引发递归。
+        // 拖拽结束后统一由 CleanupAfterDrag / CancelCardDrag 调用 RefreshHand 重排。
+        if (draggedCard != null) return;
         foreach (Node child in handRow.GetChildren()) child.QueueFree();
         handCardMap.Clear();
         handCardBasePositions.Clear();
@@ -610,7 +610,8 @@ public partial class HexBattleScene : Control
         tween.TweenProperty(card, "scale", targetScale, 0.12f);
         handHoverTweens[id] = tween;
     }
-    private void ShowMessage(string text) => message.Text = text;
+    // 底部信息栏已移除：所有操作反馈统一打印到 Godot 控制台（Output 面板），便于日志排查。
+    private void ShowMessage(string text) => GD.Print($"[战场] {text}");
     private void ShowTooltip(string text, Vector2 screenPosition)
     {
         tooltip.Visible = text.Length > 0 && !pauseShade.Visible;
@@ -683,7 +684,7 @@ public partial class HexBattleScene : Control
         pendingCardId = 0;
         lastCastHover = null;
         MapView.ClearCastPreview();
-        return true;
+        return ok; // 返回真实结果：失败时由调用方 CancelCardDrag 归还手牌。
     }
 
     // ── 出牌拖拽（对齐旧版战斗系统）：按住卡牌→跟手，拖出手牌区/指向目标格后松开施放 ──
@@ -831,19 +832,19 @@ public partial class HexBattleScene : Control
         lastCastHover = null;
         HideDragLine();
         MapView.ClearCastPreview();
+        RefreshHand(); // 出牌成功：弃牌堆已收走该卡，重排剩余手牌。
     }
 
     private void CancelCardDrag()
     {
-        if (draggedCardNode != null && draggedCardNode.GetParent() == dragLayer) dragLayer.RemoveChild(draggedCardNode);
-        draggedCardNode = null;
+        if (draggedCardNode != null) { draggedCardNode.QueueFree(); draggedCardNode = null; }
         draggedCard = null;
         dragExitedHandArea = false;
         pendingCardId = 0;
         lastCastHover = null;
         HideDragLine();
         MapView.ClearCastPreview();
-        RefreshHand();
+        RefreshHand(); // 出牌失败/取消：卡牌数据仍留在手牌，重排后回到手牌区。
     }
 
     // ── 道具拖拽（对齐卡牌逻辑）：无目标→跟手/拖出即用；需目标→直线选目标；丢到道具栏→移动 ──
