@@ -5,7 +5,7 @@ using System.Linq;
 namespace CardSimulator.Battlefield;
 
 /// <summary>Runnable spatial battle session using the existing Card, Effect and State pipelines.</summary>
-public sealed class BattlefieldSession : IDisposable
+public sealed partial class BattlefieldSession : IDisposable
 {
     public enum BattlePhase { Player, Monsters, Victory, Defeat }
     public BattleMapDefinition Definition { get; }
