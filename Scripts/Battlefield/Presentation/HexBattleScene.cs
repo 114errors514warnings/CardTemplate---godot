@@ -22,14 +22,15 @@ public partial class HexBattleScene : Control
     private int pendingCardId;
     private AxialHex? lastCastHover;
     private bool movePlanning;
-    private HBoxContainer handRow;
+    private Control handRow;
     private Label moveInfo;
     private Button drawPileButton;
     private Button discardPileButton;
     private Button exhaustPileButton;
     private Control pileOverlay;
     private Label pileTitle;
-    private VBoxContainer pileList;
+    private GridContainer pileList;
+    private Label pileDetail;
     private readonly ColorRect[] energyPips = new ColorRect[3];
     private bool victoryShown;
     private Control resultShade;
@@ -46,6 +47,9 @@ public partial class HexBattleScene : Control
     private Control dragLayer;
     private Line2D dragLine;
     private readonly Dictionary<ulong, Card> handCardMap = new();
+    private readonly Dictionary<ulong, Vector2> handCardBasePositions = new();
+    private readonly Dictionary<ulong, Tween> handHoverTweens = new();
+    private Control hoveredHandCard;
     // ── 道具拖拽状态 ──
     private GroundObject draggedItem;
     private Control draggedItemNode;
@@ -62,6 +66,9 @@ public partial class HexBattleScene : Control
     private StyleBoxFlat curItemDefaultBox;
     private StyleBoxFlat curItemHoverBox;
     private readonly Dictionary<ulong, GroundObject> itemNodeMap = new();
+    // —— 调试面板（EnableDebugPanel 为真时才创建）——
+    private HexBattleDebugPanel debugPanel;
+    [Export] public bool EnableDebugPanel;
 
     public override void _Ready()
     {
@@ -81,6 +88,7 @@ public partial class HexBattleScene : Control
             MapView.Message += ShowMessage;
             MapView.LeftClickOverride = OnMapClick;
             RefreshHud();
+            SetupDebugPanel();
             ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后选择相邻格。Esc 取消/暂停。");
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke"))
                 CallDeferred(nameof(RunSmoke));
@@ -91,6 +99,17 @@ public partial class HexBattleScene : Control
             GD.PrintErr(ex);
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke")) GetTree().Quit(1);
         }
+    }
+
+    private void SetupDebugPanel()
+    {
+        if (!EnableDebugPanel) return;
+        var packed = (PackedScene)ResourceLoader.Load("res://Scenes/UI/HexBattleDebugPanel.tscn");
+        if (packed == null) { GD.PrintErr("HexBattleDebugPanel.tscn 加载失败。"); return; }
+        debugPanel = (HexBattleDebugPanel)packed.Instantiate();
+        debugPanel.Setup(Session, MapView, ShowMessage);
+        AddChild(debugPanel);
+        debugPanel.Visible = false;
     }
 
     private void BuildUi()
@@ -118,6 +137,7 @@ public partial class HexBattleScene : Control
         Place(topRight, 0.78f, 0.02f, 0.985f, 0.075f);
         AddChild(topRight);
         AddButton(topRight, "定位当前角色", () => MapView.CenterSelected()).CustomMinimumSize = new Vector2(120, 0);
+        if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.Visible = !debugPanel.Visible; }).CustomMinimumSize = new Vector2(88, 0);
         AddButton(topRight, "暂停", () => SetPaused(true)).CustomMinimumSize = new Vector2(88, 0);
 
         // ── 右侧：当前格道具（可拖拽 prefab）──
@@ -125,7 +145,7 @@ public partial class HexBattleScene : Control
         curItemDefaultBox = WellBox(new Color(0.07f, 0.09f, 0.12f, 0.94f), new Color(0.30f, 0.34f, 0.42f), 1, 10);
         curItemHoverBox = WellBox(new Color(0.16f, 0.22f, 0.28f, 0.96f), new Color(0.95f, 0.83f, 0.4f), 2, 10);
         curItemPanel.AddThemeStyleboxOverride("panel", curItemDefaultBox);
-        Place(curItemPanel, 0.78f, 0.30f, 0.945f, 0.44f);
+        Place(curItemPanel, 0.84f, 0.30f, 0.98f, 0.44f);
         AddChild(curItemPanel);
         var curBox = new VBoxContainer(); curBox.AddThemeConstantOverride("separation", 4); curItemPanel.AddChild(curBox);
         curBox.AddChild(Label("当前格道具", 13, new Color("e8d9a0")));
@@ -133,7 +153,7 @@ public partial class HexBattleScene : Control
 
         // ── 右侧：随身道具 3 格（可拖拽 prefab）──
         carryPanelNode = MakePanel();
-        Place(carryPanelNode, 0.78f, 0.48f, 0.945f, 0.62f);
+        Place(carryPanelNode, 0.84f, 0.48f, 0.98f, 0.62f);
         AddChild(carryPanelNode);
         var carryBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; carryBox.AddThemeConstantOverride("separation", 4); carryPanelNode.AddChild(carryBox);
         carryBox.AddChild(Label("随身道具", 13, new Color("e8d9a0")));
@@ -186,7 +206,8 @@ public partial class HexBattleScene : Control
 
         // ── 底部中央：角色 Tab + 手牌卡面 ──
         var handPanel = new VBoxContainer(); handPanel.AddThemeConstantOverride("separation", 6);
-        Place(handPanel, 0.24f, 0.64f, 0.60f, 0.87f);
+        // 手牌与左右装备、操作列同处底部带状区域，不侵占中部战场。
+        Place(handPanel, 0.23f, 0.65f, 0.84f, 0.89f);
         AddChild(handPanel);
         var tabRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; tabRow.AddThemeConstantOverride("separation", 6); handPanel.AddChild(tabRow);
         for (int i = 0; i < 3; i++)
@@ -202,7 +223,7 @@ public partial class HexBattleScene : Control
             tabs[i].CustomMinimumSize = new Vector2(130, 28);
         }
         // 手牌区底板：深色半透明圆角面板 + 细描边（参考效果图），衬托居中手牌。
-        var handArea = new PanelContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
+        var handArea = new PanelContainer { SizeFlagsVertical = SizeFlags.ExpandFill, ClipContents = false };
         handArea.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
             BgColor = new Color(0.07f, 0.07f, 0.09f, 0.86f),
@@ -213,7 +234,7 @@ public partial class HexBattleScene : Control
         });
         handPanel.AddChild(handArea);
         handAreaNode = handArea;
-        handRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, SizeFlagsVertical = SizeFlags.ShrinkCenter }; handRow.AddThemeConstantOverride("separation", 6); handArea.AddChild(handRow);
+        handRow = new Control { MouseFilter = MouseFilterEnum.Ignore, ClipContents = false }; handRow.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); handArea.AddChild(handRow);
 
         // ── 出牌拖拽层：承载拖出的卡牌本体，及卡牌中心→鼠标的引导线 ──
         dragLayer = new Control { MouseFilter = MouseFilterEnum.Ignore, ZIndex = 25 };
@@ -224,7 +245,7 @@ public partial class HexBattleScene : Control
 
         // ── 底部（手牌右侧）：结束回合 / 移动 竖排 ──
         var actionCol = new VBoxContainer(); actionCol.AddThemeConstantOverride("separation", 8);
-        Place(actionCol, 0.62f, 0.70f, 0.72f, 0.87f);
+        Place(actionCol, 0.845f, 0.68f, 0.895f, 0.89f);
         AddChild(actionCol);
         AddButton(actionCol, "结束回合", () =>
         {
@@ -247,7 +268,7 @@ public partial class HexBattleScene : Control
 
         // ── 底部提示行 ──
         message = Label("", 14, new Color("eed9aa"));
-        Place(message, 0.30f, 0.90f, 0.98f, 0.95f);
+        Place(message, 0.23f, 0.91f, 0.98f, 0.95f);
         AddChild(message);
 
         tooltip = new PanelContainer { Visible = false, MouseFilter = MouseFilterEnum.Ignore, ZIndex = 20 };
@@ -278,13 +299,15 @@ public partial class HexBattleScene : Control
         pileShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(pileShade);
         pileOverlay = pileShade;
         var pileCenter = new CenterContainer(); pileCenter.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); pileShade.AddChild(pileCenter);
-        var pilePanel = MakePanel(); pilePanel.CustomMinimumSize = new Vector2(480, 380); pileCenter.AddChild(pilePanel);
+        var pilePanel = MakePanel(); pilePanel.CustomMinimumSize = new Vector2(1120, 720); pileCenter.AddChild(pilePanel);
         var pileBox = new VBoxContainer(); pileBox.AddThemeConstantOverride("separation", 10); pilePanel.AddChild(pileBox);
         var pileHeader = new HBoxContainer(); pileBox.AddChild(pileHeader);
         pileTitle = new Label { Text = "", SizeFlagsHorizontal = SizeFlags.ExpandFill }; pileTitle.AddThemeFontSizeOverride("font_size", 18); pileHeader.AddChild(pileTitle);
         AddButton(pileHeader, "返回", () => pileShade.Visible = false);
-        var pileScroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 250) }; pileBox.AddChild(pileScroll);
-        pileList = new VBoxContainer(); pileList.AddThemeConstantOverride("separation", 4); pileScroll.AddChild(pileList);
+        pileDetail = new Label { Text = "点击卡面查看完整描述", AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(0, 58) };
+        pileDetail.AddThemeColorOverride("font_color", new Color("d6dce2")); pileBox.AddChild(pileDetail);
+        var pileScroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 540) }; pileBox.AddChild(pileScroll);
+        pileList = new GridContainer { Columns = 3 }; pileList.AddThemeConstantOverride("h_separation", 18); pileList.AddThemeConstantOverride("v_separation", 18); pileScroll.AddChild(pileList);
 
     }
 
@@ -349,6 +372,7 @@ public partial class HexBattleScene : Control
         if (pileOverlay == null) return;
         pileTitle.Text = title + (cards == null ? "" : $"（{cards.Count}）");
         foreach (Node child in pileList.GetChildren()) child.QueueFree();
+        pileDetail.Text = "点击卡面查看完整描述";
         if (cards == null || cards.Count == 0)
         {
             pileList.AddChild(Label("（空）", 14, new Color("c8d0d8")));
@@ -357,20 +381,39 @@ public partial class HexBattleScene : Control
         {
             foreach (Card c in cards)
             {
-                var row = new Label { Text = $"{c.CardName}（费用 {c.EnergyCost}）", AutowrapMode = TextServer.AutowrapMode.WordSmart };
-                row.AddThemeFontSizeOverride("font_size", 16);
-                pileList.AddChild(row);
+                Control cardNode = MakeReadonlyPileCard(c);
+                cardNode.ZIndex = 0;
+                cardNode.GuiInput += input =>
+                {
+                    if (input is InputEventMouseButton mouse && mouse.Pressed && mouse.ButtonIndex == MouseButton.Left)
+                    {
+                        pileDetail.Text = $"{c.CardName}　费用 {c.EnergyCost}　{CardTypeText(c.Category)}\n{c.EffectDescription}";
+                        GetViewport().SetInputAsHandled();
+                    }
+                };
+                pileList.AddChild(cardNode);
             }
         }
         pileOverlay.Visible = true;
     }
     private Control MakeHandCard(Card card)
     {
-        const int w = 108, h = 156;
+        return MakeBattleCard(card);
+    }
+
+    private Control MakeReadonlyPileCard(Card card)
+    {
+        return MakeBattleCard(card);
+    }
+
+    // 六边形战斗专用的小型卡面；不使用旧战斗系统的 CardDisplayPrefab。
+    private static Control MakeBattleCard(Card card)
+    {
+        const int width = 108, height = 156;
         var panel = new PanelContainer
         {
-            CustomMinimumSize = new Vector2(w, h),
-            SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+            CustomMinimumSize = new Vector2(width, height),
+            Size = new Vector2(width, height),
             MouseFilter = MouseFilterEnum.Stop,
             ClipContents = true,
         };
@@ -382,20 +425,20 @@ public partial class HexBattleScene : Control
             CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
             ContentMarginLeft = 8, ContentMarginTop = 6, ContentMarginRight = 8, ContentMarginBottom = 8,
         });
-        var body = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin }; body.AddThemeConstantOverride("separation", 3);
-        var metaRow = new HBoxContainer(); metaRow.AddThemeConstantOverride("separation", 4); body.AddChild(metaRow);
-        var costBg = new PanelContainer { CustomMinimumSize = new Vector2(22, 22) };
-        costBg.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0.18f, 0.22f, 0.35f), CornerRadiusTopLeft = 6, CornerRadiusBottomRight = 6 });
-        var costLbl = new Label { Text = card.EnergyCost.ToString(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        costLbl.AddThemeFontSizeOverride("font_size", 13); costLbl.AddThemeColorOverride("font_color", Colors.White);
-        costBg.AddChild(costLbl); metaRow.AddChild(costBg); metaRow.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
+        var body = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
+        body.AddThemeConstantOverride("separation", 3);
+        var meta = new HBoxContainer(); body.AddChild(meta);
+        var cost = new Label { Text = card.EnergyCost.ToString(), HorizontalAlignment = HorizontalAlignment.Center, CustomMinimumSize = new Vector2(22, 22) };
+        cost.AddThemeFontSizeOverride("font_size", 13); cost.AddThemeColorOverride("font_color", Colors.White);
+        var costBox = new PanelContainer(); costBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0.18f, 0.22f, 0.35f), CornerRadiusTopLeft = 6, CornerRadiusBottomRight = 6 }); costBox.AddChild(cost); meta.AddChild(costBox);
+        var type = new Label { Text = CardTypeText(card.Category), HorizontalAlignment = HorizontalAlignment.Right, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        type.AddThemeFontSizeOverride("font_size", 9); type.AddThemeColorOverride("font_color", new Color(0.35f, 0.35f, 0.35f)); meta.AddChild(type);
         var name = new Label { Text = card.CardName, HorizontalAlignment = HorizontalAlignment.Center, AutowrapMode = TextServer.AutowrapMode.WordSmart };
         name.AddThemeFontSizeOverride("font_size", 12); name.AddThemeColorOverride("font_color", new Color(0.05f, 0.05f, 0.06f)); body.AddChild(name);
-        var type = new Label { Text = CardTypeText(card.Category), HorizontalAlignment = HorizontalAlignment.Center };
-        type.AddThemeFontSizeOverride("font_size", 9); type.AddThemeColorOverride("font_color", new Color(0.35f, 0.35f, 0.35f)); body.AddChild(type);
-        var desc = new RichTextLabel { Text = card.EffectDescription, ScrollActive = false, FitContent = false, SizeFlagsVertical = SizeFlags.ExpandFill, MouseFilter = MouseFilterEnum.Ignore };
+        var desc = new RichTextLabel { Text = card.EffectDescription, ScrollActive = false, FitContent = false, SizeFlagsVertical = Control.SizeFlags.ExpandFill, MouseFilter = MouseFilterEnum.Ignore };
         desc.AddThemeFontSizeOverride("normal_font_size", 9); desc.AddThemeColorOverride("default_color", new Color(0.12f, 0.12f, 0.14f)); body.AddChild(desc);
-        panel.AddChild(body); SetDescendantsIgnore(panel); return panel;
+        panel.AddChild(body); SetDescendantsIgnore(panel);
+        return panel;
     }
     private static string CardTypeText(CardCategory category) => category switch
     {
@@ -491,18 +534,81 @@ public partial class HexBattleScene : Control
     private void RefreshHand()
     {
         if (Session == null || handRow == null) return;
+        // 初始 _Ready 中 Control 尚未完成容器布局时尺寸约为 (8,24)。
+        // 此时计算重叠间距会错误地把所有卡压到一起；等布局完成后只重排一次。
+        if (handRow.Size.X < 300f)
+        {
+            CallDeferred(nameof(RefreshHand));
+            return;
+        }
         if (draggedCard != null) CancelCardDrag();
         foreach (Node child in handRow.GetChildren()) child.QueueFree();
         handCardMap.Clear();
+        handCardBasePositions.Clear();
+        foreach (Tween tween in handHoverTweens.Values) tween?.Kill();
+        handHoverTweens.Clear();
+        hoveredHandCard = null;
 
         BattleUnitPlacement p = Session.Selected;
-        foreach (Card card in Session.GetHand(p.UnitId))
+        List<Card> cards = Session.GetHand(p.UnitId).Where(card => card != null).Take(10).ToList();
+        const float cardWidth = 108f;
+        const float cardHeight = 156f;
+        float availableWidth = handRow.Size.X > 0 ? handRow.Size.X : GetViewportRect().Size.X * 0.55f;
+        const float normalGap = 8f;
+        float normalWidth = cards.Count * cardWidth + Math.Max(0, cards.Count - 1) * normalGap;
+        float step = cards.Count <= 1 ? 0f : normalWidth <= availableWidth
+            ? cardWidth + normalGap
+            : Math.Max(38f, (availableWidth - cardWidth) / (cards.Count - 1));
+        float totalWidth = cardWidth + Math.Max(0, cards.Count - 1) * step;
+        float startX = Math.Max(0, (availableWidth - totalWidth) * 0.5f);
+        for (int index = 0; index < cards.Count; index++)
         {
-            if (card == null) continue;
+            Card card = cards[index];
             var cardNode = MakeHandCard(card);
+            cardNode.MouseEntered += () => SetHoveredHandCard(cardNode);
+            cardNode.MouseExited += () =>
+            {
+                if (hoveredHandCard == cardNode) SetHoveredHandCard(null);
+            };
             handCardMap[cardNode.GetInstanceId()] = card;
             handRow.AddChild(cardNode);
+            // Control 加入父节点后再写位置，避免 Container 的首次布局把绝对定位重置为 (0,0)。
+            cardNode.Position = new Vector2(startX + index * step, 0);
+            cardNode.Size = new Vector2(cardWidth, cardHeight);
+            cardNode.PivotOffset = new Vector2(cardWidth * 0.5f, cardHeight * 0.5f);
+            cardNode.ZIndex = index;
+            handCardBasePositions[cardNode.GetInstanceId()] = cardNode.Position;
         }
+    }
+
+    private void SetHoveredHandCard(Control hovered)
+    {
+        if (hoveredHandCard == hovered || draggedCard != null) return;
+        hoveredHandCard = hovered;
+        foreach (Node child in handRow.GetChildren())
+        {
+            if (child is not Control card || !handCardBasePositions.TryGetValue(card.GetInstanceId(), out Vector2 basePosition)) continue;
+            int index = card.GetIndex();
+            card.Position = basePosition;
+            card.ZIndex = index;
+            AnimateHandCardScale(card, card == hovered ? new Vector2(1.08f, 1.08f) : Vector2.One);
+        }
+        if (hovered != null && handCardBasePositions.TryGetValue(hovered.GetInstanceId(), out Vector2 selectedBase))
+        {
+            hovered.Position = selectedBase;
+            hovered.ZIndex = 100;
+        }
+    }
+
+    private void AnimateHandCardScale(Control card, Vector2 targetScale)
+    {
+        ulong id = card.GetInstanceId();
+        if (handHoverTweens.TryGetValue(id, out Tween oldTween)) oldTween?.Kill();
+        Tween tween = CreateTween();
+        tween.SetTrans(Tween.TransitionType.Quad);
+        tween.SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(card, "scale", targetScale, 0.12f);
+        handHoverTweens[id] = tween;
     }
     private void ShowMessage(string text) => message.Text = text;
     private void ShowTooltip(string text, Vector2 screenPosition)
@@ -631,6 +737,7 @@ public partial class HexBattleScene : Control
 
     private void StartCardDrag(Card card, Control cardNode)
     {
+        SetHoveredHandCard(null);
         draggedCard = card;
         draggedCardNode = cardNode;
         draggedCardOriginalIndex = cardNode.GetIndex();
@@ -728,14 +835,7 @@ public partial class HexBattleScene : Control
 
     private void CancelCardDrag()
     {
-        if (draggedCardNode != null && handRow != null && dragLayer != null)
-        {
-            if (draggedCardNode.GetParent() == dragLayer) dragLayer.RemoveChild(draggedCardNode);
-            draggedCardNode.Modulate = Colors.White;
-            handRow.AddChild(draggedCardNode);
-            int idx = Math.Clamp(draggedCardOriginalIndex, 0, handRow.GetChildCount() - 1);
-            handRow.MoveChild(draggedCardNode, idx);
-        }
+        if (draggedCardNode != null && draggedCardNode.GetParent() == dragLayer) dragLayer.RemoveChild(draggedCardNode);
         draggedCardNode = null;
         draggedCard = null;
         dragExitedHandArea = false;
@@ -743,6 +843,7 @@ public partial class HexBattleScene : Control
         lastCastHover = null;
         HideDragLine();
         MapView.ClearCastPreview();
+        RefreshHand();
     }
 
     // ── 道具拖拽（对齐卡牌逻辑）：无目标→跟手/拖出即用；需目标→直线选目标；丢到道具栏→移动 ──

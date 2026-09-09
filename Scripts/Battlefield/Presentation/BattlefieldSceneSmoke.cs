@@ -14,6 +14,12 @@ public static class BattlefieldSceneSmoke
             await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
             await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
             var session = scene.Session; var view = scene.MapView;
+            if (OS.GetCmdlineUserArgs().Contains("--battlefield-hand-capture"))
+            {
+                await scene.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                Error initialCapture = scene.GetViewport().GetTexture().GetImage().SavePng("res://README/施工文档/2026/2026.09/六边形手牌初始实测.png");
+                Check(initialCapture == Error.Ok, "initial hand capture saved");
+            }
             Check(session.PlayerIds.Count == 3 && session.Occupancy.Occupants.Count == 9, "deployment");
             Check(session.Selected.BaseMovesPerTurn == 3, "CSV MovesPerTurn reaches runtime");
             int firstId = session.SelectedId;
