@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using CardSimulator.Battlefield;
 
@@ -13,6 +14,8 @@ public partial class BattlefieldView : Control
     private AxialHex? hover;
     public event Action<string, Vector2> HoverDetails;
     public event Action<string> Message;
+    /// <summary>外部（如出牌选目标）接管左键点击：返回 true 表示已消费，不再走内置选择/移动。</summary>
+    public Func<AxialHex, bool> LeftClickOverride;
 
     public override void _Ready()
     {
@@ -48,6 +51,39 @@ public partial class BattlefieldView : Control
     }
     public void SetMoving(bool value)
     { Moving = value; QueueRedraw(); }
+
+    // ── 施法预览（拖卡/选卡时） ──
+    private readonly HashSet<AxialHex> castCandidates = new();
+    private readonly HashSet<AxialHex> castAffected = new();
+    private AxialHex castOrigin;
+    private AxialHex? castHover;
+    public bool HasCastPreview => castCandidates.Count > 0;
+
+    public void SetCastPreview(IEnumerable<AxialHex> candidates, IEnumerable<AxialHex> affected,
+        AxialHex origin, AxialHex? hover)
+    {
+        castCandidates.Clear(); castAffected.Clear();
+        if (candidates != null) foreach (var c in candidates) castCandidates.Add(c);
+        if (affected != null) foreach (var c in affected) castAffected.Add(c);
+        castOrigin = origin; castHover = hover;
+        QueueRedraw();
+    }
+
+    public void ClearCastPreview()
+    {
+        castCandidates.Clear(); castAffected.Clear(); castHover = null;
+        QueueRedraw();
+    }
+
+    // ── 移动路线规划 ──
+    private readonly List<AxialHex> movePath = new();
+    public void SetMovePath(IEnumerable<AxialHex> path)
+    {
+        movePath.Clear();
+        if (path != null) foreach (var p in path) movePath.Add(p);
+        QueueRedraw();
+    }
+    public void ClearMovePath() { movePath.Clear(); QueueRedraw(); }
     private void Refresh() => QueueRedraw();
 
     private void ClampPan()
@@ -71,7 +107,9 @@ public partial class BattlefieldView : Control
             if (button.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown) { AcceptEvent(); return; }
             if (button.ButtonIndex == MouseButton.Left && button.Pressed)
             {
-                var coord = CellAt(button.Position); var target = Session.Occupancy.At(coord);
+                var coord = CellAt(button.Position);
+                if (LeftClickOverride?.Invoke(coord) == true) { AcceptEvent(); return; }
+                var target = Session.Occupancy.At(coord);
                 if (target?.Role == BattlefieldRole.Player)
                 { SetMoving(false); Session.Select(target.UnitId); }
                 else if (Moving)
@@ -109,6 +147,7 @@ public partial class BattlefieldView : Control
                 text += $"\n{definition.Name} ×{state.Value.Stacks}\n{definition.EffectDescription}\n衰减：{definition.DecayTiming} / {definition.DecayMode}";
             }
             if (p.Unit.States.Count == 0) text += "\n无状态";
+            if (p.Role == BattlefieldRole.Enemy) text += "\n意图：" + Session.GetEnemyIntentionText(p.UnitId);
         }
         if (cell.Kind == BattleCellKind.Obstacle) text += "\n障碍：不可通行";
         if (cell.Surface == BattleSurface.Pit) text += "\n坑洞：不可通行";
@@ -150,11 +189,45 @@ public partial class BattlefieldView : Control
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
             CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
             CenterText(center + new Vector2(0, 15), $"HP {p.Unit.HP}", 12, color);
+            if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));
             CenterText(center + new Vector2(0, 42), p.Unit.States.Count == 0 ? "无状态" :
                 string.Join(" ", p.Unit.States.Take(3).Select(x => $"{GetStateDefinition(x.Key).Name[..1]}{x.Value.Stacks}")), 12, new Color("b7c5ce"));
         }
+        DrawCastPreview();
+        DrawMovePath();
         if (hover.HasValue && Moving && legal.Contains(hover.Value))
             DrawLine(CellPosition(Session.Selected.Coord), CellPosition(hover.Value), Colors.LightGreen, 3, true);
+    }
+
+    private void DrawMovePath()
+    {
+        if (movePath.Count == 0) return;
+        Vector2[] points = new Vector2[movePath.Count];
+        for (int i = 0; i < movePath.Count; i++) points[i] = CellPosition(movePath[i]);
+        Vector2 last = CellPosition(Session.Selected.Coord);
+        foreach (var point in points) { DrawLine(last, point, Colors.LightSkyBlue, 3f, true); last = point; }
+        DrawCircle(points[^1] + new Vector2(0, -7), 7, Colors.LightSkyBlue);
+    }
+
+    private void DrawCastPreview()
+    {
+        if (castCandidates.Count == 0) return;
+        float r = (float)Session.Definition.CellRadius;
+        foreach (var cell in Session.Board.Cells.Values)
+        {
+            AxialHex coord = cell.Coord;
+            if (!castCandidates.Contains(coord)) continue;
+            bool red = castAffected.Contains(coord);
+            Color fill = red ? new Color(0.95f, 0.25f, 0.22f, 0.42f) : new Color(1f, 0.85f, 0.25f, 0.28f);
+            var center = CellPosition(coord);
+            var points = Enumerable.Range(0, 6).Select(i => center + Vector2.FromAngle(Mathf.DegToRad(60 * i - 30)) * r).ToArray();
+            DrawColoredPolygon(points, fill);
+            for (int i = 0; i < 6; i++)
+                DrawLine(points[i], points[(i + 1) % 6], red ? Colors.Red : Colors.Yellow, red ? 3f : 1.5f, true);
+        }
+
+        if (castHover.HasValue && castCandidates.Contains(castHover.Value))
+            DrawLine(CellPosition(castOrigin), CellPosition(castHover.Value), Colors.OrangeRed, 3f, true);
     }
 
     private void CenterText(Vector2 baseline, string text, int size, Color color)

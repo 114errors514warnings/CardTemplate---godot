@@ -402,7 +402,9 @@ public partial class Card : Resource
 	private CardApplyResult ApplyDamageByBattleLostHpEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
 	{
 		int baseExtraDamage = effectArgs != null && effectArgs.Length > 0 ? effectArgs[0] : 0;
-		int battleLostHp = BattleSytem.Current?.GetBattleLostHp(source) ?? 0;
+		int battleLostHp = BattleSytem.Current?.GetBattleLostHp(source)
+			?? CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current?.GetBattleLostHp(source)
+			?? 0;
 		int totalExtraDamage = baseExtraDamage + battleLostHp;
 		return ApplyDamageEffect(source, resolvedTargets, new int[] { totalExtraDamage });
 	}
@@ -1008,6 +1010,12 @@ public partial class Card : Resource
 
 	private static List<IUnitInstance> ResolveEffectTargets(IUnitInstance source, IUnitInstance selectedTarget, EffectTargetType effectTargetType)
 	{
+		if (CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current?.TryResolve(
+			source, selectedTarget, effectTargetType, out List<IUnitInstance> spatialTargets) == true)
+		{
+			return spatialTargets;
+		}
+
 		List<IUnitInstance> targets = new List<IUnitInstance>();
 		switch (effectTargetType)
 		{

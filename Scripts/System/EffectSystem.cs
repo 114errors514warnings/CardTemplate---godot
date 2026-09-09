@@ -208,7 +208,9 @@ public sealed class AttackEffect : IEffect
     private static EffectResult ApplyAttackToAllEnemies(EffectContext context)
     {
         var battle = BattleSytem.Current;
-        var enemies = battle?.GetEnemyUnits(context.Source) ?? new System.Collections.Generic.List<IUnitInstance>();
+        var enemies = battle?.GetEnemyUnits(context.Source)
+            ?? new System.Collections.Generic.List<IUnitInstance>(CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current?.Enemies
+                ?? System.Array.Empty<IUnitInstance>());
         if (enemies.Count == 0)
         {
             return new EffectResult("Attack", context.Source, context.Target, summaryOverride: $"来源={BuildUnitLabel(context.Source)}，目标=全体敌人，未命中任何有效目标。");
@@ -279,6 +281,11 @@ public sealed class AttackEffect : IEffect
             return;
         }
 
+        if (CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current?.CanAttack(context.Target, context.Source) == false)
+        {
+            return;
+        }
+
         EffectResult counterAttackResult = EffectSystem.ApplyAttack(context.Target, context.Source, isCounterAttack: true);
         BattleSytem.Current?.EnqueueDeferredCombatInfo($"反击触发：{counterAttackResult.BuildSummary()}");
 
@@ -326,7 +333,7 @@ public sealed class AttackEffect : IEffect
         BattleSytem battle = BattleSytem.Current;
         if (battle == null || !battle.IsBattleStarted)
         {
-            return false;
+            return CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current?.IsOutOfTurn(unit) ?? false;
         }
 
         if (unit is CharacterInstance)

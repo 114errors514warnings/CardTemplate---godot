@@ -21,7 +21,7 @@
   "MinEnemyDistance": 3,
   "MaxGenerationAttempts": 32,
   "ObjectPlacements": [
-    { "Q": -1, "R": 0, "DefinitionId": "测试石块", "Kind": "Item" },
-    { "Q": -1, "R": 0, "DefinitionId": "测试短剑", "Kind": "Equipment" }
+    { "Q": -1, "R": 0, "DefinitionId": "治疗药剂", "Kind": "Item", "HealAmount": 6 },
+    { "Q": -1, "R": 0, "DefinitionId": "行军短剑", "Kind": "Equipment", "HandsRequired": 1, "AttackRange": 2, "MoveBonus": 1 }
   ]
 }

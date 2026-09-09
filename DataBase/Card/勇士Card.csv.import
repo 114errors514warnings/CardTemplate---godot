@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cksatv0b480l8"
+
+[deps]
+
+files=["res://DataBase/Card/勇士Card.CardName.translation", "res://DataBase/Card/勇士Card.CardType.translation", "res://DataBase/Card/勇士Card.EnergyCost.translation", "res://DataBase/Card/勇士Card.EffectType.translation", "res://DataBase/Card/勇士Card.EffectDesc.translation", "res://DataBase/Card/勇士Card.Params.translation", "res://DataBase/Card/勇士Card.en.translation", "res://DataBase/Card/勇士Card.en.translation", "res://DataBase/Card/勇士Card.SpatialShape.translation", "res://DataBase/Card/勇士Card.SpatialArgs.translation", "res://DataBase/Card/勇士Card.TrapId.translation"]
+
+source_file="res://DataBase/Card/勇士Card.csv"
+dest_files=["res://DataBase/Card/勇士Card.CardName.translation", "res://DataBase/Card/勇士Card.CardType.translation", "res://DataBase/Card/勇士Card.EnergyCost.translation", "res://DataBase/Card/勇士Card.EffectType.translation", "res://DataBase/Card/勇士Card.EffectDesc.translation", "res://DataBase/Card/勇士Card.Params.translation", "res://DataBase/Card/勇士Card.en.translation", "res://DataBase/Card/勇士Card.en.translation", "res://DataBase/Card/勇士Card.SpatialShape.translation", "res://DataBase/Card/勇士Card.SpatialArgs.translation", "res://DataBase/Card/勇士Card.TrapId.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

@@ -118,7 +118,7 @@ public partial class MainMenuScene : Control
 			startButton.Pressed += OnStartPressed;
 		}
 
-		Button battlefieldButton = CreateMenuButton("六边形战场 · 基础验证");
+		Button battlefieldButton = CreateMenuButton("六边形战斗");
 		battlefieldButton.Pressed += () => GetTree().ChangeSceneToFile("res://Scenes/Battle/HexBattleScene.tscn");
 
 		Button exitButton = CreateMenuButton("退出");

@@ -15,13 +15,20 @@ public sealed class GroundObject
     public string DefinitionId { get; }
     public GroundObjectKind Kind { get; }
     public EntryTriggerMode TriggerMode { get; }
+    public int HandsRequired { get; }
+    public int AttackRange { get; }
+    public int MoveBonus { get; }
+    public int HealAmount { get; }
     public GroundObject(string instanceId, string definitionId, GroundObjectKind kind,
-        EntryTriggerMode triggerMode = EntryTriggerMode.Once)
+        EntryTriggerMode triggerMode = EntryTriggerMode.Once, int handsRequired = 1,
+        int attackRange = 1, int moveBonus = 0, int healAmount = 0)
     {
         if (string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(definitionId))
             throw new ArgumentException("物件实例 ID 和定义 ID 不可为空。");
         if (!Enum.IsDefined(kind) || !Enum.IsDefined(triggerMode)) throw new ArgumentException("物件类型无效。");
+        if (handsRequired is < 1 or > 2 || attackRange < 1 || healAmount < 0) throw new ArgumentException("物件属性无效。");
         InstanceId = instanceId; DefinitionId = definitionId; Kind = kind; TriggerMode = triggerMode;
+        HandsRequired = handsRequired; AttackRange = attackRange; MoveBonus = moveBonus; HealAmount = healAmount;
     }
     public bool IsTrigger => Kind is GroundObjectKind.Trap or GroundObjectKind.Mechanism;
 }

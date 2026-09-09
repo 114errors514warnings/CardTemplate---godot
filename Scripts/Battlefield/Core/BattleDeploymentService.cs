@@ -52,7 +52,8 @@ public static class BattleDeploymentService
             int serial = 0;
             foreach (var entry in definition.ObjectPlacements)
             {
-                var obj = new GroundObject($"fixed-{++serial}", entry.DefinitionId, entry.Kind, entry.TriggerMode);
+                var obj = new GroundObject($"fixed-{++serial}", entry.DefinitionId, entry.Kind, entry.TriggerMode,
+                    entry.HandsRequired, entry.AttackRange, entry.MoveBonus, entry.HealAmount);
                 if (!board.TryAddObject(new AxialHex(entry.Q, entry.R), obj, out string error))
                     throw new ArgumentException($"固定物件 {entry.DefinitionId}：{error}");
             }
@@ -63,7 +64,8 @@ public static class BattleDeploymentService
             for (int i = 0; i < definition.RandomItemCount; i++)
             {
                 var coord = itemCells[itemRandom.Next(itemCells.Count)];
-                var item = new GroundObject($"random-{i}", definition.RandomItemDefinitions[itemRandom.Next(definition.RandomItemDefinitions.Count)], GroundObjectKind.Item);
+                var item = new GroundObject($"random-{i}", definition.RandomItemDefinitions[itemRandom.Next(definition.RandomItemDefinitions.Count)], GroundObjectKind.Item,
+                    healAmount: 3);
                 if (!board.TryAddObject(coord, item, out var error)) throw new InvalidOperationException(error);
             }
             return new GeneratedBattlefield(board, Array.AsReadOnly(players), Array.AsReadOnly(enemies), actualSeed, attempt);

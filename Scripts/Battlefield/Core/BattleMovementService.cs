@@ -58,6 +58,26 @@ public sealed class BattleMovementService
         finally { executing = false; }
     }
 
+    public bool TryMoveWithoutPlayerCost(int unitId, AxialHex destination, out string error)
+    {
+        occupancy.SyncDeaths(); error = "";
+        if (executing) { error = "当前移动正在结算。"; return false; }
+        if (!occupancy.Placements.TryGetValue(unitId, out var p) || p.Presence != BattlefieldPresence.Active || p.Unit.HP <= 0)
+        { error = "单位无法移动。"; return false; }
+        if (AxialHex.Distance(p.Coord, destination) != 1 || !board.IsWalkable(destination) || !occupancy.CanEnter(destination))
+        { error = "目标不是合法相邻空格。"; return false; }
+        executing = true;
+        try
+        {
+            var from = p.Coord; occupancy.CommitMove(p, destination);
+            var trigger = board.Cells[destination].Trigger;
+            if (trigger?.TriggerMode == EntryTriggerMode.Once) board.TryRemoveObject(destination, trigger.InstanceId, out _);
+            Entered?.Invoke(new BattlefieldEntry(++entrySequence, unitId, from, destination, trigger));
+            occupancy.SyncDeaths(); return true;
+        }
+        finally { executing = false; }
+    }
+
     public void StartPlayerTurn()
     {
         if (executing) throw new InvalidOperationException("不能在移动结算中重置回合。");

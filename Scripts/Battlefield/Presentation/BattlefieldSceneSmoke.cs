@@ -47,8 +47,42 @@ public static class BattlefieldSceneSmoke
             Check(session.Selected.RemainingMoves == 2, "unequip preserves spent moves");
             session.NextTestRound();
             Check(session.Selected.Unit.Energy == 3 && session.Selected.MovesUsedThisTurn == 0, "turn reset");
+            var lootCell = new AxialHex(-1, 0);
+            Check(session.Occupancy.At(lootCell) == null, "fixture loot cell open");
+            session.Occupancy.CommitMove(session.Selected, lootCell);
+            GroundObject equipment = session.Board.Cells[lootCell].Items.First(x => x.Kind == GroundObjectKind.Equipment);
+            Check(session.TryEquipFromCurrentCell(equipment.InstanceId, BattlefieldSession.HandSlot.Left, out string inventoryError), "equip: " + inventoryError);
+            Check(session.CurrentAttackRange == 2 && session.Selected.EffectiveMovesPerTurn == 4, "equipment modifiers");
+            GroundObject item = session.Board.Cells[lootCell].Items.First(x => x.Kind == GroundObjectKind.Item);
+            session.Selected.Unit.HP -= 4;
+            Check(session.TryPickItemFromCurrentCell(item.InstanceId, 0, out inventoryError), "pickup: " + inventoryError);
+            int woundedHp = session.Selected.Unit.HP;
+            Check(session.TryUseItem(0, out inventoryError) && session.Selected.Unit.HP > woundedHp, "use item: " + inventoryError);
             StateSystem.AddOrUpdateState(session.Selected.Unit, StateType.Vulnerable, 1);
             Check(view.Describe(session.Selected.Coord).Contains("易伤"), "state tooltip binding");
+            session.DrawCards(session.SelectedId, 99);
+            Card selfCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 21001001);
+            Check(selfCard != null, "configured hand card loaded");
+            int handBefore = session.HandCount(session.SelectedId);
+            Check(session.TryCastCard(selfCard.CardId, session.Selected.Coord, out string castError), "existing card pipeline: " + castError);
+            Check(session.HandCount(session.SelectedId) >= handBefore - 1, "draw card effect and lifecycle");
+            Card attackCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001001);
+            Check(attackCard != null, "spatial attack card loaded");
+            var attackCell = BattleHexLayout.Neighbors(session.Selected.Coord).First(x => session.Occupancy.CanEnter(x));
+            var attackEnemy = session.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active);
+            session.Occupancy.CommitMove(attackEnemy, attackCell);
+            int targetHp = attackEnemy.Unit.HP;
+            Check(session.TryCastCard(attackCard.CardId, attackCell, out castError), "spatial damage pipeline: " + castError);
+            Check(attackEnemy.Unit.HP < targetHp, "spatial card damages only validated target");
+            var enemyBefore = session.Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active)
+                .ToDictionary(x => x.UnitId, x => x.Coord);
+            session.EndCurrentTurn();
+            Check(session.Round == 3 && session.Phase == BattlefieldSession.BattlePhase.Player, "monster turn then player round");
+            Check(enemyBefore.Any(x => session.Occupancy.Placements[x.Key].Presence != BattlefieldPresence.Active ||
+                session.Occupancy.Placements[x.Key].Coord != x.Value), "monster spatial action");
+            foreach (var remainingEnemy in session.Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active).ToArray())
+                remainingEnemy.Unit.HP = 0;
+            Check(session.Phase == BattlefieldSession.BattlePhase.Victory, "victory outcome");
             view.CenterSelected(); view.SetMoving(true); view.QueueRedraw();
             await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-capture"))
@@ -58,7 +92,7 @@ public static class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, modifiers, turn, states");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, spatial damage, monster turn, states, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)

@@ -28,6 +28,10 @@ public sealed class BattleObjectData
     public string DefinitionId { get; set; } = "";
     public GroundObjectKind Kind { get; set; }
     public EntryTriggerMode TriggerMode { get; set; }
+    public int HandsRequired { get; set; } = 1;
+    public int AttackRange { get; set; } = 1;
+    public int MoveBonus { get; set; }
+    public int HealAmount { get; set; }
 }
 
 public sealed class BattleMapDefinition
