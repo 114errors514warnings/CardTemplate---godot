@@ -8,6 +8,8 @@ public enum BattleCellKind { Normal, Obstacle }
 public enum BattleSurface { Ground, Pit }
 public enum GroundObjectKind { Item, Equipment, Trap, Mechanism }
 public enum EntryTriggerMode { Once, EveryEntry }
+/// <summary>投掷型道具的生效形状：单体 / 直线 / 扇形 / 环形（菱形暂未实现，枚举值保留）。</summary>
+public enum ItemSpatialShape { None = 0, Single = 1, Line = 2, Fan = 3, Ring = 4, Diamond = 5 }
 
 public sealed class GroundObject
 {
@@ -19,6 +21,13 @@ public sealed class GroundObject
     public int AttackRange { get; }
     public int MoveBonus { get; }
     public int HealAmount { get; }
+    // ── 投掷型道具（需要选定目标）的空间规格 ──
+    public ItemSpatialShape SpatialShape { get; set; } = ItemSpatialShape.None;
+    public int ItemMaxRange { get; set; } = 1;
+    public int ItemRadius { get; set; } = 1;
+    public int ItemLength { get; set; } = 1;
+    public string ItemTrapId { get; set; } = "";
+    public int DamageAmount { get; set; }
     public GroundObject(string instanceId, string definitionId, GroundObjectKind kind,
         EntryTriggerMode triggerMode = EntryTriggerMode.Once, int handsRequired = 1,
         int attackRange = 1, int moveBonus = 0, int healAmount = 0)
@@ -31,6 +40,7 @@ public sealed class GroundObject
         HandsRequired = handsRequired; AttackRange = attackRange; MoveBonus = moveBonus; HealAmount = healAmount;
     }
     public bool IsTrigger => Kind is GroundObjectKind.Trap or GroundObjectKind.Mechanism;
+    public bool NeedsTarget => SpatialShape != ItemSpatialShape.None;
 }
 
 /// <summary>Terrain states are independent of unit states. Trigger effects are wired in a later batch.</summary>

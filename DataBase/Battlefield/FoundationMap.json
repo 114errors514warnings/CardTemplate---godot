@@ -22,6 +22,7 @@
   "MaxGenerationAttempts": 32,
   "ObjectPlacements": [
     { "Q": -1, "R": 0, "DefinitionId": "治疗药剂", "Kind": "Item", "HealAmount": 6 },
-    { "Q": -1, "R": 0, "DefinitionId": "行军短剑", "Kind": "Equipment", "HandsRequired": 1, "AttackRange": 2, "MoveBonus": 1 }
+    { "Q": -1, "R": 0, "DefinitionId": "行军短剑", "Kind": "Equipment", "HandsRequired": 1, "AttackRange": 2, "MoveBonus": 1 },
+    { "Q": 0, "R": 0, "DefinitionId": "石头", "Kind": "Item", "SpatialShape": "Line", "ItemMaxRange": 3, "ItemLength": 3, "DamageAmount": 3 }
   ]
 }

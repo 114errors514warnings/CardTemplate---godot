@@ -54,6 +54,12 @@ public static class BattleDeploymentService
             {
                 var obj = new GroundObject($"fixed-{++serial}", entry.DefinitionId, entry.Kind, entry.TriggerMode,
                     entry.HandsRequired, entry.AttackRange, entry.MoveBonus, entry.HealAmount);
+                obj.SpatialShape = entry.SpatialShape;
+                obj.ItemMaxRange = Math.Max(1, entry.ItemMaxRange);
+                obj.ItemRadius = Math.Max(1, entry.ItemRadius);
+                obj.ItemLength = Math.Max(1, entry.ItemLength);
+                obj.ItemTrapId = entry.ItemTrapId;
+                obj.DamageAmount = entry.DamageAmount;
                 if (!board.TryAddObject(new AxialHex(entry.Q, entry.R), obj, out string error))
                     throw new ArgumentException($"固定物件 {entry.DefinitionId}：{error}");
             }
@@ -64,8 +70,11 @@ public static class BattleDeploymentService
             for (int i = 0; i < definition.RandomItemCount; i++)
             {
                 var coord = itemCells[itemRandom.Next(itemCells.Count)];
-                var item = new GroundObject($"random-{i}", definition.RandomItemDefinitions[itemRandom.Next(definition.RandomItemDefinitions.Count)], GroundObjectKind.Item,
-                    healAmount: 3);
+                string itemId = definition.RandomItemDefinitions[itemRandom.Next(definition.RandomItemDefinitions.Count)];
+                bool thrown = itemId is "石头" or "测试石块";
+                var item = new GroundObject($"random-{i}", itemId, GroundObjectKind.Item,
+                    healAmount: thrown ? 0 : 3);
+                ConfigureThrowableItem(item);
                 if (!board.TryAddObject(coord, item, out var error)) throw new InvalidOperationException(error);
             }
             return new GeneratedBattlefield(board, Array.AsReadOnly(players), Array.AsReadOnly(enemies), actualSeed, attempt);
@@ -82,6 +91,18 @@ public static class BattleDeploymentService
             foreach (var next in BattleHexLayout.Neighbors(queue.Dequeue()))
                 if (board.IsWalkable(next) && found.Add(next)) queue.Enqueue(next);
         return found;
+    }
+
+    private static void ConfigureThrowableItem(GroundObject item)
+    {
+        if (item.DefinitionId is "石头" or "测试石块")
+        {
+            // 投掷型石头：固定 3 格直线距离，命中直线上的敌人造成伤害。
+            item.SpatialShape = ItemSpatialShape.Line;
+            item.ItemMaxRange = 3;
+            item.ItemLength = 3;
+            item.DamageAmount = 3;
+        }
     }
 
     private static Dictionary<AxialHex, BattleCell> CreateBase(BattleMapDefinition definition)

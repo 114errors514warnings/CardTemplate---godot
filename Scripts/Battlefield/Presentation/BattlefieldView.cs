@@ -55,8 +55,6 @@ public partial class BattlefieldView : Control
     // ── 施法预览（拖卡/选卡时） ──
     private readonly HashSet<AxialHex> castCandidates = new();
     private readonly HashSet<AxialHex> castAffected = new();
-    private AxialHex castOrigin;
-    private AxialHex? castHover;
     public bool HasCastPreview => castCandidates.Count > 0;
 
     public void SetCastPreview(IEnumerable<AxialHex> candidates, IEnumerable<AxialHex> affected,
@@ -65,13 +63,12 @@ public partial class BattlefieldView : Control
         castCandidates.Clear(); castAffected.Clear();
         if (candidates != null) foreach (var c in candidates) castCandidates.Add(c);
         if (affected != null) foreach (var c in affected) castAffected.Add(c);
-        castOrigin = origin; castHover = hover;
         QueueRedraw();
     }
 
     public void ClearCastPreview()
     {
-        castCandidates.Clear(); castAffected.Clear(); castHover = null;
+        castCandidates.Clear(); castAffected.Clear();
         QueueRedraw();
     }
 
@@ -226,8 +223,6 @@ public partial class BattlefieldView : Control
                 DrawLine(points[i], points[(i + 1) % 6], red ? Colors.Red : Colors.Yellow, red ? 3f : 1.5f, true);
         }
 
-        if (castHover.HasValue && castCandidates.Contains(castHover.Value))
-            DrawLine(CellPosition(castOrigin), CellPosition(castHover.Value), Colors.OrangeRed, 3f, true);
     }
 
     private void CenterText(Vector2 baseline, string text, int size, Color color)

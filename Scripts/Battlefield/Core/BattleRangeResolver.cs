@@ -114,4 +114,113 @@ public static class BattleRangeResolver
 
 		return best;
 	}
+
+	/// <summary>
+	/// 投掷型道具：给定已选落点 target，求会受到影响的格集合。
+	/// 全部以 target 为落点中心；方向由 origin→target 决定（直线/扇形/环形）。
+	/// </summary>
+	public static HashSet<AxialHex> ResolveItemAffectedCells(AxialHex origin, AxialHex target, GroundObject item)
+	{
+		HashSet<AxialHex> affected = new HashSet<AxialHex> { target };
+		if (item == null || item.SpatialShape == ItemSpatialShape.None || item.SpatialShape == ItemSpatialShape.Single)
+		{
+			return affected;
+		}
+
+		int radius = Math.Max(1, item.ItemRadius);
+		int length = Math.Max(1, item.ItemLength);
+		AxialHex dir = PickLineDirection(origin, target);
+		switch (item.SpatialShape)
+		{
+			case ItemSpatialShape.Line:
+				// 直线：从施法者 origin 沿投掷方向向前 length 格（投掷型“固定距离直线”）。
+				for (int i = 1; i <= length; i++)
+				{
+					affected.Add(new AxialHex(origin.Q + dir.Q * i, origin.R + dir.R * i));
+				}
+
+				break;
+
+			case ItemSpatialShape.Fan:
+				// 扇形：以 origin 为顶点、朝投掷方向 ±60° 的楔形，半径 radius。
+				foreach (AxialHex cell in CellsWithinRange(origin, radius))
+				{
+					if (cell == origin)
+					{
+						continue;
+					}
+
+					if (IsSameOrAdjacentDirection(dir, PickLineDirection(origin, cell)))
+					{
+						affected.Add(cell);
+					}
+				}
+
+				break;
+
+			case ItemSpatialShape.Ring:
+				// 环形：以落点 target 为圆心、半径为 radius 的一圈格。
+				foreach (AxialHex cell in CellsWithinRange(target, radius))
+				{
+					if (Distance(target, cell) == radius)
+					{
+						affected.Add(cell);
+					}
+				}
+
+				break;
+
+			case ItemSpatialShape.Diamond:
+				// 菱形（较短中线与使用方向一致）：以落点为中心、沿投掷方向为“短对角线”。
+				foreach (AxialHex perp in SixNeighborOffsets)
+				{
+					if (perp == dir || IsSameOrAdjacentDirection(dir, perp)) continue;
+					for (int i = -1; i <= radius; i++)
+					{
+						affected.Add(new AxialHex(target.Q + dir.Q * i + perp.Q, target.R + dir.R * i + perp.R));
+					}
+				}
+
+				for (int i = -1; i <= radius; i++)
+				{
+					affected.Add(new AxialHex(target.Q + dir.Q * i, target.R + dir.R * i));
+				}
+
+				break;
+		}
+
+		return affected;
+	}
+
+	/// <summary>两个方向是否相同或相差 60°（相邻邻向）。</summary>
+	public static bool IsSameOrAdjacentDirection(AxialHex a, AxialHex b)
+	{
+		if (a == b)
+		{
+			return true;
+		}
+
+		int ia = IndexOfDirection(a);
+		int ib = IndexOfDirection(b);
+		if (ia < 0 || ib < 0)
+		{
+			return false;
+		}
+
+		int diff = Math.Abs(ia - ib);
+		return diff == 1 || diff == 5;
+	}
+
+	private static int IndexOfDirection(AxialHex d)
+	{
+		for (int i = 0; i < SixNeighborOffsets.Length; i++)
+		{
+			if (SixNeighborOffsets[i] == d)
+			{
+				return i;
+			}
+		}
+
+		return -1;
+	}
 }

@@ -1,4 +1,4 @@
-﻿// Card.cs
+// Card.cs
 using Godot;
 using CardSimulator;
 using System;
@@ -224,7 +224,7 @@ public partial class Card : Resource
 			throw new ArgumentNullException(nameof(source));
 		}
 
-		if (NeedTarget && target == null)
+		if (NeedTarget && target == null && CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current == null)
 		{
 			string errorMessage = $"卡牌ID {CardId} 需要目标，但本次出牌未传入目标。";
 			AppendConsoleError(errorMessage, true);
@@ -289,6 +289,12 @@ public partial class Card : Resource
 
 			if (resolvedTargets.Count == 0)
 			{
+				if (CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current != null)
+				{
+					// 空间（六边形）出牌允许“打空”：该效果无有效目标时不结算，继续后续效果。
+					AppendConsoleInfo($"卡牌ID {CardId} 的效果 {effectType} 无有效目标，跳过（打空）。");
+					continue;
+				}
 				string errorMessage = $"卡牌ID {CardId} 的效果类型 {effectType} 未解析出有效目标，targetType={effectTargetType}。";
 				AppendConsoleError(errorMessage, true);
 				return new CardApplyResult(false, this, source, target, errorMessage: errorMessage);

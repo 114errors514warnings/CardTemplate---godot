@@ -96,8 +96,16 @@ public sealed class BattlefieldSession : IDisposable
         return BattleRangeResolver.CellsWithinRange(origin, effectiveRange).Where(x => Board.Cells.ContainsKey(x) && HasClearTrace(origin, x, spec.Penetrates)).ToArray();
     }
 
-    public IReadOnlyCollection<AxialHex> GetAffectedCells(int cardId, AxialHex target) =>
-        BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, GetSpatialSpec(cardId)).Where(Board.Cells.ContainsKey).ToArray();
+    public IReadOnlyCollection<AxialHex> GetAffectedCells(int cardId, AxialHex target)
+    {
+        CardSpatialSpec spec = GetSpatialSpec(cardId);
+        if (spec.Shape == CardSpatialShape.Line)
+        {
+            AxialHex dir = BattleRangeResolver.PickLineDirection(Selected.Coord, target);
+            return ResolveLineUntilBlocked(dir, Math.Max(1, spec.Length), spec.Penetrates);
+        }
+        return BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
+    }
 
     private bool HasClearTrace(AxialHex origin, AxialHex target, bool penetrates)
     {
@@ -211,9 +219,11 @@ public sealed class BattlefieldSession : IDisposable
     public bool TryPickItemFromCurrentCell(string instanceId, int slot, out string error)
     {
         error = "";
-        if (slot < 0 || slot >= 3 || SelectedLoadout.Items[slot] != null) { error = "道具栏位不可用。"; return false; }
+        if (slot < 0 || slot >= 3) { error = "道具栏位不可用。"; return false; }
         GroundObject item = Board.Cells[Selected.Coord].Items.FirstOrDefault(x => x.InstanceId == instanceId && x.Kind == GroundObjectKind.Item);
         if (item == null || !Board.TryRemoveObject(Selected.Coord, instanceId, out _)) { error = "当前格没有该道具。"; return false; }
+        // 目标栏已有道具时交换：把原栏道具放回当前格。
+        if (SelectedLoadout.Items[slot] != null) Board.TryAddObject(Selected.Coord, SelectedLoadout.Items[slot], out _);
         SelectedLoadout.Items[slot] = item; Notify(); return true;
     }
 
@@ -226,6 +236,188 @@ public sealed class BattlefieldSession : IDisposable
         SelectedLoadout.Items[slot] = null; Notify();
         Message?.Invoke($"{Selected.Name} 使用 {item.DefinitionId}，生命 {before}→{Selected.Unit.HP}。");
         return true;
+    }
+
+    // ── 投掷型道具：需要选定目标，从道具栏或当前格直接使用 ──
+
+    public IReadOnlyCollection<AxialHex> GetItemCastCandidates(GroundObject item)
+    {
+        if (item == null) return Array.Empty<AxialHex>();
+        AxialHex origin = Selected.Coord;
+
+        // 直线投掷：仅允许瞄准 6 个方向直线上的格子（沿 ItemLength 延伸，遇单位/障碍即停）。
+        if (item.SpatialShape == ItemSpatialShape.Line)
+        {
+            var lineCells = new List<AxialHex>();
+            int length = Math.Max(1, item.ItemLength);
+            foreach (var dir in BattleRangeResolver.SixNeighborOffsets)
+            {
+                for (int i = 1; i <= length; i++)
+                {
+                    var cell = new AxialHex(origin.Q + dir.Q * i, origin.R + dir.R * i);
+                    if (!Board.Cells.ContainsKey(cell)) break;
+                    lineCells.Add(cell);
+                    bool blocked = Board.Cells[cell].Kind == BattleCellKind.Obstacle || Board.Cells[cell].BlocksSight || Occupancy.At(cell) != null;
+                    if (blocked) break; // 首个目标之后不可再瞄准（不能隔墙/隔人瞄准）
+                }
+            }
+            return lineCells.ToArray();
+        }
+
+        int range = Math.Max(1, item.ItemMaxRange);
+        IEnumerable<AxialHex> cells = BattleRangeResolver.CellsWithinRange(origin, range).Where(Board.Cells.ContainsKey);
+        if (item.ItemTrapId.Length > 0)
+            cells = cells.Where(x => x != origin && Board.Cells[x].Walkable && Board.Cells[x].Trigger == null
+                && Board.Cells[x].Items.Count == 0 && Occupancy.At(x) == null);
+        return cells.ToArray();
+    }
+
+    public bool IsValidItemTarget(GroundObject item, AxialHex target) =>
+        item != null && BattleRangeResolver.Distance(Selected.Coord, target) <= Math.Max(1, item.ItemMaxRange)
+        && GetItemCastCandidates(item).Contains(target);
+
+    /// <summary>
+    /// 投掷型道具的“实际受影响格”。直线攻击默认会被方向上的第一个单位/障碍挡住，
+    /// 只命中该格（后续不再穿透），除非道具被标记为穿透（暂未提供穿透开关，后续可扩展）。
+    /// </summary>
+    public IReadOnlyCollection<AxialHex> GetItemAffectedCells(GroundObject item, AxialHex target)
+    {
+        if (item == null) return Array.Empty<AxialHex>();
+        if (item.SpatialShape != ItemSpatialShape.Line)
+            return BattleRangeResolver.ResolveItemAffectedCells(Selected.Coord, target, item).ToArray();
+
+        // 直线：从施法者 origin 沿投掷方向走 length 格，遇第一个单位或障碍即停（首个目标）。
+        AxialHex dir = BattleRangeResolver.PickLineDirection(Selected.Coord, target);
+        return ResolveLineUntilBlocked(dir, Math.Max(1, item.ItemLength), penetrates: false);
+    }
+
+    /// <summary>直线攻击专用：从施法者沿 dir 走 length 格，命中方向上的第一个单位/障碍即停下（非穿透时）。</summary>
+    private IReadOnlyCollection<AxialHex> ResolveLineUntilBlocked(AxialHex dir, int length, bool penetrates)
+    {
+        var affected = new List<AxialHex>();
+        AxialHex origin = Selected.Coord;
+        for (int i = 1; i <= length; i++)
+        {
+            var cell = new AxialHex(origin.Q + dir.Q * i, origin.R + dir.R * i);
+            if (!Board.Cells.ContainsKey(cell)) break;
+            affected.Add(cell);
+            bool blocked = Board.Cells[cell].Kind == BattleCellKind.Obstacle || Board.Cells[cell].BlocksSight || Occupancy.At(cell) != null;
+            if (blocked && !penetrates) break;
+        }
+        return affected;
+    }
+
+    public bool TryUseItemAt(int slot, AxialHex? target, out string error)
+    {
+        error = "";
+        if (Phase != BattlePhase.Player || IsFinished) { error = "当前不是玩家出牌阶段。"; return false; }
+        if (slot < 0 || slot >= 3 || SelectedLoadout.Items[slot] == null) { error = "该道具栏为空。"; return false; }
+        GroundObject item = SelectedLoadout.Items[slot];
+        if (item.NeedsTarget)
+        {
+            if (!target.HasValue) { error = "该道具需要选定目标。"; return false; }
+            if (!IsValidItemTarget(item, target.Value)) { error = "超出投掷射程或目标不可用。"; return false; }
+        }
+        ApplyItemEffect(Selected, item, target, out error);
+        if (error.Length > 0) return false;
+        SelectedLoadout.Items[slot] = null;
+        Notify();
+        return true;
+    }
+
+    public bool TryUseItemFromCurrentCell(string instanceId, AxialHex? target, out string error)
+    {
+        error = "";
+        if (Phase != BattlePhase.Player || IsFinished) { error = "当前不是玩家出牌阶段。"; return false; }
+        if (HasPendingHandChoice) { error = "请先完成当前选牌效果。"; return false; }
+        GroundObject item = Board.Cells[Selected.Coord].Items.FirstOrDefault(x => x.InstanceId == instanceId && x.Kind == GroundObjectKind.Item);
+        if (item == null) { error = "当前格没有该道具。"; return false; }
+        if (item.NeedsTarget)
+        {
+            if (!target.HasValue) { error = "该道具需要选定目标。"; return false; }
+            if (!IsValidItemTarget(item, target.Value)) { error = "超出投掷射程或目标不可用。"; return false; }
+        }
+        ApplyItemEffect(Selected, item, target, out error);
+        if (error.Length > 0) return false;
+        Board.TryRemoveObject(Selected.Coord, instanceId, out _);
+        Notify();
+        return true;
+    }
+
+    public bool TryMoveItemBetweenSlots(int from, int to, out string error)
+    {
+        error = "";
+        if (from < 0 || from >= 3 || to < 0 || to >= 3) { error = "道具栏位置无效。"; return false; }
+        if (SelectedLoadout.Items[from] == null) { error = "源道具栏为空。"; return false; }
+        if (to == from) return true;
+        // 目标栏已有道具时直接交换，便于自由挪动。
+        if (SelectedLoadout.Items[to] != null)
+        {
+            (SelectedLoadout.Items[from], SelectedLoadout.Items[to]) = (SelectedLoadout.Items[to], SelectedLoadout.Items[from]);
+        }
+        else
+        {
+            SelectedLoadout.Items[to] = SelectedLoadout.Items[from];
+            SelectedLoadout.Items[from] = null;
+        }
+        Notify();
+        return true;
+    }
+
+    public bool TryDropItemOnCurrentCell(int slot, out string error)
+    {
+        error = "";
+        if (slot < 0 || slot >= 3 || SelectedLoadout.Items[slot] == null) { error = "该道具栏为空。"; return false; }
+        if (!Board.TryAddObject(Selected.Coord, SelectedLoadout.Items[slot], out error))
+        {
+            if (error.Length == 0) error = "当前格无法放下该道具。";
+            return false;
+        }
+        SelectedLoadout.Items[slot] = null;
+        Notify();
+        return true;
+    }
+
+    private void ApplyItemEffect(BattleUnitPlacement source, GroundObject item, AxialHex? target, out string error)
+    {
+        error = "";
+        if (item.NeedsTarget && target.HasValue)
+        {
+            var affected = GetItemAffectedCells(item, target.Value);
+            var tracked = Occupancy.Placements.Values.Where(x => x.Presence == BattlefieldPresence.Active).ToArray();
+            var beforeHp = tracked.ToDictionary(x => x.UnitId, x => x.Unit.HP);
+
+            if (item.ItemTrapId.Length > 0)
+            {
+                var trap = new GroundObject($"trap-{source.UnitId}-{Guid.NewGuid():N}".Substring(0, 20), item.ItemTrapId,
+                    GroundObjectKind.Trap, EntryTriggerMode.EveryEntry);
+                if (!Board.TryAddObject(target.Value, trap, out error))
+                {
+                    if (error.Length == 0) error = "陷阱目标必须没有单位或物品。";
+                    return;
+                }
+                Message?.Invoke($"{source.Name} 在 ({target.Value.Q},{target.Value.R}) 投放了陷阱：{trap.DefinitionId}。");
+                return;
+            }
+
+            foreach (var cell in affected)
+            {
+                var u = Occupancy.At(cell);
+                if (u == null || u.Presence != BattlefieldPresence.Active) continue;
+                if (u.Role == BattlefieldRole.Enemy && item.DamageAmount > 0)
+                    u.Unit.HP = Math.Max(0, u.Unit.HP - item.DamageAmount);
+                else if (u.Role == BattlefieldRole.Player && item.HealAmount > 0)
+                    u.Unit.HP = Math.Min(u.Unit.Max_HP, u.Unit.HP + item.HealAmount);
+            }
+            foreach (var unit in tracked) TrackHpLoss(unit.Unit, beforeHp[unit.UnitId]);
+            Message?.Invoke($"{source.Name} 使用 {item.DefinitionId}。");
+            Occupancy.SyncDeaths(); EvaluateOutcome();
+            return;
+        }
+
+        int before = source.Unit.HP;
+        source.Unit.HP = Math.Min(source.Unit.Max_HP, source.Unit.HP + item.HealAmount);
+        Message?.Invoke($"{source.Name} 使用 {item.DefinitionId}，生命 {before}→{source.Unit.HP}。");
     }
 
     internal void NextTestRound()
@@ -281,6 +473,10 @@ public sealed class BattlefieldSession : IDisposable
 
     public IReadOnlyList<Card> GetHand(int playerId)
         => hands.TryGetValue(playerId, out var hand) ? hand : Array.Empty<Card>();
+    public IReadOnlyList<Card> GetDrawPile(int playerId)
+        => drawPiles.TryGetValue(playerId, out var pile) ? pile : Array.Empty<Card>();
+    public IReadOnlyList<Card> GetDiscardPile(int playerId)
+        => discardPiles.TryGetValue(playerId, out var pile) ? pile : Array.Empty<Card>();
 
     public int HandCount(int playerId) => hands.TryGetValue(playerId, out var hand) ? hand.Count : 0;
     public int DrawPileCount(int playerId) => drawPiles.TryGetValue(playerId, out var pile) ? pile.Count : 0;
@@ -523,7 +719,9 @@ public sealed class BattlefieldSession : IDisposable
             case CardSpatialShape.Line:
             {
                 if (!GetCastCandidates(cardId).Contains(target)) { error = "超出卡牌射程或被单位/障碍阻挡。"; return false; }
-                var affected = BattleRangeResolver.ResolveAffectedCells(p.Coord, target, spec);
+                var affected = spec.Shape == CardSpatialShape.Line
+                    ? ResolveLineUntilBlocked(BattleRangeResolver.PickLineDirection(p.Coord, target), Math.Max(1, spec.Length), spec.Penetrates)
+                    : BattleRangeResolver.ResolveAffectedCells(p.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
                 var enemies = new List<BattleUnitPlacement>();
                 var seen = new HashSet<int>();
                 foreach (var cell in affected)
@@ -531,9 +729,11 @@ public sealed class BattlefieldSession : IDisposable
                     var unit = Occupancy.At(cell);
                     if (unit != null && unit.Role == BattlefieldRole.Enemy && seen.Add(unit.UnitId)) enemies.Add(unit);
                 }
-                if (enemies.Count == 0) { error = "该范围内没有敌方单位。"; return false; }
+                // 允许“对空格/无敌人区域”出牌（打空）：卡牌照常消耗，伤害落空，其余效果仍结算。
+                // 目标格只需在射程内即可（无论其中是否存在单位）；无敌人时传入 null 目标并让效果层跳过空目标。
+                BattleUnitPlacement selected = enemies.Count > 0 ? enemies[0] : null;
 
-                return ApplyCardThroughExistingPipeline(p, handCard, enemies[0], enemies, actualCost, out error);
+                return ApplyCardThroughExistingPipeline(p, handCard, selected, enemies, actualCost, out error);
             }
 
             default:

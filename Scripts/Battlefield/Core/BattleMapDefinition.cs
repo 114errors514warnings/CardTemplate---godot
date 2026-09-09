@@ -32,6 +32,13 @@ public sealed class BattleObjectData
     public int AttackRange { get; set; } = 1;
     public int MoveBonus { get; set; }
     public int HealAmount { get; set; }
+    // ── 投掷型道具（需选目标）的空间规格 ──
+    public ItemSpatialShape SpatialShape { get; set; } = ItemSpatialShape.None;
+    public int ItemMaxRange { get; set; } = 1;
+    public int ItemRadius { get; set; } = 1;
+    public int ItemLength { get; set; } = 1;
+    public string ItemTrapId { get; set; } = "";
+    public int DamageAmount { get; set; }
 }
 
 public sealed class BattleMapDefinition
