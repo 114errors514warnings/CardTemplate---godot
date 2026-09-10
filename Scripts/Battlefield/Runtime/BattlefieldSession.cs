@@ -51,7 +51,10 @@ public sealed partial class BattlefieldSession : IDisposable
         public GroundObject LeftHand;
         public GroundObject RightHand;
         public GroundObject[] Items { get; } = new GroundObject[3];
+        public bool AllowEquipmentInItemSlots { get; set; }
     }
+
+    public const int WeaponThrowRange = 3;
 
     public CardSpatialSpec GetSpatialSpec(int cardId)
     {
@@ -77,6 +80,8 @@ public sealed partial class BattlefieldSession : IDisposable
         if (spec.Shape == CardSpatialShape.Trap)
             return BattleRangeResolver.CellsWithinRange(origin, spec.MaxRange).Where(x => x != origin && Board.Cells.TryGetValue(x, out var c) && c.Walkable && c.Trigger == null && c.Items.Count == 0 && Occupancy.At(x) == null).ToArray();
         if (spec.Shape == CardSpatialShape.None) return new[] { origin };
+        if (spec.Shape == CardSpatialShape.Fan)
+            return BattleRangeResolver.Neighbors(origin).Where(Board.Cells.ContainsKey).ToArray();
         if (spec.Shape == CardSpatialShape.Line)
         {
             var cells = new List<AxialHex>();
@@ -93,7 +98,8 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             return cells;
         }
-        return BattleRangeResolver.CellsWithinRange(origin, effectiveRange).Where(x => Board.Cells.ContainsKey(x) && HasClearTrace(origin, x, spec.Penetrates)).ToArray();
+        return BattleRangeResolver.CellsWithinRange(origin, effectiveRange)
+            .Where(x => x != origin && Board.Cells.ContainsKey(x) && HasClearTrace(origin, x, spec.Penetrates)).ToArray();
     }
 
     public IReadOnlyCollection<AxialHex> GetAffectedCells(int cardId, AxialHex target)
@@ -177,8 +183,46 @@ public sealed partial class BattlefieldSession : IDisposable
         get
         {
             GroundObject equipment = SelectedHand == HandSlot.Left ? SelectedLoadout.LeftHand : SelectedLoadout.RightHand;
-            return equipment?.Kind == GroundObjectKind.Equipment ? equipment.AttackRange : 1;
+            return equipment?.Kind == GroundObjectKind.Equipment ? BattleWeaponCatalog.Resolve(equipment).AttackRange : 1;
         }
+    }
+
+    public WeaponAttackSpec CurrentWeapon => BattleWeaponCatalog.Resolve(
+        SelectedHand == HandSlot.Left ? SelectedLoadout.LeftHand : SelectedLoadout.RightHand);
+
+    /// <summary>Normal attacks are free. The selected hand determines its weapon specification.</summary>
+    public bool TryPerformDefaultAttack(AxialHex target, out string error)
+    {
+        error = "";
+        if (Phase != BattlePhase.Player || IsFinished) { error = "当前不是玩家行动阶段。"; return false; }
+        var source = Selected;
+        var spec = CurrentWeapon;
+        var cells = BattleAttackTraceResolver.Resolve(Board, Occupancy, source.Coord, target, spec);
+        if (cells.Count == 0) { error = "目标不在该武器的合法攻击范围内。"; return false; }
+
+        int hitCount = 0;
+        foreach (AxialHex cell in cells)
+        {
+            if (!Board.Cells.TryGetValue(cell, out var data)) break;
+            var victim = Occupancy.At(cell);
+            if (data.Kind == BattleCellKind.Obstacle || data.BlocksSight) break;
+            if (victim == null) continue;
+            int beforeShield = victim.Unit.Shield;
+            int beforeHp = victim.Unit.HP;
+            using (new BattlefieldEffectTargetScope(source.Unit, victim.Unit, new[] { victim.Unit }, Array.Empty<IUnitInstance>(),
+                hpLostThisBattle.GetValueOrDefault(source.UnitId), playerTurn: true, canAttack: CanDefaultAttack))
+            {
+                EffectSystem.ApplyAttack(source.Unit, victim.Unit, spec.DamageBonus == 0 ? Array.Empty<int>() : new[] { spec.DamageBonus });
+            }
+            TrackHpLoss(victim.Unit, beforeHp); hitCount++;
+            Occupancy.SyncDeaths();
+            if (spec.Mode is WeaponAttackMode.AdjacentSingle or WeaponAttackMode.RangedLine or WeaponAttackMode.Thrust) break;
+            // Melee line continues through units only when this strike broke their shield.
+            if (spec.Mode == WeaponAttackMode.MeleeLine && beforeShield > 0 && victim.Unit.Shield > 0) break;
+        }
+        if (hitCount == 0 && spec.Mode != WeaponAttackMode.ThrowSingle) { error = "攻击路径上没有可命中的单位。"; return false; }
+        Message?.Invoke($"{source.Name} 使用 {spec.DefinitionId} 普通攻击，命中 {hitCount} 个单位（不消耗资源）。");
+        EvaluateOutcome(); Notify(); return true;
     }
 
     public void SelectHand(HandSlot hand) { selectedHands[SelectedId] = hand; Notify(); }
@@ -188,6 +232,7 @@ public sealed partial class BattlefieldSession : IDisposable
         error = "";
         GroundObject equipment = Board.Cells[Selected.Coord].Items.FirstOrDefault(x => x.InstanceId == instanceId && x.Kind == GroundObjectKind.Equipment);
         if (equipment == null) { error = "当前格没有该装备。"; return false; }
+        WeaponAttackSpec equippedWeapon = BattleWeaponCatalog.Resolve(equipment);
         var loadout = SelectedLoadout;
         var replaced = new List<GroundObject>();
         if (equipment.HandsRequired == 2)
@@ -210,9 +255,9 @@ public sealed partial class BattlefieldSession : IDisposable
         if (equipment.HandsRequired == 2) loadout.LeftHand = loadout.RightHand = equipment;
         else if (hand == HandSlot.Left) loadout.LeftHand = equipment;
         else loadout.RightHand = equipment;
-        Selected.SetEquipmentMoveModifier(equipment.InstanceId, equipment.MoveBonus);
+        Selected.SetEquipmentMoveModifier(equipment.InstanceId, equippedWeapon.MoveBonus);
         selectedHands[SelectedId] = hand; Notify();
-        Message?.Invoke($"{Selected.Name} 装备 {equipment.DefinitionId}：攻击距离 {equipment.AttackRange}，移动额度 {equipment.MoveBonus:+#;-#;0}。");
+        Message?.Invoke($"{Selected.Name} 装备 {equipment.DefinitionId}：攻击距离 {equippedWeapon.AttackRange}，移动额度 {equippedWeapon.MoveBonus:+#;-#;0}。");
         return true;
     }
 
@@ -225,6 +270,84 @@ public sealed partial class BattlefieldSession : IDisposable
         // 目标栏已有道具时交换：把原栏道具放回当前格。
         if (SelectedLoadout.Items[slot] != null) Board.TryAddObject(Selected.Coord, SelectedLoadout.Items[slot], out _);
         SelectedLoadout.Items[slot] = item; Notify(); return true;
+    }
+
+    public IReadOnlyCollection<AxialHex> GetWeaponThrowCandidates()
+    {
+        var result = new List<AxialHex>(); AxialHex origin = Selected.Coord;
+        foreach (var dir in BattleRangeResolver.SixNeighborOffsets)
+        {
+            for (int i = 1; i <= WeaponThrowRange; i++)
+            {
+                var cell = new AxialHex(origin.Q + dir.Q * i, origin.R + dir.R * i);
+                if (!Board.Cells.TryGetValue(cell, out var data)) break;
+                result.Add(cell);
+                if (data.Kind == BattleCellKind.Obstacle || data.BlocksSight || Occupancy.At(cell) != null) break;
+            }
+        }
+        return result;
+    }
+
+    public bool TryThrowEquippedWeapon(HandSlot hand, AxialHex target, out string error)
+    {
+        GroundObject weapon = hand == HandSlot.Left ? SelectedLoadout.LeftHand : SelectedLoadout.RightHand;
+        if (weapon == null || weapon.Kind != GroundObjectKind.Equipment) { error = "该手位没有可投掷的武器。"; return false; }
+        return TryThrowWeapon(weapon, target, () =>
+        {
+            if (ReferenceEquals(SelectedLoadout.LeftHand, weapon)) SelectedLoadout.LeftHand = null;
+            if (ReferenceEquals(SelectedLoadout.RightHand, weapon)) SelectedLoadout.RightHand = null;
+            Selected.SetEquipmentMoveModifier(weapon.InstanceId, 0);
+        }, out error);
+    }
+
+    public bool TryThrowWeaponFromCurrentCell(string instanceId, AxialHex target, out string error)
+    {
+        GroundObject weapon = Board.Cells[Selected.Coord].Items.FirstOrDefault(x => x.InstanceId == instanceId && x.Kind == GroundObjectKind.Equipment);
+        if (weapon == null) { error = "当前格没有该武器。"; return false; }
+        return TryThrowWeapon(weapon, target, () => Board.TryRemoveObject(Selected.Coord, weapon.InstanceId, out _), out error);
+    }
+
+    public bool TrySwapEquippedHands(out string error)
+    {
+        error = ""; var loadout = SelectedLoadout;
+        if (loadout.LeftHand == null || loadout.RightHand == null) { error = "需要左右手都装备单手装备才能交换。"; return false; }
+        if (ReferenceEquals(loadout.LeftHand, loadout.RightHand) || loadout.LeftHand.HandsRequired == 2 || loadout.RightHand.HandsRequired == 2)
+        { error = "双手装备占满两个手位，不能拆分交换。"; return false; }
+        (loadout.LeftHand, loadout.RightHand) = (loadout.RightHand, loadout.LeftHand); Notify(); return true;
+    }
+
+    public bool TryDropEquippedWeaponOnCurrentCell(HandSlot hand, out string error)
+    {
+        error = ""; var weapon = hand == HandSlot.Left ? SelectedLoadout.LeftHand : SelectedLoadout.RightHand;
+        if (weapon == null) { error = "该手位为空。"; return false; }
+        if (!Board.TryAddObject(Selected.Coord, weapon, out error)) return false;
+        if (ReferenceEquals(SelectedLoadout.LeftHand, weapon)) SelectedLoadout.LeftHand = null;
+        if (ReferenceEquals(SelectedLoadout.RightHand, weapon)) SelectedLoadout.RightHand = null;
+        Selected.SetEquipmentMoveModifier(weapon.InstanceId, 0); Notify(); return true;
+    }
+
+    private bool TryThrowWeapon(GroundObject weapon, AxialHex target, Action removeWeapon, out string error)
+    {
+        error = "";
+        if (Phase != BattlePhase.Player || IsFinished) { error = "当前不是玩家行动阶段。"; return false; }
+        if (!GetWeaponThrowCandidates().Contains(target)) { error = "武器投掷只能瞄准三格内的直线格。"; return false; }
+        var victim = Occupancy.At(target);
+        if (victim != null)
+        {
+            int before = victim.Unit.HP;
+            EffectResult result;
+            using (new BattlefieldEffectTargetScope(Selected.Unit, victim.Unit, new[] { victim.Unit }, Array.Empty<IUnitInstance>(), 0, true, CanDefaultAttack))
+                result = EffectSystem.ApplyAttack(Selected.Unit, victim.Unit, Array.Empty<int>());
+            TrackHpLoss(victim.Unit, before);
+            Message?.Invoke($"武器投掷命中 {victim.Name}：{result.TotalValue} 伤害，护盾吸收 {result.ShieldAbsorbed}，HP {result.TargetHpBefore}→{result.TargetHpAfter}。"
+                + (victim.Role == Selected.Role ? " 警告：命中友方单位。" : ""));
+        }
+        removeWeapon();
+        AxialHex landing = Board.IsWalkable(target) ? target : Selected.Coord;
+        if (!Board.TryAddObject(landing, weapon, out error)) { error = "武器投掷落点无法放置。"; return false; }
+        Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
+        Message?.Invoke($"{Selected.Name} 投掷 {weapon.DefinitionId} 至 ({landing.Q},{landing.R})。");
+        return true;
     }
 
     public bool TryUseItem(int slot, out string error)
@@ -400,17 +523,28 @@ public sealed partial class BattlefieldSession : IDisposable
                 return;
             }
 
+            var hitLogs = new List<string>();
             foreach (var cell in affected)
             {
                 var u = Occupancy.At(cell);
                 if (u == null || u.Presence != BattlefieldPresence.Active) continue;
-                if (u.Role == BattlefieldRole.Enemy && item.DamageAmount > 0)
-                    u.Unit.HP = Math.Max(0, u.Unit.HP - item.DamageAmount);
+                if (item.DamageAmount > 0)
+                {
+                    int shieldBefore = u.Unit.Shield, hpBefore = u.Unit.HP;
+                    int absorbed = Math.Min(shieldBefore, item.DamageAmount);
+                    u.Unit.Shield -= absorbed;
+                    int hpDamage = item.DamageAmount - absorbed;
+                    u.Unit.HP = Math.Max(0, u.Unit.HP - hpDamage);
+                    hitLogs.Add($"命中 {u.Name}：{item.DamageAmount} 伤害，护盾吸收 {absorbed}，HP {hpBefore}→{u.Unit.HP}"
+                        + (u.Role == source.Role ? "（警告：友方伤害）" : ""));
+                }
                 else if (u.Role == BattlefieldRole.Player && item.HealAmount > 0)
                     u.Unit.HP = Math.Min(u.Unit.Max_HP, u.Unit.HP + item.HealAmount);
             }
             foreach (var unit in tracked) TrackHpLoss(unit.Unit, beforeHp[unit.UnitId]);
-            Message?.Invoke($"{source.Name} 使用 {item.DefinitionId}。");
+            Message?.Invoke(hitLogs.Count > 0 ? $"{source.Name} 使用 {item.DefinitionId}：{string.Join("；", hitLogs)}。"
+                : $"{source.Name} 使用 {item.DefinitionId}：未命中单位。"
+            );
             Occupancy.SyncDeaths(); EvaluateOutcome();
             return;
         }
@@ -543,16 +677,22 @@ public sealed partial class BattlefieldSession : IDisposable
             if (IsFinished) break;
             StateSystem.OnTurnStart(enemy.Unit);
             StateDecayProcessor.ProcessDecayAtTiming(enemy.Unit, DecayTrigger.OnTurnStart);
-            var target = NearestAlivePlayer(enemy.Coord);
+            MonsterInstance monster = enemy.Unit as MonsterInstance;
+            EnemyIntentSpec intentSpec = BattleEnemyIntentCatalog.Resolve(monster);
+            EnemyIntentPlan plan = EnemyIntentPlanner.Plan(Board, Occupancy, enemy,
+                PlayerIds.Select(id => Occupancy.Placements[id]),
+                Occupancy.Placements.Values.FirstOrDefault(x => x.Role == BattlefieldRole.Protected && x.Presence == BattlefieldPresence.Active),
+                intentSpec, random);
+            var target = plan?.Target;
             if (target == null) { SetOutcome(BattlePhase.Defeat, "没有存活玩家。"); break; }
             bool needsTargetInRange = (enemy.Unit as MonsterInstance)?.SelectedIntention?.Any(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage) != false;
-            if (needsTargetInRange && AxialHex.Distance(enemy.Coord, target.Coord) > 1)
+            for (int move = 0; needsTargetInRange && move < intentSpec.MoveBudget && !CanEnemyHit(enemy, target, intentSpec); move++)
             {
                 AxialHex? step = BestStepToward(enemy, target);
-                if (step.HasValue) Movement.TryMoveWithoutPlayerCost(enemy.UnitId, step.Value, out _);
+                if (!step.HasValue || !Movement.TryMoveWithoutPlayerCost(enemy.UnitId, step.Value, out _)) break;
             }
             if (enemy.Presence == BattlefieldPresence.Active && target.Presence == BattlefieldPresence.Active &&
-                (!needsTargetInRange || AxialHex.Distance(enemy.Coord, target.Coord) == 1))
+                (!needsTargetInRange || CanEnemyHit(enemy, target, intentSpec)))
             {
                 ExecuteEnemyIntention(enemy, target);
             }
@@ -648,6 +788,10 @@ public sealed partial class BattlefieldSession : IDisposable
         .Where(x => x.Presence == BattlefieldPresence.Active && x.Unit.HP > 0)
         .OrderBy(x => AxialHex.Distance(from, x.Coord)).ThenBy(x => x.UnitId).FirstOrDefault();
 
+    private bool CanEnemyHit(BattleUnitPlacement enemy, BattleUnitPlacement target, EnemyIntentSpec spec) =>
+        BattleAttackTraceResolver.Resolve(Board, Occupancy, enemy.Coord, target.Coord,
+            new WeaponAttackSpec("enemy", spec.AttackRange, 0, spec.AttackMode, 0)).Contains(target.Coord);
+
     private AxialHex? BestStepToward(BattleUnitPlacement enemy, BattleUnitPlacement target)
     {
         var queue = new Queue<AxialHex>();
@@ -717,6 +861,7 @@ public sealed partial class BattlefieldSession : IDisposable
             case CardSpatialShape.Single:
             case CardSpatialShape.Burst:
             case CardSpatialShape.Line:
+            case CardSpatialShape.Fan:
             {
                 if (!GetCastCandidates(cardId).Contains(target)) { error = "超出卡牌射程或被单位/障碍阻挡。"; return false; }
                 var affected = spec.Shape == CardSpatialShape.Line
@@ -732,8 +877,16 @@ public sealed partial class BattlefieldSession : IDisposable
                 // 允许“对空格/无敌人区域”出牌（打空）：卡牌照常消耗，伤害落空，其余效果仍结算。
                 // 目标格只需在射程内即可（无论其中是否存在单位）；无敌人时传入 null 目标并让效果层跳过空目标。
                 BattleUnitPlacement selected = enemies.Count > 0 ? enemies[0] : null;
+                if (enemies.Count == 0 && spec.Dashes)
+                {
+                    FinalizeNoTargetSpatialCard(p, handCard, actualCost);
+                    ExecuteDash(p, target, spec);
+                    return true;
+                }
 
-                return ApplyCardThroughExistingPipeline(p, handCard, selected, enemies, actualCost, out error);
+                bool applied = ApplyCardThroughExistingPipeline(p, handCard, selected, enemies, actualCost, out error);
+                if (applied && spec.Dashes && !IsFinished) ExecuteDash(p, target, spec);
+                return applied;
             }
 
             default:
@@ -772,6 +925,34 @@ public sealed partial class BattlefieldSession : IDisposable
         Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
         Message?.Invoke($"{source.Name} 打出 {card.CardName}，消耗 {cost} 能量。" + (result.EffectResult == null ? "" : " " + result.EffectResult.BuildSummary()));
         return true;
+    }
+
+    private void FinalizeNoTargetSpatialCard(BattleUnitPlacement source, Card card, int cost)
+    {
+        source.Unit.Energy -= cost;
+        cardsPlayedThisTurn[source.UnitId] = cardsPlayedThisTurn.GetValueOrDefault(source.UnitId) + (card.Category == CardCategory.State ? 0 : 1);
+        StateSystem.OnCardPlayed(source.Unit, card);
+        if (card.Category == CardCategory.Attack) StateDecayProcessor.ProcessDecayAtTiming(source.Unit, DecayTrigger.OnAttackPlayed);
+        CompleteCardLifecycle(source, card);
+        Notify();
+        Message?.Invoke($"{source.Name} 打出 {card.CardName}，该方向没有敌人，伤害落空。消耗 {cost} 能量。");
+    }
+
+    private void ExecuteDash(BattleUnitPlacement source, AxialHex target, CardSpatialSpec spec)
+    {
+        AxialHex direction = BattleRangeResolver.PickLineDirection(source.Coord, target);
+        int requested = Math.Min(Math.Max(1, spec.Length), AxialHex.Distance(source.Coord, target));
+        int moved = 0;
+        for (int i = 0; i < requested; i++)
+        {
+            AxialHex next = new AxialHex(source.Coord.Q + direction.Q, source.Coord.R + direction.R);
+            if (!Movement.TryMoveWithoutPlayerCost(source.UnitId, next, out _)) break;
+            moved++;
+            if (source.Presence != BattlefieldPresence.Active || source.Unit.HP <= 0) break;
+        }
+        Message?.Invoke(moved > 0
+            ? $"{source.Name} 沿选定方向突进 {moved} 格。"
+            : $"{source.Name} 的突进被单位、障碍或边界阻挡。" );
     }
 
     private IReadOnlyList<BattleUnitPlacement> ActiveAlliesWithin(BattleUnitPlacement source, int range) =>
@@ -869,7 +1050,9 @@ public sealed partial class BattlefieldSession : IDisposable
     private void OnEntered(BattlefieldEntry entry)
     {
         var p = Occupancy.Placements[entry.UnitId];
-        string text = $"{p.Name} 移动到 ({entry.To.Q},{entry.To.R})，消耗 1 能量、1 次移动。";
+        string text = entry.ConsumesPlayerMove
+            ? $"{p.Name} 移动到 ({entry.To.Q},{entry.To.R})，消耗 1 能量、1 次移动。"
+            : $"{p.Name} 进入 ({entry.To.Q},{entry.To.R})。";
         if (entry.Trigger != null)
         {
             if (entry.Trigger.Kind == GroundObjectKind.Trap)

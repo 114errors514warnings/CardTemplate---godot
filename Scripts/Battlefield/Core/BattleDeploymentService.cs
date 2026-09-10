@@ -52,8 +52,11 @@ public static class BattleDeploymentService
             int serial = 0;
             foreach (var entry in definition.ObjectPlacements)
             {
+                WeaponAttackSpec weapon = entry.Kind == GroundObjectKind.Equipment
+                    ? BattleWeaponCatalog.ForDefinition(entry.DefinitionId) : null;
                 var obj = new GroundObject($"fixed-{++serial}", entry.DefinitionId, entry.Kind, entry.TriggerMode,
-                    entry.HandsRequired, entry.AttackRange, entry.MoveBonus, entry.HealAmount);
+                    weapon?.HandsRequired ?? entry.HandsRequired, weapon?.AttackRange ?? entry.AttackRange,
+                    weapon?.MoveBonus ?? entry.MoveBonus, entry.HealAmount);
                 obj.SpatialShape = entry.SpatialShape;
                 obj.ItemMaxRange = Math.Max(1, entry.ItemMaxRange);
                 obj.ItemRadius = Math.Max(1, entry.ItemRadius);

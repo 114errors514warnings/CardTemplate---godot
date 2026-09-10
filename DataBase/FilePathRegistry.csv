@@ -7,3 +7,4 @@ Data.Unit.CharacterDefaultDeck,res://DataBase/Unit/Character/CharacterDefaultDec
 Data.Map.DropTable,res://DataBase/Map/DropTable.csv
 Data.Card.CharacterRewardPool,res://DataBase/Card/CharacterRewardPool.csv
 Data.Battlefield.Foundation,res://DataBase/Battlefield/FoundationMap.json
+Data.Equipment.Weapon,res://DataBase/Equipment/Weapon.csv

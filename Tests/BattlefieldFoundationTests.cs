@@ -201,4 +201,51 @@ public class BattlefieldFoundationTests
         f.movement.Entered += entry => Assert.False(f.movement.TryMove(7, new(0, 0), out _));
         Assert.True(f.movement.TryMove(7, new(1, 0), out _)); Assert.Equal(2, f.actor.Unit.Energy);
     }
+
+    [Fact]
+    public void Fan_RangeTwoMatchesApprovedAxialCells()
+    {
+        var cells = BattleRangeResolver.ResolveFanCells(new AxialHex(0, 0), new AxialHex(1, 0), 2);
+        var expected = new[] { new AxialHex(0, 1), new AxialHex(0, 2), new AxialHex(1, 1), new AxialHex(1, 0),
+            new AxialHex(2, 0), new AxialHex(2, -1), new AxialHex(2, -2), new AxialHex(1, -1) };
+        Assert.Equal(expected.OrderBy(x => x.Q).ThenBy(x => x.R), cells.OrderBy(x => x.Q).ThenBy(x => x.R));
+        Assert.DoesNotContain(new AxialHex(0, 0), cells);
+    }
+
+    [Fact]
+    public void WeaponCsv_LoadsEnumDrivenWeaponDefinitions()
+    {
+        var weapons = BattleWeaponCatalog.LoadAll(useCache: false);
+        Assert.Equal(WeaponAttackMode.ThrowSingle, weapons["魔典"].Mode);
+        Assert.Equal(4, weapons["魔典"].AttackRange);
+        Assert.Equal(0, weapons["弓"].DefenseValue);
+        Assert.Equal(1, weapons["行军短剑"].MoveBonus);
+    }
+
+    [Fact]
+    public void WeaponTrace_ThrowBypassesMiddleButRangedLineStopsAtFirstUnit()
+    {
+        var cells = new[] { new BattleCell(new(0, 0)), new BattleCell(new(1, 0)), new BattleCell(new(2, 0)), new BattleCell(new(3, 0)) };
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var blocker = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 91, HP = 10 }, "blocker", BattlefieldRole.Player, 0);
+        Assert.True(occupancy.TryPlace(blocker, new(1, 0), out _));
+        var ranged = new WeaponAttackSpec("bow", 3, 2, WeaponAttackMode.RangedLine, 0);
+        var thrown = new WeaponAttackSpec("tome", 3, 2, WeaponAttackMode.ThrowSingle, 0);
+        Assert.Equal(new[] { new AxialHex(1, 0) }, BattleAttackTraceResolver.Resolve(board, occupancy, new(0, 0), new(3, 0), ranged));
+        Assert.Equal(new[] { new AxialHex(3, 0) }, BattleAttackTraceResolver.Resolve(board, occupancy, new(0, 0), new(3, 0), thrown));
+    }
+
+    [Fact]
+    public void EnemyPlanner_ThrowSinglePrefersLowestHealthThenNearest()
+    {
+        var cells = BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 4).Select(x => new BattleCell(x));
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var enemy = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 1, HP = 10 }, "enemy", BattlefieldRole.Enemy, 0);
+        var near = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 2, HP = 3 }, "near", BattlefieldRole.Player, 0);
+        var far = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 3, HP = 3 }, "far", BattlefieldRole.Player, 0);
+        occupancy.TryPlace(enemy, new(0, 0), out _); occupancy.TryPlace(near, new(1, 0), out _); occupancy.TryPlace(far, new(3, 0), out _);
+        var plan = EnemyIntentPlanner.Plan(board, occupancy, enemy, new[] { near, far }, null,
+            new EnemyIntentSpec(WeaponAttackMode.ThrowSingle, 4, 0, EnemyActionOrder.MoveThenAttack, EnemyTargetPolicy.ThrowSingleLowestHealth), new Random(1));
+        Assert.Same(near, plan.Target);
+    }
 }

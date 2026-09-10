@@ -1,0 +1,6 @@
+WeaponId,DefinitionId,HandsRequired,AttackMode,AttackRange,DefenseValue,DamageBonus,MoveBonus,ResourceCost
+10001,行军短剑,1,AdjacentSingle,1,1,0,1,0
+10002,长刀,1,AdjacentSingle,2,1,0,0,0
+10003,长枪,2,MeleeLine,3,1,0,0,0
+10004,魔典,2,ThrowSingle,4,0,0,0,0
+10005,弓,2,RangedLine,5,0,0,0,0

@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace CardSimulator.Battlefield;
 
-public sealed record BattlefieldEntry(long EventId, int UnitId, AxialHex From, AxialHex To, GroundObject Trigger);
+public sealed record BattlefieldEntry(long EventId, int UnitId, AxialHex From, AxialHex To, GroundObject Trigger, bool ConsumesPlayerMove);
 
 public sealed class BattleMovementService
 {
@@ -51,7 +51,7 @@ public sealed class BattleMovementService
             var trigger = board.Cells[destination].Trigger;
             if (trigger?.TriggerMode == EntryTriggerMode.Once)
                 board.TryRemoveObject(destination, trigger.InstanceId, out _);
-            Entered?.Invoke(new BattlefieldEntry(++entrySequence, unitId, from, destination, trigger));
+            Entered?.Invoke(new BattlefieldEntry(++entrySequence, unitId, from, destination, trigger, true));
             occupancy.SyncDeaths();
             return true;
         }
@@ -72,7 +72,7 @@ public sealed class BattleMovementService
             var from = p.Coord; occupancy.CommitMove(p, destination);
             var trigger = board.Cells[destination].Trigger;
             if (trigger?.TriggerMode == EntryTriggerMode.Once) board.TryRemoveObject(destination, trigger.InstanceId, out _);
-            Entered?.Invoke(new BattlefieldEntry(++entrySequence, unitId, from, destination, trigger));
+            Entered?.Invoke(new BattlefieldEntry(++entrySequence, unitId, from, destination, trigger, false));
             occupancy.SyncDeaths(); return true;
         }
         finally { executing = false; }

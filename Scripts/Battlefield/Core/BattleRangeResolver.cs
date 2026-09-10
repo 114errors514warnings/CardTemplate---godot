@@ -90,9 +90,33 @@ public static class BattleRangeResolver
 
 				break;
 			}
+
+			case CardSpatialShape.Fan:
+			{
+				AxialHex dir = PickLineDirection(origin, target);
+				foreach (AxialHex cell in ResolveFanCells(origin, dir, Math.Max(1, spec.MaxRange))) affected.Add(cell);
+				break;
+			}
 		}
 
 		return affected;
+	}
+
+	/// <summary>Two 120-degree boundary fan: O + a*left + b*right, excluding O.</summary>
+	public static HashSet<AxialHex> ResolveFanCells(AxialHex origin, AxialHex direction, int range)
+	{
+		var result = new HashSet<AxialHex>();
+		int index = IndexOfDirection(direction);
+		if (index < 0 || range <= 0) return result;
+		AxialHex left = SixNeighborOffsets[(index + 1) % SixNeighborOffsets.Length];
+		AxialHex right = SixNeighborOffsets[(index + SixNeighborOffsets.Length - 1) % SixNeighborOffsets.Length];
+		for (int a = 0; a <= range; a++)
+		for (int b = 0; b <= range; b++)
+		{
+			if (a == 0 && b == 0) continue;
+			result.Add(new AxialHex(origin.Q + a * left.Q + b * right.Q, origin.R + a * left.R + b * right.R));
+		}
+		return result;
 	}
 
 	/// <summary>从 6 个邻向中选与 (target-origin) 最接近的方向。</summary>
@@ -100,11 +124,24 @@ public static class BattleRangeResolver
 	{
 		int dq = target.Q - origin.Q;
 		int dr = target.R - origin.R;
+		if (dq == 0 && dr == 0)
+		{
+			return SixNeighborOffsets[0];
+		}
+
+		// 轴向 q/r 不是正交二维坐标。必须在实际 pointy-top 六边形中心坐标中比较夹角，
+		// 否则鼠标指向屏幕纵向两组邻格时会被错误归到斜向格。
+		double targetX = Math.Sqrt(3d) * (dq + dr * 0.5d);
+		double targetY = 1.5d * dr;
+		double targetLength = Math.Sqrt(targetX * targetX + targetY * targetY);
 		AxialHex best = SixNeighborOffsets[0];
 		double bestDot = double.MinValue;
 		foreach (AxialHex dir in SixNeighborOffsets)
 		{
-			double dot = dir.Q * dq + dir.R * dr;
+			double directionX = Math.Sqrt(3d) * (dir.Q + dir.R * 0.5d);
+			double directionY = 1.5d * dir.R;
+			double directionLength = Math.Sqrt(directionX * directionX + directionY * directionY);
+			double dot = (directionX * targetX + directionY * targetY) / (directionLength * targetLength);
 			if (dot > bestDot)
 			{
 				bestDot = dot;

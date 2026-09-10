@@ -64,6 +64,42 @@ public class WarriorCardSpatialTests
     }
 
     [Fact]
+    public void ParseFields_ParsesFanCard()
+    {
+        string[] fields = "11001002,横扫,Attack,2,Damage,扇形伤害,2;1,,,Fan,Range=1,".Split(',');
+        CardSpatialSpec spec = CardSpatialSpec.ParseFields(fields);
+        Assert.Equal(CardSpatialShape.Fan, spec.Shape);
+        Assert.Equal(1, spec.MaxRange);
+    }
+
+    [Fact]
+    public void Fan_AffectsOnlySelectedDirectionAndItsTwoAdjacentNeighbors()
+    {
+        var spec = new CardSpatialSpec { CardId = 11001002, Shape = CardSpatialShape.Fan, MaxRange = 1 };
+        HashSet<AxialHex> affected = BattleRangeResolver.ResolveAffectedCells(new AxialHex(0, 0), new AxialHex(0, 1), spec);
+        Assert.Equal(3, affected.Count);
+        Assert.Contains(new AxialHex(0, 1), affected);
+        Assert.Contains(new AxialHex(1, 0), affected);
+        Assert.Contains(new AxialHex(-1, 1), affected);
+        Assert.DoesNotContain(new AxialHex(0, 0), affected);
+        Assert.DoesNotContain(new AxialHex(0, -1), affected);
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(1, -1)]
+    [InlineData(0, -1)]
+    [InlineData(-1, 0)]
+    [InlineData(-1, 1)]
+    [InlineData(0, 1)]
+    public void PickLineDirection_ResolvesEveryAxialNeighborIncludingVerticalScreenDirections(int q, int r)
+    {
+        AxialHex direction = new AxialHex(q, r);
+        Assert.Equal(direction, BattleRangeResolver.PickLineDirection(new AxialHex(0, 0), direction));
+        Assert.Equal(direction, BattleRangeResolver.PickLineDirection(new AxialHex(0, 0), new AxialHex(q * 3, r * 3)));
+    }
+
+    [Fact]
     public void SelfMoveAndTrap_ReturnSingleTargetForAffected()
     {
         var self = new CardSpatialSpec { CardId = 21001004, Shape = CardSpatialShape.SelfMove, MaxRange = 2 };

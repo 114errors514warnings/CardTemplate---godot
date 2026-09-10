@@ -34,8 +34,13 @@ public partial class HexBattleScene : Control
     private bool victoryShown;
     private Control resultShade;
     private Label resultTitle;
-    private Button leftHandButton;
-    private Button rightHandButton;
+    private Control friendlyWarningShade;
+    private Label friendlyWarningText;
+    private Action pendingFriendlyHit;
+    private Control leftHandButton;
+    private Control rightHandButton;
+    private int draggedEquipmentHand = -1;
+    private Control draggedItemOrigin;
 
     // ── 出牌拖拽状态 ──
     private Card draggedCard;
@@ -175,7 +180,7 @@ public partial class HexBattleScene : Control
         AddChild(leftPanel);
         var leftBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; leftBox.AddThemeConstantOverride("separation", 6); leftPanel.AddChild(leftBox);
         leftBox.AddChild(Label("左手", 15, new Color("e8d9a0")));
-        leftHandButton = AddSlotButton(BattlefieldSession.HandSlot.Left); leftBox.AddChild(leftHandButton);
+        leftHandButton = MakeEquipmentSlot(); leftBox.AddChild(leftHandButton);
 
         // ── 底部：右手装备（右下）──
         var rightPanel = MakePanel();
@@ -183,7 +188,7 @@ public partial class HexBattleScene : Control
         AddChild(rightPanel);
         var rightBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; rightBox.AddThemeConstantOverride("separation", 6); rightPanel.AddChild(rightBox);
         rightBox.AddChild(Label("右手", 15, new Color("e8d9a0")));
-        rightHandButton = AddSlotButton(BattlefieldSession.HandSlot.Right); rightBox.AddChild(rightHandButton);
+        rightHandButton = MakeEquipmentSlot(); rightBox.AddChild(rightHandButton);
 
         // ── 底部：能量 / 牌堆（手牌左侧）──
         var resPanel = MakePanel();
@@ -205,9 +210,8 @@ public partial class HexBattleScene : Control
 
         // ── 底部中央：角色 Tab + 手牌卡面 ──
         var handPanel = new VBoxContainer(); handPanel.AddThemeConstantOverride("separation", 6);
-        // 手牌与左右装备、操作列同处底部带状区域，不侵占中部战场。
-        // 适当缩短手牌区（右边界 0.84→0.72），为右侧“结束回合/移动”按钮腾出空间。
-        Place(handPanel, 0.23f, 0.65f, 0.72f, 0.89f);
+        // 顶边固定，底板向下延伸覆盖底部地图；卡面在底板可用高度中居中。
+        Place(handPanel, 0.23f, 0.69f, 0.72f, 0.99f);
         AddChild(handPanel);
         var tabRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; tabRow.AddThemeConstantOverride("separation", 6); handPanel.AddChild(tabRow);
         for (int i = 0; i < 3; i++)
@@ -292,6 +296,16 @@ public partial class HexBattleScene : Control
         resultTitle = new Label { HorizontalAlignment = HorizontalAlignment.Center }; resultTitle.AddThemeFontSizeOverride("font_size", 34); resultBox.AddChild(resultTitle);
         AddButton(resultBox, "重新开始本场", () => GetTree().ReloadCurrentScene());
         AddButton(resultBox, "返回主菜单", ReturnToMenu);
+        friendlyWarningShade = new ColorRect { Color = new Color(0, 0, 0, .72f), Visible = false, ZIndex = 50 };
+        friendlyWarningShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(friendlyWarningShade);
+        var warningCenter = new CenterContainer(); warningCenter.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); friendlyWarningShade.AddChild(warningCenter);
+        var warningPanel = MakePanel(); warningPanel.CustomMinimumSize = new Vector2(420, 210); warningCenter.AddChild(warningPanel);
+        var warningBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; warningBox.AddThemeConstantOverride("separation", 16); warningPanel.AddChild(warningBox);
+        warningBox.AddChild(Label("友方伤害警告", 24, new Color("ffb36b")));
+        friendlyWarningText = Label("", 15, Colors.White); friendlyWarningText.AutowrapMode = TextServer.AutowrapMode.WordSmart; warningBox.AddChild(friendlyWarningText);
+        var warningButtons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; warningButtons.AddThemeConstantOverride("separation", 18); warningBox.AddChild(warningButtons);
+        AddButton(warningButtons, "确认命中", () => { var action = pendingFriendlyHit; CloseFriendlyWarning(); action?.Invoke(); });
+        AddButton(warningButtons, "取消", () => { CloseFriendlyWarning(); CancelItemDrag(); });
         // ── 牌堆弹窗 ──
         var pileShade = new ColorRect { Color = new Color(0, 0, 0, .55f), Visible = false, ZIndex = 35, ProcessMode = ProcessModeEnum.Always };
         pileShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(pileShade);
@@ -309,11 +323,11 @@ public partial class HexBattleScene : Control
 
     }
 
-    private Button AddSlotButton(BattlefieldSession.HandSlot hand)
+    private static Control MakeEquipmentSlot()
     {
-        var button = new Button { Text = "空", CustomMinimumSize = new Vector2(120, 108), SizeFlagsVertical = SizeFlags.ExpandFill };
-        button.Pressed += () => HandleHand(hand);
-        return button;
+        var slot = new PanelContainer { CustomMinimumSize = new Vector2(120, 108), SizeFlagsVertical = SizeFlags.ExpandFill, ClipContents = true };
+        slot.AddThemeStyleboxOverride("panel", WellBox(new Color(0.08f, 0.11f, 0.15f), new Color(0.32f, 0.38f, 0.46f), 1, 8));
+        return slot;
     }
     private static PanelContainer MakePanel()
     {
@@ -471,8 +485,8 @@ public partial class HexBattleScene : Control
         }
         RefreshItems();
         var loadout = Session.SelectedLoadout;
-        leftHandButton.Text = FormatHand(loadout.LeftHand, Session.SelectedHand == BattlefieldSession.HandSlot.Left);
-        rightHandButton.Text = FormatHand(loadout.RightHand, Session.SelectedHand == BattlefieldSession.HandSlot.Right);
+        RefreshHandEquipmentPrefab(leftHandButton, loadout.LeftHand, Session.SelectedHand == BattlefieldSession.HandSlot.Left);
+        RefreshHandEquipmentPrefab(rightHandButton, loadout.RightHand, Session.SelectedHand == BattlefieldSession.HandSlot.Right);
         moveButton.Disabled = p.RemainingMoves == 0 || p.Unit.Energy < 1 || p.Presence != BattlefieldPresence.Active;
         if (moveButton.Disabled) MapView.SetMoving(false);
         RefreshHand();
@@ -490,6 +504,21 @@ public partial class HexBattleScene : Control
 
     private static string FormatHand(GroundObject equipment, bool selected) =>
         $"{(selected ? "▶ " : "")}{(equipment == null ? "空\n点击选手/拾取" : equipment.DefinitionId + $"\n距离 {equipment.AttackRange}\n移动 {equipment.MoveBonus:+#;-#;0}")}";
+
+    private void RefreshHandEquipmentPrefab(Control host, GroundObject equipment, bool selected)
+    {
+        foreach (Node child in host.GetChildren()) child.QueueFree();
+        if (equipment == null)
+        {
+            host.AddChild(Label("空", 13, new Color("8a9199")));
+            return;
+        }
+        Control card = MakeItemPrefab(equipment);
+        card.CustomMinimumSize = new Vector2(92, 78);
+        itemNodeMap[card.GetInstanceId()] = equipment;
+        host.AddChild(card);
+        card.Position = new Vector2(14, 14);
+    }
 
     private void HandleHand(BattlefieldSession.HandSlot hand)
     {
@@ -573,7 +602,8 @@ public partial class HexBattleScene : Control
             handCardMap[cardNode.GetInstanceId()] = card;
             handRow.AddChild(cardNode);
             // Control 加入父节点后再写位置，避免 Container 的首次布局把绝对定位重置为 (0,0)。
-            cardNode.Position = new Vector2(startX + index * step, 0);
+            float cardY = Math.Max(0f, (handRow.Size.Y - cardHeight) * 0.5f);
+            cardNode.Position = new Vector2(startX + index * step, cardY);
             cardNode.Size = new Vector2(cardWidth, cardHeight);
             cardNode.PivotOffset = new Vector2(cardWidth * 0.5f, cardHeight * 0.5f);
             cardNode.ZIndex = index;
@@ -612,6 +642,14 @@ public partial class HexBattleScene : Control
     }
     // 底部信息栏已移除：所有操作反馈统一打印到 Godot 控制台（Output 面板），便于日志排查。
     private void ShowMessage(string text) => GD.Print($"[战场] {text}");
+    private bool NeedsFriendlyHitWarning(AxialHex target) => Session?.Occupancy.At(target)?.Role == BattlefieldRole.Player;
+    private void ShowFriendlyHitWarning(GroundObject item, AxialHex target, Action confirm)
+    {
+        pendingFriendlyHit = confirm;
+        friendlyWarningText.Text = $"{item.DefinitionId} 将命中友方单位。\n确认继续造成伤害吗？";
+        friendlyWarningShade.Visible = true;
+    }
+    private void CloseFriendlyWarning() { pendingFriendlyHit = null; friendlyWarningShade.Visible = false; }
     private void ShowTooltip(string text, Vector2 screenPosition)
     {
         tooltip.Visible = text.Length > 0 && !pauseShade.Visible;
@@ -652,6 +690,7 @@ public partial class HexBattleScene : Control
             case CardSpatialShape.Single:
             case CardSpatialShape.Burst:
             case CardSpatialShape.Line:
+            case CardSpatialShape.Fan:
                 foreach (var cell in Session.GetCastCandidates(pendingCardId)) candidates.Add(cell);
                 if (hover.HasValue && candidates.Contains(hover.Value))
                     affected = new HashSet<AxialHex>(Session.GetAffectedCells(pendingCardId, hover.Value));
@@ -868,14 +907,19 @@ public partial class HexBattleScene : Control
     {
         if (curItemHost != null) yield return curItemHost;
         for (int i = 0; i < 3; i++) if (itemSlotHosts[i] != null) yield return itemSlotHosts[i];
+        if (leftHandButton != null) yield return leftHandButton;
+        if (rightHandButton != null) yield return rightHandButton;
     }
 
     private void StartItemDrag(GroundObject item, Control node)
     {
         draggedItem = item;
         draggedItemNode = node;
+        draggedItemOrigin = node.GetParent() as Control;
         draggedItemFromCell = node.GetParent() == curItemHost;
         draggedItemSlot = -1;
+        draggedEquipmentHand = node.GetParent() == leftHandButton ? 0 : node.GetParent() == rightHandButton ? 1 : -1;
+        draggedItemOrigin = node.GetParent() as Control;
         for (int i = 0; i < 3; i++) if (itemSlotHosts[i] != null && node.GetParent() == itemSlotHosts[i]) { draggedItemSlot = i; break; }
         itemDragExited = false;
         if (node.GetParent() != null) node.GetParent().RemoveChild(node); // Godot 不允许直接 add_child 已有父节点的节点
@@ -896,9 +940,12 @@ public partial class HexBattleScene : Control
         UpdateItemDropHighlights(mouse);
         bool overItemPanels = (curItemPanel != null && curItemPanel.GetGlobalRect().HasPoint(mouse))
             || (carryPanelNode != null && carryPanelNode.GetGlobalRect().HasPoint(mouse));
-        itemDragExited = !overItemPanels;
+        bool overEquipmentSlot = draggedItem.Kind == GroundObjectKind.Equipment &&
+            (leftHandButton.GetGlobalRect().HasPoint(mouse) || rightHandButton.GetGlobalRect().HasPoint(mouse));
+        itemDragExited = !overItemPanels && !overEquipmentSlot;
+        UpdateEquipmentDropHighlights(mouse, draggedItem.Kind == GroundObjectKind.Equipment);
 
-        if (draggedItem.NeedsTarget && !overItemPanels)
+        if ((draggedItem.NeedsTarget || draggedItem.Kind == GroundObjectKind.Equipment) && !overItemPanels && !overEquipmentSlot)
         {
             draggedItemNode.Position = new Vector2(GetViewportRect().Size.X / 2 - draggedItemNode.Size.X / 2, 22);
             UpdateItemPreview(CurrentHoveredCell());
@@ -907,17 +954,20 @@ public partial class HexBattleScene : Control
         else
         {
             draggedItemNode.Position = mouse - draggedItemNode.Size / 2;
-            if (draggedItem.NeedsTarget) { MapView.ClearCastPreview(); HideDragLine(); }
+            if (draggedItem.NeedsTarget || draggedItem.Kind == GroundObjectKind.Equipment) { MapView.ClearCastPreview(); HideDragLine(); }
         }
     }
 
     private void UpdateItemPreview(AxialHex? hover)
     {
         if (Session == null || draggedItem == null) return;
-        var candidates = new HashSet<AxialHex>(Session.GetItemCastCandidates(draggedItem));
+        var candidates = new HashSet<AxialHex>(draggedItem.Kind == GroundObjectKind.Equipment
+            ? Session.GetWeaponThrowCandidates() : Session.GetItemCastCandidates(draggedItem));
         var affected = new HashSet<AxialHex>();
         if (hover.HasValue && candidates.Contains(hover.Value))
-            affected = new HashSet<AxialHex>(Session.GetItemAffectedCells(draggedItem, hover.Value));
+            affected = draggedItem.Kind == GroundObjectKind.Equipment
+                ? new HashSet<AxialHex> { hover.Value }
+                : new HashSet<AxialHex>(Session.GetItemAffectedCells(draggedItem, hover.Value));
         MapView.SetCastPreview(candidates, affected, Session.Selected.Coord, hover);
     }
 
@@ -926,7 +976,8 @@ public partial class HexBattleScene : Control
         if (dragLine == null || draggedItemNode == null) return;
         Vector2 cardCenter = draggedItemNode.Position + draggedItemNode.Size / 2;
         Vector2 mouse = GetGlobalMousePosition();
-        bool valid = CurrentHoveredCell() is AxialHex h && Session.IsValidItemTarget(draggedItem, h);
+        bool valid = CurrentHoveredCell() is AxialHex h && (draggedItem.Kind == GroundObjectKind.Equipment
+            ? Session.GetWeaponThrowCandidates().Contains(h) : Session.IsValidItemTarget(draggedItem, h));
         dragLine.Points = new Vector2[] { cardCenter, mouse };
         dragLine.DefaultColor = valid ? new Color(1f, 0.42f, 0.18f) : new Color(0.62f, 0.66f, 0.72f, 0.7f);
         dragLine.Visible = true;
@@ -966,12 +1017,68 @@ public partial class HexBattleScene : Control
         }
         if (curItemPanel != null && curItemDefaultBox != null)
             curItemPanel.AddThemeStyleboxOverride("panel", curItemDefaultBox);
+        UpdateEquipmentDropHighlights(Vector2.Zero, false);
+    }
+
+    private void UpdateEquipmentDropHighlights(Vector2 mouse, bool active)
+    {
+        if (leftHandButton == null || rightHandButton == null) return;
+        bool left = active && leftHandButton.GetGlobalRect().HasPoint(mouse);
+        bool right = active && rightHandButton.GetGlobalRect().HasPoint(mouse);
+        leftHandButton.AddThemeStyleboxOverride("panel", WellBox(
+            left ? new Color(0.21f, 0.29f, 0.35f) : new Color(0.08f, 0.11f, 0.15f),
+            left ? new Color(0.95f, 0.83f, 0.4f) : new Color(0.32f, 0.38f, 0.46f), left ? 2 : 1, 8));
+        rightHandButton.AddThemeStyleboxOverride("panel", WellBox(
+            right ? new Color(0.21f, 0.29f, 0.35f) : new Color(0.08f, 0.11f, 0.15f),
+            right ? new Color(0.95f, 0.83f, 0.4f) : new Color(0.32f, 0.38f, 0.46f), right ? 2 : 1, 8));
     }
 
     private void FinishItemDrag()
     {
         if (draggedItem == null) return;
         Vector2 mouse = GetGlobalMousePosition();
+
+        if (draggedEquipmentHand >= 0)
+        {
+            var sourceHand = draggedEquipmentHand == 0 ? BattlefieldSession.HandSlot.Left : BattlefieldSession.HandSlot.Right;
+            bool overOther = (draggedEquipmentHand == 0 ? rightHandButton : leftHandButton).GetGlobalRect().HasPoint(mouse);
+            if (overOther)
+            {
+                if (Session.TrySwapEquippedHands(out string swapError)) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(swapError); }
+                return;
+            }
+            if (curItemPanel.GetGlobalRect().HasPoint(mouse))
+            {
+                if (Session.TryDropEquippedWeaponOnCurrentCell(sourceHand, out string dropError)) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(dropError); }
+                return;
+            }
+            AxialHex? throwTarget = CurrentHoveredCell(); string throwError = "";
+            if (throwTarget.HasValue && NeedsFriendlyHitWarning(throwTarget.Value))
+            { ShowFriendlyHitWarning(draggedItem, throwTarget.Value, () => { if (Session.TryThrowEquippedWeapon(sourceHand, throwTarget.Value, out string e)) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(e); } }); return; }
+            if (!throwTarget.HasValue || !Session.TryThrowEquippedWeapon(sourceHand, throwTarget.Value, out throwError))
+            { CancelItemDrag(); ShowMessage(throwTarget.HasValue ? throwError : "未选中武器投掷目标，已取消。"); }
+            else CleanupItemDrag();
+            return;
+        }
+
+        if (draggedItem.Kind == GroundObjectKind.Equipment && draggedItemFromCell)
+        {
+            if (leftHandButton.GetGlobalRect().HasPoint(mouse) || rightHandButton.GetGlobalRect().HasPoint(mouse))
+            {
+                var hand = leftHandButton.GetGlobalRect().HasPoint(mouse) ? BattlefieldSession.HandSlot.Left : BattlefieldSession.HandSlot.Right;
+                if (Session.TryEquipFromCurrentCell(draggedItem.InstanceId, hand, out string equipError)) CleanupItemDrag();
+                else { CancelItemDrag(); ShowMessage(equipError); }
+                return;
+            }
+            AxialHex? throwTarget = CurrentHoveredCell();
+            string throwError = "";
+            if (throwTarget.HasValue && NeedsFriendlyHitWarning(throwTarget.Value))
+            { ShowFriendlyHitWarning(draggedItem, throwTarget.Value, () => { if (Session.TryThrowWeaponFromCurrentCell(draggedItem.InstanceId, throwTarget.Value, out string e)) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(e); } }); return; }
+            if (!throwTarget.HasValue || !Session.TryThrowWeaponFromCurrentCell(draggedItem.InstanceId, throwTarget.Value, out throwError))
+            { CancelItemDrag(); ShowMessage(throwTarget.HasValue ? throwError : "未选中武器投掷目标，已取消。"); }
+            else CleanupItemDrag();
+            return;
+        }
 
         int slot = ItemSlotUnder(mouse);
         bool sameSlot = !draggedItemFromCell && slot == draggedItemSlot;
@@ -1001,6 +1108,8 @@ public partial class HexBattleScene : Control
             AxialHex? hover = CurrentHoveredCell();
             bool valid = hover.HasValue && Session.IsValidItemTarget(draggedItem, hover.Value);
             if (!valid) { CancelItemDrag(); ShowMessage("未选中有效目标，已取消使用。"); return; }
+            if (NeedsFriendlyHitWarning(hover.Value) && draggedItem.DamageAmount > 0)
+            { ShowFriendlyHitWarning(draggedItem, hover.Value, () => { bool ok = draggedItemFromCell ? Session.TryUseItemFromCurrentCell(draggedItem.InstanceId, hover.Value, out string e) : Session.TryUseItemAt(draggedItemSlot, hover.Value, out e); if (ok) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(e); } }); return; }
             string err = "";
             bool ok = draggedItemFromCell
                 ? Session.TryUseItemFromCurrentCell(draggedItem.InstanceId, hover.Value, out err)
@@ -1024,6 +1133,8 @@ public partial class HexBattleScene : Control
         itemDragExited = false;
         draggedItemFromCell = false;
         draggedItemSlot = -1;
+        draggedEquipmentHand = -1;
+        draggedItemOrigin = null;
         ClearItemDropHighlights();
         HideDragLine();
         MapView.ClearCastPreview();
@@ -1033,8 +1144,8 @@ public partial class HexBattleScene : Control
     {
         if (draggedItemNode != null)
         {
-            Control host = draggedItemFromCell ? (Control)curItemHost
-                : (draggedItemSlot >= 0 && draggedItemSlot < 3 ? (Control)itemSlotHosts[draggedItemSlot] : null);
+            Control host = draggedItemOrigin ?? (draggedItemFromCell ? (Control)curItemHost
+                : (draggedItemSlot >= 0 && draggedItemSlot < 3 ? (Control)itemSlotHosts[draggedItemSlot] : null));
             if (host != null)
             {
                 if (draggedItemNode.GetParent() == dragLayer) dragLayer.RemoveChild(draggedItemNode);
@@ -1047,6 +1158,8 @@ public partial class HexBattleScene : Control
         itemDragExited = false;
         draggedItemFromCell = false;
         draggedItemSlot = -1;
+        draggedEquipmentHand = -1;
+        draggedItemOrigin = null;
         ClearItemDropHighlights();
         HideDragLine();
         MapView.ClearCastPreview();
@@ -1078,7 +1191,7 @@ public partial class HexBattleScene : Control
     {
         var panel = new PanelContainer
         {
-            CustomMinimumSize = new Vector2(54, 58),
+            CustomMinimumSize = item.Kind == GroundObjectKind.Equipment ? new Vector2(72, 76) : new Vector2(54, 58),
             SizeFlagsHorizontal = SizeFlags.Fill,
             MouseFilter = MouseFilterEnum.Stop,
         };
@@ -1108,7 +1221,7 @@ public partial class HexBattleScene : Control
         var items = Session.Board.Cells[Session.Selected.Coord].Items;
         foreach (GroundObject item in items)
         {
-            if (item.Kind != GroundObjectKind.Item) continue;
+            if (item.Kind is not (GroundObjectKind.Item or GroundObjectKind.Equipment)) continue;
             Control node = MakeItemPrefab(item);
             itemNodeMap[node.GetInstanceId()] = item;
             curItemHost.AddChild(node);

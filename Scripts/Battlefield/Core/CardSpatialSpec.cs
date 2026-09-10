@@ -13,6 +13,7 @@ public enum CardSpatialShape
 	Line = 3,    // 从施法方向延伸的直线
 	SelfMove = 4, // 卡牌移动：沿所选合法路线移动
 	Trap = 5,    // 在目标格放置陷阱（格上触发物件）
+	Fan = 6,     // 以施法者为中心，选定方向及左右各一格的近距扇形
 }
 
 public sealed class CardSpatialSpec
@@ -25,6 +26,7 @@ public sealed class CardSpatialSpec
 	public string TrapId = string.Empty;
 	public bool Penetrates;
 	public bool Explodes;
+	public bool Dashes;
 
 	public bool HasSpatial => Shape != CardSpatialShape.None;
 
@@ -52,6 +54,7 @@ public sealed class CardSpatialSpec
 				else if (TryArg(t, "Length", out int length)) spec.Length = Math.Max(1, length);
 				else if (t.Equals("Pierce", StringComparison.OrdinalIgnoreCase) || t.Equals("Penetrates", StringComparison.OrdinalIgnoreCase)) spec.Penetrates = true;
 				else if (t.Equals("Explode", StringComparison.OrdinalIgnoreCase) || t.Equals("Explodes", StringComparison.OrdinalIgnoreCase)) spec.Explodes = true;
+				else if (t.Equals("Dash", StringComparison.OrdinalIgnoreCase) || t.Equals("Dashes", StringComparison.OrdinalIgnoreCase)) spec.Dashes = true;
 			}
 		}
 
