@@ -25,6 +25,7 @@
 | [卡牌参数](卡牌与配置/卡牌参数.md) | CardId 8 位编号、CSV 字段、完整 EffectType / EffectTargetType / StateType 表、CSV 文件组织 |
 | [State 牌 vs Skill 施加 State](卡牌与配置/State牌与Skill施加State.md) | State 牌进入 `StatePile` 生命周期、Skill 牌施加 AddState 直接进弃牌堆、回收机制 |
 | [总体卡牌设计](卡牌与配置/总体卡牌设计.md) | D/C/B/A/S 五级卡牌分级、初始牌组来源 |
+| [六边形战场卡牌设计](../角色设计/六边形战场卡牌设计.md) | 51 张旧牌的新版空间适配草案、距离与范围模板、旧版备份入口；尚未替换运行时配置 |
 
 ## 三、实体与标识
 
