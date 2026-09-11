@@ -93,6 +93,7 @@ public static class BattlefieldSceneSmoke
             var enemyBefore = session.Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active)
                 .ToDictionary(x => x.UnitId, x => x.Coord);
             session.EndCurrentTurn();
+            while (session.Phase == BattlefieldSession.BattlePhase.Monsters && session.ExecuteNextMonsterTurnStep()) { }
             Check(session.Round == 3 && session.Phase == BattlefieldSession.BattlePhase.Player, "monster turn then player round");
             Check(enemyBefore.Any(x => session.Occupancy.Placements[x.Key].Presence != BattlefieldPresence.Active ||
                 session.Occupancy.Placements[x.Key].Coord != x.Value), "monster spatial action");

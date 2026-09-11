@@ -13,6 +13,7 @@ public partial class HexBattleScene : Control
     private Label resources;
     private Label title;
     private Button moveButton;
+    private HBoxContainer moveConfirmRow;
     private readonly Button[] tabs = new Button[3];
     private PanelContainer tooltip;
     private Label tooltipText;
@@ -21,6 +22,10 @@ public partial class HexBattleScene : Control
     private int pendingCardId;
     private AxialHex? lastCastHover;
     private bool movePlanning;
+    private bool moveDragActive;
+    private bool moveAwaitingConfirmation;
+    private bool moveExecuting;
+    private IReadOnlyList<AxialHex> plannedMovePath = Array.Empty<AxialHex>();
     private Control handRow;
     private Label moveInfo;
     private Button drawPileButton;
@@ -89,11 +94,12 @@ public partial class HexBattleScene : Control
             Session.Finished += ShowResult;
             MapView.Bind(Session);
             MapView.HoverDetails += ShowTooltip;
-            MapView.Message += ShowMessage;
-            MapView.LeftClickOverride = OnMapClick;
+            MapView.PointerPressed += OnMovePointerPressed;
+            MapView.PointerDragged += OnMovePointerDragged;
+            MapView.PointerReleased += OnMovePointerReleased;
             RefreshHud();
             SetupDebugPanel();
-            ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后选择相邻格。Esc 取消/暂停。");
+            ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后悬停预览路线，拖拽绘制路线。Esc 取消/暂停。");
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke"))
                 CallDeferred(nameof(RunSmoke));
         }
@@ -116,6 +122,17 @@ public partial class HexBattleScene : Control
         debugPanel.Visible = false;
     }
 
+    private async void RunMonsterQueue()
+    {
+        while (Session != null && Session.Phase == BattlefieldSession.BattlePhase.Monsters && !Session.IsFinished)
+        {
+            bool more = Session.ExecuteNextMonsterTurnStep();
+            while (MapView != null && MapView.HasPendingPresentation)
+                await ToSignal(GetTree().CreateTimer(0.05f), SceneTreeTimer.SignalName.Timeout);
+            if (!more) break;
+        }
+    }
+
     private void BuildUi()
     {
         var background = new ColorRect { Color = new Color("101820"), MouseFilter = MouseFilterEnum.Ignore };
@@ -125,6 +142,16 @@ public partial class HexBattleScene : Control
         MapView = new BattlefieldView();
         MapView.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(MapView);
+
+        // 底部操作区的最底层：既衬托 HUD，也必须截获空白区域的鼠标输入，
+        // 避免手牌/装备/行动按钮之间的空隙把点击穿透到战场地图。
+        var bottomHudBackdrop = new ColorRect
+        {
+            Color = new Color(0.035f, 0.055f, 0.075f, 0.82f),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
+        Place(bottomHudBackdrop, 0f, 0.68f, 1f, 1f);
+        AddChild(bottomHudBackdrop);
 
         // ── 左上：关卡目标 ──
         var goal = MakePanel();
@@ -258,18 +285,21 @@ public partial class HexBattleScene : Control
             CancelPendingCast();
             MapView.SetMoving(false);
             Session.EndCurrentTurn();
+            RunMonsterQueue();
         }).CustomMinimumSize = new Vector2(0, 44);
         moveButton = AddButton(actionCol, "移动（1 能量）", () =>
         {
             if (Session == null) return;
-            movePlanning = !movePlanning;
-            CancelPendingCast();
-            MapView.SetMoving(movePlanning);
-            moveButton.Text = movePlanning ? "取消移动" : "移动（1 能量）";
-            ShowMessage(movePlanning ? "选择一个绿色相邻格：移动一格消耗 1 能量和 1 次。" : "已取消移动。");
+            if (movePlanning) EndMovePlanning(); else BeginMovePlanning();
         });
         moveButton.CustomMinimumSize = new Vector2(0, 44);
         moveButton.SizeFlagsVertical = SizeFlags.ExpandFill;
+        moveConfirmRow = new HBoxContainer { Visible = false, SizeFlagsVertical = SizeFlags.ExpandFill };
+        moveConfirmRow.AddThemeConstantOverride("separation", 8); actionCol.AddChild(moveConfirmRow);
+        Button confirm = AddButton(moveConfirmRow, "确定移动", ConfirmMove);
+        Button cancel = AddButton(moveConfirmRow, "取消移动", () => EndMovePlanning(false));
+        confirm.SizeFlagsHorizontal = SizeFlags.ExpandFill; cancel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        confirm.SizeFlagsVertical = SizeFlags.ExpandFill; cancel.SizeFlagsVertical = SizeFlags.ExpandFill;
 
         // （底部信息栏已移除：ShowMessage 统一走 GD.Print 控制台日志。）
 
@@ -471,7 +501,7 @@ public partial class HexBattleScene : Control
         title.Text = $"{FormatPhase(Session.Phase)} · 回合 {Session.Round}";
         int maxEnergy = Math.Max(p.Unit.Energy, 3);
         resources.Text = $"{p.Name}\n能量 {p.Unit.Energy}/{maxEnergy}";
-        moveInfo.Text = $"移动 {p.RemainingMoves}/{p.EffectiveMovesPerTurn}";
+        moveInfo.Text = $"移动 {p.RemainingMoves}/{p.EffectiveMovesPerTurn} · 每次 {p.EffectiveMoveDistancePerAction} 格";
         for (int i = 0; i < 3; i++)
             energyPips[i].Modulate = i < Math.Min(p.Unit.Energy, 3) ? new Color(0.35f, 0.75f, 0.95f) : new Color(0.25f, 0.3f, 0.4f);
         if (drawPileButton != null) drawPileButton.Text = $"抽牌堆\n{Session.DrawPileCount(p.UnitId)}";
@@ -548,14 +578,101 @@ public partial class HexBattleScene : Control
         ShowMessage(pickError.Length == 0 ? $"已将 {item.DefinitionId} 放入道具栏 {slot + 1}。" : pickError);
     }
 
-    /// <summary>出牌/移动规划待命时吞掉地图左键按下，避免误切人；实际动作由松开/确认按钮统一触发。</summary>
-    private bool OnMapClick(AxialHex coord)
+    private void BeginMovePlanning()
     {
-        if (!movePlanning) return false;
-        bool ok = Session.Movement.TryMove(Session.SelectedId, coord, out string error);
-        ShowMessage(ok ? "移动成功：消耗 1 能量和 1 次移动。" : "移动失败：" + error);
-        movePlanning = false; MapView.SetMoving(false); moveButton.Text = "移动（1 能量）";
-        return true;
+        movePlanning = true; moveDragActive = false; moveAwaitingConfirmation = false;
+        plannedMovePath = Array.Empty<AxialHex>();
+        CancelPendingCast(); MapView.SetMoving(true); MapView.ClearMovePath();
+        moveButton.Visible = true; moveButton.Text = "取消移动";
+        moveConfirmRow.Visible = false;
+        ShowMessage("悬停在一次移动可达格上预览；按住左键拖拽绘制连续路线，松开后确认。 ");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (Session == null || !movePlanning || moveDragActive || moveAwaitingConfirmation || !MapView.HoveredCell.HasValue) return;
+        UpdateMovePreview(MapView.HoveredCell.Value, maximumActions: 1);
+    }
+
+    private void OnMovePointerPressed(AxialHex coord)
+    {
+        if (!movePlanning || moveAwaitingConfirmation || moveExecuting) return;
+        moveDragActive = true;
+        // Preserve the one-action hover preview. If there was no hover frame, seed it once here.
+        if (plannedMovePath.Count == 0) UpdateMovePreview(coord, maximumActions: 1);
+    }
+
+    private void OnMovePointerDragged(AxialHex coord)
+    {
+        if (!movePlanning || !moveDragActive || moveAwaitingConfirmation || moveExecuting) return;
+        TryAppendOrRewindMoveNode(coord);
+    }
+
+    private void OnMovePointerReleased(AxialHex coord)
+    {
+        if (!movePlanning || !moveDragActive || moveAwaitingConfirmation || moveExecuting) return;
+        moveDragActive = false;
+        if (plannedMovePath.Count == 0) return;
+        string validation = Session.Movement.ValidatePath(Session.SelectedId, plannedMovePath);
+        if (validation.Length > 0) { ShowMessage("路线无效：" + validation); return; }
+        moveAwaitingConfirmation = true;
+        // Keep map selection suppressed until the player confirms or cancels this exact route.
+        MapView.SetMoving(true); moveButton.Visible = false; moveConfirmRow.Visible = true;
+        int actions = (plannedMovePath.Count + Session.Selected.EffectiveMoveDistancePerAction - 1) / Session.Selected.EffectiveMoveDistancePerAction;
+        ShowMessage($"路线已确认：{plannedMovePath.Count} 格，预计消耗 {actions} 次移动与 {actions} 能量。请确定或取消。");
+    }
+
+    private void UpdateMovePreview(AxialHex destination, int? maximumActions = null)
+    {
+        var path = Session.Movement.FindPath(Session.SelectedId, destination, maximumActions);
+        if (path.SequenceEqual(plannedMovePath)) return;
+        plannedMovePath = path;
+        MapView.SetMovePath(path);
+    }
+
+    /// <summary>
+    /// Dragging owns its route: a legal adjacent cell is appended and remains in the route.
+    /// The only deletion gesture is stepping back from the tail to its immediate predecessor.
+    /// </summary>
+    private void TryAppendOrRewindMoveNode(AxialHex coord)
+    {
+        if (plannedMovePath.Count == 0)
+        {
+            UpdateMovePreview(coord, maximumActions: 1);
+            return;
+        }
+        AxialHex tail = plannedMovePath[^1];
+        if (coord == tail) return;
+        // Reverse from the first route node to the actor's current cell: remove that first node too.
+        if (plannedMovePath.Count == 1 && coord == Session.Selected.Coord)
+        {
+            plannedMovePath = Array.Empty<AxialHex>();
+            MapView.ClearMovePath();
+            return;
+        }
+        if (plannedMovePath.Count >= 2 && coord == plannedMovePath[^2])
+        {
+            plannedMovePath = plannedMovePath.Take(plannedMovePath.Count - 1).ToArray();
+            MapView.SetMovePath(plannedMovePath);
+            return;
+        }
+        // Do not replace or optimize the existing path: only append a newly crossed neighbor.
+        if (AxialHex.Distance(tail, coord) != 1 || plannedMovePath.Contains(coord)) return;
+        var candidate = plannedMovePath.Concat(new[] { coord }).ToArray();
+        if (Session.Movement.ValidatePath(Session.SelectedId, candidate).Length != 0) return;
+        plannedMovePath = candidate;
+        MapView.SetMovePath(plannedMovePath);
+    }
+
+    private async void ConfirmMove()
+    {
+        if (!moveAwaitingConfirmation || moveExecuting || plannedMovePath.Count == 0) return;
+        moveExecuting = true; moveConfirmRow.Visible = false;
+        bool moved = Session.Movement.TryMovePath(Session.SelectedId, plannedMovePath, out string error);
+        while (MapView.HasPendingPresentation) await ToSignal(GetTree().CreateTimer(0.05f), SceneTreeTimer.SignalName.Timeout);
+        moveExecuting = false;
+        ShowMessage(moved ? "移动完成。" : "移动中断：" + error);
+        EndMovePlanning(false);
     }
 
     private void RefreshHand()
@@ -1247,10 +1364,12 @@ public partial class HexBattleScene : Control
 
     private void EndMovePlanning(bool showCancelMessage = true)
     {
-        movePlanning = false;
+        movePlanning = false; moveDragActive = false; moveAwaitingConfirmation = false;
+        plannedMovePath = Array.Empty<AxialHex>();
         MapView.SetMoving(false);
         MapView.ClearMovePath();
-        if (moveButton != null) moveButton.Text = "移动（1 能量）";
+        if (moveButton != null) { moveButton.Text = "移动（1 能量）"; moveButton.Visible = true; }
+        if (moveConfirmRow != null) moveConfirmRow.Visible = false;
         if (showCancelMessage) ShowMessage("已取消移动。");
     }
 
@@ -1284,7 +1403,10 @@ public partial class HexBattleScene : Control
         if (Session == null) return;
         Session.Changed -= RefreshHud; Session.Message -= ShowMessage;
         Session.Finished -= ShowResult;
-        MapView.HoverDetails -= ShowTooltip; MapView.Message -= ShowMessage;
+        MapView.HoverDetails -= ShowTooltip;
+        MapView.PointerPressed -= OnMovePointerPressed;
+        MapView.PointerDragged -= OnMovePointerDragged;
+        MapView.PointerReleased -= OnMovePointerReleased;
         Session.Dispose();
     }
 

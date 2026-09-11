@@ -203,6 +203,26 @@ public class BattlefieldFoundationTests
     }
 
     [Fact]
+    public void Movement_PathUsesOneActionPerConfiguredDistanceAndEmitsEveryEnteredCell()
+    {
+        var board = new BattleBoard(new[] { new BattleCell(new(0, 0)), new BattleCell(new(1, 0)), new BattleCell(new(2, 0)) });
+        var occupancy = new BattleOccupancyService(board);
+        var actor = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 7, HP = 10, Energy = 3 }, "player", BattlefieldRole.Player, 2, moveDistancePerAction: 2);
+        Assert.True(occupancy.TryPlace(actor, new(0, 0), out _));
+        var movement = new BattleMovementService(board, occupancy);
+        var path = movement.FindPath(7, new AxialHex(2, 0));
+        Assert.Equal(new[] { new AxialHex(1, 0), new AxialHex(2, 0) }, path);
+        var entries = new List<BattlefieldEntry>(); movement.Entered += entries.Add;
+        Assert.True(movement.TryMovePath(7, path, out _));
+        Assert.Equal(new AxialHex(2, 0), actor.Coord);
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(2, actor.Unit.Energy);
+        Assert.Equal(1, actor.MovesUsedThisTurn);
+        Assert.True(entries[0].ConsumesPlayerMove);
+        Assert.False(entries[1].ConsumesPlayerMove);
+    }
+
+    [Fact]
     public void Fan_RangeTwoMatchesApprovedAxialCells()
     {
         var cells = BattleRangeResolver.ResolveFanCells(new AxialHex(0, 0), new AxialHex(1, 0), 2);

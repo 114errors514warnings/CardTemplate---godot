@@ -4,6 +4,11 @@ using System.Linq;
 
 namespace CardSimulator.Battlefield;
 
+/// <summary>Presentation-only result of one resolved strike. Rules have already applied the result.</summary>
+public sealed record BattlefieldAttackEvent(long EventId, int SourceUnitId, int? TargetUnitId,
+    AxialHex From, AxialHex To, WeaponAttackMode Mode, int Damage, int ShieldAbsorbed, bool Defeated,
+    int TargetHpBefore = -1, int TargetHpAfter = -1, int TargetShieldBefore = -1, int TargetShieldAfter = -1);
+
 /// <summary>Runnable spatial battle session using the existing Card, Effect and State pipelines.</summary>
 public sealed partial class BattlefieldSession : IDisposable
 {
@@ -24,6 +29,9 @@ public sealed partial class BattlefieldSession : IDisposable
     public event Action Changed;
     public event Action<string> Message;
     public event Action<BattlePhase> Finished;
+    public event Action<BattlefieldEntry> UnitEntered;
+    public event Action<BattlefieldAttackEvent> AttackResolved;
+    private long attackEventSequence;
 
     // 空间场景持有独立牌堆，但卡牌效果仍统一调用 Card.Apply / EffectSystem / StateSystem。
     private readonly Dictionary<int, List<Card>> drawPiles = new();
@@ -36,12 +44,26 @@ public sealed partial class BattlefieldSession : IDisposable
     private readonly Dictionary<int, PlayerLoadout> loadouts = new();
     private readonly Dictionary<int, HandSlot> selectedHands = new();
     private PendingHandChoice pendingChoice;
+    private readonly Queue<int> monsterTurnQueue = new();
+    private MonsterActionState activeMonsterAction;
 
     private sealed class PendingHandChoice
     {
         public int PlayerId;
         public Card SourceCard;
         public readonly List<(EffectType Effect, int[] Params)> Operations = new();
+    }
+
+    /// <summary>One monster's action is deliberately advanced one visual beat at a time.</summary>
+    private sealed class MonsterActionState
+    {
+        public BattleUnitPlacement Enemy;
+        public BattleUnitPlacement Target;
+        public EnemyIntentSpec Spec;
+        public int MoveSteps;
+        public int EffectIndex;
+        public int[][] Intention;
+        public bool NeedsTargetInRange;
     }
 
     public bool HasPendingHandChoice => pendingChoice != null;
@@ -190,6 +212,15 @@ public sealed partial class BattlefieldSession : IDisposable
     public WeaponAttackSpec CurrentWeapon => BattleWeaponCatalog.Resolve(
         SelectedHand == HandSlot.Left ? SelectedLoadout.LeftHand : SelectedLoadout.RightHand);
 
+    public IReadOnlyCollection<AxialHex> GetDefaultAttackCandidates()
+    {
+        var source = Selected;
+        return Board.Cells.Keys.Where(cell => BattleAttackTraceResolver.Resolve(Board, Occupancy, source.Coord, cell, CurrentWeapon).Count > 0).ToArray();
+    }
+
+    public IReadOnlyCollection<AxialHex> GetDefaultAttackAffectedCells(AxialHex target) =>
+        BattleAttackTraceResolver.Resolve(Board, Occupancy, Selected.Coord, target, CurrentWeapon).ToArray();
+
     /// <summary>Normal attacks are free. The selected hand determines its weapon specification.</summary>
     public bool TryPerformDefaultAttack(AxialHex target, out string error)
     {
@@ -214,6 +245,10 @@ public sealed partial class BattlefieldSession : IDisposable
             {
                 EffectSystem.ApplyAttack(source.Unit, victim.Unit, spec.DamageBonus == 0 ? Array.Empty<int>() : new[] { spec.DamageBonus });
             }
+            int damage = Math.Max(0, beforeHp - victim.Unit.HP);
+            AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, victim.UnitId,
+                source.Coord, cell, spec.Mode, damage, Math.Max(0, beforeShield - victim.Unit.Shield), victim.Unit.HP <= 0,
+                beforeHp, victim.Unit.HP, beforeShield, victim.Unit.Shield));
             TrackHpLoss(victim.Unit, beforeHp); hitCount++;
             Occupancy.SyncDeaths();
             if (spec.Mode is WeaponAttackMode.AdjacentSingle or WeaponAttackMode.RangedLine or WeaponAttackMode.Thrust) break;
@@ -335,9 +370,14 @@ public sealed partial class BattlefieldSession : IDisposable
         if (victim != null)
         {
             int before = victim.Unit.HP;
+            int shieldBefore = victim.Unit.Shield;
             EffectResult result;
             using (new BattlefieldEffectTargetScope(Selected.Unit, victim.Unit, new[] { victim.Unit }, Array.Empty<IUnitInstance>(), 0, true, CanDefaultAttack))
                 result = EffectSystem.ApplyAttack(Selected.Unit, victim.Unit, Array.Empty<int>());
+            AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, Selected.UnitId, victim.UnitId,
+                Selected.Coord, target, WeaponAttackMode.ThrowSingle, Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
+                Math.Max(0, result.TargetShieldBefore - result.TargetShieldAfter), result.TargetHpAfter <= 0,
+                before, victim.Unit.HP, shieldBefore, victim.Unit.Shield));
             TrackHpLoss(victim.Unit, before);
             Message?.Invoke($"武器投掷命中 {victim.Name}：{result.TotalValue} 伤害，护盾吸收 {result.ShieldAbsorbed}，HP {result.TargetHpBefore}→{result.TargetHpAfter}。"
                 + (victim.Role == Selected.Role ? " 警告：命中友方单位。" : ""));
@@ -665,41 +705,92 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             StateDecayProcessor.ProcessDecayAtTiming(character, DecayTrigger.OnTurnEnd);
         }
-        ExecuteMonsterTurn();
-        if (!IsFinished) StartNextPlayerRound();
+        monsterTurnQueue.Clear();
+        activeMonsterAction = null;
+        foreach (var enemy in Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active).OrderBy(x => x.UnitId))
+            monsterTurnQueue.Enqueue(enemy.UnitId);
+        Message?.Invoke("怪物回合开始。"); Notify();
     }
 
-    private void ExecuteMonsterTurn()
+    public bool ExecuteNextMonsterTurnStep()
     {
-        Message?.Invoke("怪物回合开始。");
-        foreach (var enemy in Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active).OrderBy(x => x.UnitId).ToArray())
+        while (true)
         {
-            if (IsFinished) break;
+            if (IsFinished) return false;
+            if (activeMonsterAction == null)
+            {
+                if (!TryBeginNextMonsterAction())
+                {
+                    if (!IsFinished) { PrepareEnemyIntentions(); StartNextPlayerRound(); }
+                    return false;
+                }
+            }
+
+            MonsterActionState action = activeMonsterAction;
+            if (action.Enemy.Presence != BattlefieldPresence.Active || action.Target.Presence != BattlefieldPresence.Active)
+            {
+                FinishActiveMonsterAction();
+                continue;
+            }
+
+            if (action.NeedsTargetInRange && action.MoveSteps < action.Spec.MoveBudget && !CanEnemyHit(action.Enemy, action.Target, action.Spec))
+            {
+                AxialHex? step = BestStepToward(action.Enemy, action.Target);
+                action.MoveSteps++;
+                if (step.HasValue && Movement.TryMoveWithoutPlayerCost(action.Enemy.UnitId, step.Value, out _)) return true;
+            }
+
+            if (action.NeedsTargetInRange && !CanEnemyHit(action.Enemy, action.Target, action.Spec))
+            {
+                Message?.Invoke($"{action.Enemy.Name} 无法进入攻击范围，本次行动结束。 ");
+                FinishActiveMonsterAction();
+                continue;
+            }
+
+            if (action.EffectIndex < action.Intention.Length)
+            {
+                int[] effect = action.Intention[action.EffectIndex++];
+                ExecuteEnemyIntentionEffect(action.Enemy, action.Target, effect);
+                Occupancy.SyncDeaths(); EvaluateOutcome();
+                return !IsFinished;
+            }
+
+            FinishActiveMonsterAction();
+        }
+    }
+
+    private bool TryBeginNextMonsterAction()
+    {
+        while (monsterTurnQueue.Count > 0)
+        {
+            int nextId = monsterTurnQueue.Dequeue();
+            if (!Occupancy.Placements.TryGetValue(nextId, out var enemy) || enemy.Presence != BattlefieldPresence.Active) continue;
             StateSystem.OnTurnStart(enemy.Unit);
             StateDecayProcessor.ProcessDecayAtTiming(enemy.Unit, DecayTrigger.OnTurnStart);
             MonsterInstance monster = enemy.Unit as MonsterInstance;
-            EnemyIntentSpec intentSpec = BattleEnemyIntentCatalog.Resolve(monster);
-            EnemyIntentPlan plan = EnemyIntentPlanner.Plan(Board, Occupancy, enemy,
-                PlayerIds.Select(id => Occupancy.Placements[id]),
-                Occupancy.Placements.Values.FirstOrDefault(x => x.Role == BattlefieldRole.Protected && x.Presence == BattlefieldPresence.Active),
-                intentSpec, random);
-            var target = plan?.Target;
-            if (target == null) { SetOutcome(BattlePhase.Defeat, "没有存活玩家。"); break; }
-            bool needsTargetInRange = (enemy.Unit as MonsterInstance)?.SelectedIntention?.Any(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage) != false;
-            for (int move = 0; needsTargetInRange && move < intentSpec.MoveBudget && !CanEnemyHit(enemy, target, intentSpec); move++)
+            EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+            EnemyIntentPlan plan = EnemyIntentPlanner.Plan(Board, Occupancy, enemy, PlayerIds.Select(id => Occupancy.Placements[id]),
+                Occupancy.Placements.Values.FirstOrDefault(x => x.Role == BattlefieldRole.Protected && x.Presence == BattlefieldPresence.Active), spec, random);
+            if (plan?.Target == null) { SetOutcome(BattlePhase.Defeat, "没有存活玩家。"); return false; }
+            int[][] intention = monster?.SelectedIntention;
+            if (intention == null || intention.Length == 0) intention = new[] { new[] { (int)EffectType.Damage, 1, 0 } };
+            activeMonsterAction = new MonsterActionState
             {
-                AxialHex? step = BestStepToward(enemy, target);
-                if (!step.HasValue || !Movement.TryMoveWithoutPlayerCost(enemy.UnitId, step.Value, out _)) break;
-            }
-            if (enemy.Presence == BattlefieldPresence.Active && target.Presence == BattlefieldPresence.Active &&
-                (!needsTargetInRange || CanEnemyHit(enemy, target, intentSpec)))
-            {
-                ExecuteEnemyIntention(enemy, target);
-            }
-            StateDecayProcessor.ProcessDecayAtTiming(enemy.Unit, DecayTrigger.OnTurnEnd);
-            Occupancy.SyncDeaths(); EvaluateOutcome();
+                Enemy = enemy, Target = plan.Target, Spec = spec, Intention = intention,
+                NeedsTargetInRange = intention.Any(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage),
+            };
+            Message?.Invoke($"{enemy.Name} 开始行动。"); Notify();
+            return true;
         }
-        if (!IsFinished) PrepareEnemyIntentions();
+        return false;
+    }
+
+    private void FinishActiveMonsterAction()
+    {
+        if (activeMonsterAction == null) return;
+        StateDecayProcessor.ProcessDecayAtTiming(activeMonsterAction.Enemy.Unit, DecayTrigger.OnTurnEnd);
+        activeMonsterAction = null;
+        Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
     }
 
     private void PrepareEnemyIntentions()
@@ -733,39 +824,39 @@ public sealed partial class BattlefieldSession : IDisposable
         return parts.Count == 0 ? "无意图" : string.Join(" / ", parts);
     }
 
-    private void ExecuteEnemyIntention(BattleUnitPlacement enemy, BattleUnitPlacement target)
+    private void ExecuteEnemyIntentionEffect(BattleUnitPlacement enemy, BattleUnitPlacement target, int[] effect)
     {
-        MonsterInstance monster = enemy.Unit as MonsterInstance;
-        int[][] intention = monster?.SelectedIntention;
-        if (intention == null || intention.Length == 0) intention = new[] { new[] { (int)EffectType.Damage, 1, 0 } };
-        IUnitInstance lastTarget = target.Unit;
-        foreach (int[] effect in intention)
+        if (effect == null || effect.Length == 0 || target.Presence != BattlefieldPresence.Active) return;
+        EffectType type = (EffectType)effect[0];
+        if (type == EffectType.Damage)
         {
-            if (effect == null || effect.Length == 0 || target.Presence != BattlefieldPresence.Active) continue;
-            EffectType type = (EffectType)effect[0];
-            if (type == EffectType.Damage)
+            int[] args = effect.Length > 2 ? effect.Skip(2).ToArray() : Array.Empty<int>();
+            int before = target.Unit.HP;
+            using (new BattlefieldEffectTargetScope(enemy.Unit, target.Unit, new[] { target.Unit }, Array.Empty<IUnitInstance>(),
+                playerTurn: false, canAttack: CanDefaultAttack))
             {
-                int[] args = effect.Length > 2 ? effect.Skip(2).ToArray() : Array.Empty<int>();
-                int before = target.Unit.HP;
-                using (new BattlefieldEffectTargetScope(enemy.Unit, target.Unit, new[] { target.Unit }, Array.Empty<IUnitInstance>(),
-                    playerTurn: false, canAttack: CanDefaultAttack))
-                {
-                    EffectResult result = EffectSystem.ApplyAttack(enemy.Unit, target.Unit, args);
-                    Message?.Invoke($"{enemy.Name} 执行 {GetEnemyIntentionText(enemy.UnitId)}，攻击 {target.Name}：{result.TotalValue} 伤害，HP {result.TargetHpBefore}→{result.TargetHpAfter}。");
-                }
-                TrackHpLoss(target.Unit, before); lastTarget = target.Unit;
+                EffectResult result = EffectSystem.ApplyAttack(enemy.Unit, target.Unit, args);
+                Message?.Invoke($"{enemy.Name} 执行攻击，命中 {target.Name}：{result.TotalValue} 伤害，HP {result.TargetHpBefore}→{result.TargetHpAfter}。 ");
+                AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, target.UnitId,
+                    enemy.Coord, target.Coord, intentSpecFor(enemy), Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
+                    Math.Max(0, result.TargetShieldBefore - result.TargetShieldAfter), result.TargetHpAfter <= 0,
+                    result.TargetHpBefore, result.TargetHpAfter, result.TargetShieldBefore, result.TargetShieldAfter));
             }
-            else if (type == EffectType.Shield)
-            {
-                EffectSystem.ApplyShield(enemy.Unit, effect.Skip(1).ToArray());
-            }
-            else if (type == EffectType.AddState && effect.Length > 2 && Enum.IsDefined(typeof(StateType), effect[2]))
-            {
-                int stacks = effect.Length > 3 ? effect[3] : 1;
-                StateSystem.AddOrUpdateState(lastTarget, (StateType)effect[2], stacks, ownerUnit: enemy.Unit);
-            }
+            TrackHpLoss(target.Unit, before);
+        }
+        else if (type == EffectType.Shield)
+        {
+            EffectSystem.ApplyShield(enemy.Unit, effect.Skip(1).ToArray());
+        }
+        else if (type == EffectType.AddState && effect.Length > 2 && Enum.IsDefined(typeof(StateType), effect[2]))
+        {
+            int stacks = effect.Length > 3 ? effect[3] : 1;
+            StateSystem.AddOrUpdateState(target.Unit, (StateType)effect[2], stacks, ownerUnit: enemy.Unit);
         }
     }
+
+    private WeaponAttackMode intentSpecFor(BattleUnitPlacement enemy) =>
+        enemy.Unit is MonsterInstance monster ? BattleEnemyIntentCatalog.Resolve(monster).AttackMode : WeaponAttackMode.AdjacentSingle;
 
     private void StartNextPlayerRound()
     {
@@ -905,6 +996,7 @@ public sealed partial class BattlefieldSession : IDisposable
         var allyList = allies ?? ActiveAlliesWithin(source, 1);
         var tracked = Occupancy.Placements.Values.Where(x => x.Presence == BattlefieldPresence.Active).ToArray();
         var beforeHp = tracked.ToDictionary(x => x.UnitId, x => x.Unit.HP);
+        var beforeShield = tracked.ToDictionary(x => x.UnitId, x => x.Unit.Shield);
         Card.CardApplyResult result;
         using (new BattlefieldEffectTargetScope(source.Unit, selected?.Unit,
             enemies.Select(x => x.Unit).ToArray(), allyList.Select(x => x.Unit).ToArray(), hpLostThisBattle.GetValueOrDefault(source.UnitId),
@@ -913,7 +1005,16 @@ public sealed partial class BattlefieldSession : IDisposable
             result = card.Apply(source.Unit, selected?.Unit);
         }
         if (!result.Success) { error = result.ErrorMessage; return false; }
-        foreach (var unit in tracked) TrackHpLoss(unit.Unit, beforeHp[unit.UnitId]);
+        foreach (var unit in tracked)
+        {
+            int hpLoss = Math.Max(0, beforeHp[unit.UnitId] - unit.Unit.HP);
+            int shieldLoss = Math.Max(0, beforeShield[unit.UnitId] - unit.Unit.Shield);
+            TrackHpLoss(unit.Unit, beforeHp[unit.UnitId]);
+            if (card.Category == CardCategory.Attack && (hpLoss > 0 || shieldLoss > 0))
+                AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, unit.UnitId, source.Coord,
+                    unit.Coord, VisualModeForCard(card), hpLoss, shieldLoss, unit.Unit.HP <= 0,
+                    beforeHp[unit.UnitId], unit.Unit.HP, beforeShield[unit.UnitId], unit.Unit.Shield));
+        }
         source.Unit.Energy -= cost;
         cardsPlayedThisTurn[source.UnitId] = cardsPlayedThisTurn.GetValueOrDefault(source.UnitId) + (card.Category == CardCategory.State ? 0 : 1);
         StateSystem.OnCardPlayed(source.Unit, card);
@@ -925,6 +1026,19 @@ public sealed partial class BattlefieldSession : IDisposable
         Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
         Message?.Invoke($"{source.Name} 打出 {card.CardName}，消耗 {cost} 能量。" + (result.EffectResult == null ? "" : " " + result.EffectResult.BuildSummary()));
         return true;
+    }
+
+    private WeaponAttackMode VisualModeForCard(Card card)
+    {
+        CardSpatialSpec spec = GetSpatialSpec(card.CardId);
+        return spec.Shape switch
+        {
+            CardSpatialShape.Fan => WeaponAttackMode.Fan,
+            CardSpatialShape.Line when spec.Dashes => WeaponAttackMode.Thrust,
+            CardSpatialShape.Line => WeaponAttackMode.RangedLine,
+            CardSpatialShape.Burst => WeaponAttackMode.ThrowSingle,
+            _ => CurrentWeapon.Mode,
+        };
     }
 
     private void FinalizeNoTargetSpatialCard(BattleUnitPlacement source, Card card, int cost)
@@ -1049,6 +1163,7 @@ public sealed partial class BattlefieldSession : IDisposable
 
     private void OnEntered(BattlefieldEntry entry)
     {
+        UnitEntered?.Invoke(entry);
         var p = Occupancy.Placements[entry.UnitId];
         string text = entry.ConsumesPlayerMove
             ? $"{p.Name} 移动到 ({entry.To.Q},{entry.To.R})，消耗 1 能量、1 次移动。"

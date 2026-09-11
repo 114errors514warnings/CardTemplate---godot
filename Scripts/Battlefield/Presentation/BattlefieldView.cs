@@ -10,10 +10,28 @@ public partial class BattlefieldView : Control
     public BattlefieldSession Session { get; private set; }
     public Vector2 Pan { get; private set; }
     public bool Moving { get; private set; }
+    public bool HasPendingPresentation => hasActiveMove || hasActiveAttack || moveAnimationQueue.Count > 0 || attackAnimationQueue.Count > 0;
     private bool dragging;
     private AxialHex? hover;
+    public AxialHex? HoveredCell => hover;
+    [Export] public float PlayerMoveCellsPerSecond = 5f;
+    [Export] public float MonsterMoveCellsPerSecond = 4f;
+    [Export] public float AttackPresentationSeconds = 0.55f;
+    private readonly Queue<BattlefieldEntry> moveAnimationQueue = new();
+    private BattlefieldEntry activeMove;
+    private bool hasActiveMove;
+    private float activeMoveElapsed;
+    private readonly Dictionary<int, Vector2> visualUnitPositions = new();
+    private readonly Queue<BattlefieldAttackEvent> attackAnimationQueue = new();
+    private BattlefieldAttackEvent activeAttack;
+    private bool hasActiveAttack;
+    private float activeAttackElapsed;
+    private bool activeAttackImpactApplied;
+    private readonly Dictionary<int, (int Hp, int Shield)> presentationStats = new();
     public event Action<string, Vector2> HoverDetails;
-    public event Action<string> Message;
+    public event Action<AxialHex> PointerPressed;
+    public event Action<AxialHex> PointerDragged;
+    public event Action<AxialHex> PointerReleased;
     /// <summary>外部（如出牌选目标）接管左键点击：返回 true 表示已消费，不再走内置选择/移动。</summary>
     public Func<AxialHex, bool> LeftClickOverride;
 
@@ -26,12 +44,59 @@ public partial class BattlefieldView : Control
 
     public void Bind(BattlefieldSession session)
     {
-        if (Session != null) Session.Changed -= Refresh;
-        Session = session; Session.Changed += Refresh;
+        if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
+        visualUnitPositions.Clear(); moveAnimationQueue.Clear(); attackAnimationQueue.Clear();
+        Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
         CenterSelected();
     }
     public override void _ExitTree()
-    { if (Session != null) Session.Changed -= Refresh; }
+    { if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; } }
+
+    private void OnUnitEntered(BattlefieldEntry entry) { moveAnimationQueue.Enqueue(entry); QueueRedraw(); }
+    private void OnAttackResolved(BattlefieldAttackEvent attack)
+    {
+        if (attack.TargetUnitId.HasValue && attack.TargetHpBefore >= 0)
+            presentationStats[attack.TargetUnitId.Value] = (attack.TargetHpBefore, attack.TargetShieldBefore);
+        attackAnimationQueue.Enqueue(attack); QueueRedraw();
+    }
+    public override void _Process(double delta)
+    {
+        if (Session == null) return;
+        foreach (int unitId in visualUnitPositions.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
+            visualUnitPositions.Remove(unitId);
+        if (!hasActiveMove && moveAnimationQueue.Count > 0) { activeMove = moveAnimationQueue.Dequeue(); hasActiveMove = true; activeMoveElapsed = 0; visualUnitPositions[activeMove.UnitId] = CellPosition(activeMove.From); }
+        if (hasActiveMove)
+        {
+            var step = activeMove; float speed = Session.Occupancy.Placements.TryGetValue(step.UnitId, out var p) && p.Role == BattlefieldRole.Enemy ? MonsterMoveCellsPerSecond : PlayerMoveCellsPerSecond;
+            float duration = 1f / Math.Max(.1f, speed); activeMoveElapsed += (float)delta;
+            visualUnitPositions[step.UnitId] = CellPosition(step.From).Lerp(CellPosition(step.To), Math.Min(1, activeMoveElapsed / duration));
+            if (activeMoveElapsed >= duration)
+            {
+                // Keep the visual endpoint until the next movement event takes over.
+                // Logic may already have committed the next cell before that event is rendered.
+                visualUnitPositions[step.UnitId] = CellPosition(step.To);
+                hasActiveMove = false;
+            }
+        }
+        if (!hasActiveAttack && !hasActiveMove && moveAnimationQueue.Count == 0 && attackAnimationQueue.Count > 0)
+        { activeAttack = attackAnimationQueue.Dequeue(); hasActiveAttack = true; activeAttackElapsed = 0; activeAttackImpactApplied = false; }
+        if (hasActiveAttack)
+        {
+            activeAttackElapsed += (float)delta;
+            if (!activeAttackImpactApplied && activeAttackElapsed >= AttackPresentationSeconds * .48f)
+            {
+                activeAttackImpactApplied = true;
+                if (activeAttack.TargetUnitId.HasValue && activeAttack.TargetHpAfter >= 0)
+                    presentationStats[activeAttack.TargetUnitId.Value] = (activeAttack.TargetHpAfter, activeAttack.TargetShieldAfter);
+            }
+            if (activeAttackElapsed >= AttackPresentationSeconds)
+            {
+                if (activeAttack.TargetUnitId.HasValue) presentationStats.Remove(activeAttack.TargetUnitId.Value);
+                hasActiveAttack = false;
+            }
+        }
+        QueueRedraw();
+    }
 
     public Vector2 CellPosition(AxialHex coord)
     {
@@ -106,14 +171,16 @@ public partial class BattlefieldView : Control
             {
                 var coord = CellAt(button.Position);
                 if (LeftClickOverride?.Invoke(coord) == true) { AcceptEvent(); return; }
+                PointerPressed?.Invoke(coord);
                 var target = Session.Occupancy.At(coord);
-                if (target?.Role == BattlefieldRole.Player)
+                if (!Moving && target?.Role == BattlefieldRole.Player)
                 { SetMoving(false); Session.Select(target.UnitId); }
-                else if (Moving)
-                {
-                    if (Session.Movement.TryMove(Session.SelectedId, coord, out string error)) SetMoving(false);
-                    else Message?.Invoke(error);
-                }
+                AcceptEvent();
+            }
+            else if (button.ButtonIndex == MouseButton.Left)
+            {
+                var coord = CellAt(button.Position);
+                PointerReleased?.Invoke(coord);
                 AcceptEvent();
             }
         }
@@ -125,6 +192,7 @@ public partial class BattlefieldView : Control
             }
             dragging = false;
             hover = CellAt(motion.Position);
+            if (motion.ButtonMask.HasFlag(MouseButtonMask.Left)) PointerDragged?.Invoke(hover.Value);
             HoverDetails?.Invoke(Describe(hover.Value), GlobalPosition + motion.Position);
             QueueRedraw();
         }
@@ -159,41 +227,88 @@ public partial class BattlefieldView : Control
         DrawRect(new Rect2(Vector2.Zero, Size), new Color("151f28"));
         if (Session == null) return;
         float r = (float)Session.Definition.CellRadius;
-        var legal = Session.Movement.LegalDestinations(Session.SelectedId);
         foreach (var cell in Session.Board.Cells.Values)
         {
             var center = CellPosition(cell.Coord);
             if (!new Rect2(-r * 2, -r * 2, Size.X + r * 4, Size.Y + r * 4).HasPoint(center)) continue;
-            bool available = Moving && legal.Contains(cell.Coord);
             Color fill = cell.Surface == BattleSurface.Pit ? new Color("070c12") : cell.Kind == BattleCellKind.Obstacle ?
-                new Color("515464") : available ? new Color("244e46") : new Color("25323d");
+                new Color("515464") : new Color("25323d");
             var points = Enumerable.Range(0, 6).Select(i => center + Vector2.FromAngle(Mathf.DegToRad(60 * i - 30)) * r).ToArray();
             DrawColoredPolygon(points, fill);
-            Color border = available ? new Color("6cbf9f") : new Color("40525f");
+            Color border = new Color("40525f");
             if (cell.Coord == Session.Selected.Coord) border = new Color("f5d98c");
-            for (int i = 0; i < 6; i++) DrawLine(points[i], points[(i + 1) % 6], border, available || cell.Coord == Session.Selected.Coord ? 2.5f : 1, true);
+            for (int i = 0; i < 6; i++) DrawLine(points[i], points[(i + 1) % 6], border, cell.Coord == Session.Selected.Coord ? 2.5f : 1, true);
             if (cell.Kind == BattleCellKind.Obstacle) CenterText(center + new Vector2(0, 5), "障碍", 14, new Color("b4b7c0"));
             if (cell.Items.Count > 0) CenterText(center + new Vector2(0, 29), $"物品 ×{cell.Items.Count}", 12, new Color("e6bd78"));
             if (cell.Trigger != null) CenterText(center + new Vector2(0, 28), cell.Trigger.Kind == GroundObjectKind.Trap ? "陷阱" : "机关", 12, Colors.Orange);
         }
         foreach (var p in Session.Occupancy.Placements.Values.Where(x => x.Presence == BattlefieldPresence.Active))
         {
-            var center = CellPosition(p.Coord);
+            var center = visualUnitPositions.TryGetValue(p.UnitId, out var visualCenter) ? visualCenter : CellPosition(p.Coord);
+            if (hasActiveAttack)
+            {
+                Vector2 attackFrom = CellPosition(activeAttack.From);
+                Vector2 attackTo = CellPosition(activeAttack.To);
+                Vector2 direction = (attackTo - attackFrom).Normalized();
+                float attackT = Math.Min(1f, activeAttackElapsed / AttackPresentationSeconds);
+                if (p.UnitId == activeAttack.SourceUnitId && activeAttack.Mode is not WeaponAttackMode.RangedLine and not WeaponAttackMode.ThrowSingle)
+                    center += direction * (Mathf.Sin(Mathf.Pi * Math.Min(attackT, .55f) / .55f) * 12f);
+                if (p.UnitId == activeAttack.TargetUnitId && attackT is > .44f and < .78f)
+                    center += direction * (Mathf.Sin((attackT - .44f) / .34f * Mathf.Pi) * 7f);
+            }
             if (!new Rect2(-60, -60, Size.X + 120, Size.Y + 120).HasPoint(center)) continue;
             Color color = p.Role == BattlefieldRole.Player ? new Color("69bec9") : new Color("d88885");
             DrawCircle(center + new Vector2(0, -7), 16, color);
             CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
             CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
-            CenterText(center + new Vector2(0, 15), $"HP {p.Unit.HP}", 12, color);
+            var shownStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
+            CenterText(center + new Vector2(0, 15), $"HP {shownStats.Item1}", 12, color);
             if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));
             CenterText(center + new Vector2(0, 42), p.Unit.States.Count == 0 ? "无状态" :
                 string.Join(" ", p.Unit.States.Take(3).Select(x => $"{GetStateDefinition(x.Key).Name[..1]}{x.Value.Stacks}")), 12, new Color("b7c5ce"));
         }
         DrawCastPreview();
         DrawMovePath();
-        if (hover.HasValue && Moving && legal.Contains(hover.Value))
-            DrawLine(CellPosition(Session.Selected.Coord), CellPosition(hover.Value), Colors.LightGreen, 3, true);
+        DrawAttackPresentation();
+    }
+
+    private void DrawAttackPresentation()
+    {
+        if (!hasActiveAttack) return;
+        float t = Math.Min(1f, activeAttackElapsed / AttackPresentationSeconds);
+        Vector2 from = CellPosition(activeAttack.From);
+        Vector2 to = CellPosition(activeAttack.To);
+        Color color = Session.Occupancy.Placements.TryGetValue(activeAttack.SourceUnitId, out var source) && source.Role == BattlefieldRole.Enemy
+            ? new Color("ff9c78") : new Color("ffe18a");
+        bool ranged = activeAttack.Mode is WeaponAttackMode.RangedLine or WeaponAttackMode.ThrowSingle;
+        if (ranged)
+        {
+            Vector2 projectile = from.Lerp(to, Math.Min(1f, t * 1.7f));
+            DrawLine(from, projectile, color.Darkened(.25f), 2.5f, true);
+            DrawCircle(projectile, 7, color);
+        }
+        else
+        {
+            Vector2 direction = (to - from).Normalized();
+            Vector2 normal = new Vector2(-direction.Y, direction.X);
+            float strike = Mathf.Clamp((t - .22f) / .30f, 0f, 1f);
+            Vector2 slashCenter = from.Lerp(to, strike * .72f);
+            float angle = direction.Angle();
+            DrawArc(from + direction * 15f, 30f, angle - 1.15f, angle + 1.15f, 18, color, 3.5f, true);
+            if (t is > .20f and < .68f)
+                DrawLine(slashCenter - normal * 20f, slashCenter + normal * 20f, color, 4f, true);
+        }
+        if (t > .48f)
+        {
+            float alpha = 1f - (t - .48f) / .52f;
+            DrawCircle(to, 20 + t * 14, new Color(color, .24f * alpha));
+            DrawLine(to + new Vector2(-13, -13), to + new Vector2(13, 13), color, 3f, true);
+            DrawLine(to + new Vector2(13, -13), to + new Vector2(-13, 13), color, 3f, true);
+            string damage = activeAttack.ShieldAbsorbed > 0
+                ? $"-{activeAttack.Damage} 盾-{activeAttack.ShieldAbsorbed}" : $"-{activeAttack.Damage}";
+            CenterText(to + new Vector2(0, -48 - t * 18), activeAttack.Defeated ? damage + " 击败" : damage, 15, color);
+        }
     }
 
     private void DrawMovePath()
@@ -202,8 +317,16 @@ public partial class BattlefieldView : Control
         Vector2[] points = new Vector2[movePath.Count];
         for (int i = 0; i < movePath.Count; i++) points[i] = CellPosition(movePath[i]);
         Vector2 last = CellPosition(Session.Selected.Coord);
-        foreach (var point in points) { DrawLine(last, point, Colors.LightSkyBlue, 3f, true); last = point; }
-        DrawCircle(points[^1] + new Vector2(0, -7), 7, Colors.LightSkyBlue);
+        float radius = (float)Session.Definition.CellRadius;
+        foreach (var cell in movePath)
+        {
+            Vector2 center = CellPosition(cell);
+            var hex = Enumerable.Range(0, 6).Select(i => center + Vector2.FromAngle(Mathf.DegToRad(60 * i - 30)) * radius).ToArray();
+            DrawColoredPolygon(hex, new Color(0.18f, 0.78f, 0.43f, 0.30f));
+            for (int i = 0; i < 6; i++) DrawLine(hex[i], hex[(i + 1) % 6], new Color("6ee59c"), 2.5f, true);
+        }
+        foreach (var point in points) { DrawLine(last, point, new Color("6ee59c"), 3f, true); last = point; }
+        DrawCircle(points[^1] + new Vector2(0, -7), 7, new Color("6ee59c"));
     }
 
     private void DrawCastPreview()

@@ -17,16 +17,19 @@ public sealed class BattleUnitPlacement
     public AxialHex Coord { get; internal set; }
     public BattlefieldPresence Presence { get; internal set; }
     public int BaseMovesPerTurn { get; }
+    public int BaseMoveDistancePerAction { get; }
     public int MovesUsedThisTurn { get; internal set; }
     private readonly Dictionary<string, int> equipmentMoveModifiers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> equipmentMoveDistanceModifiers = new(StringComparer.Ordinal);
     public int EffectiveMovesPerTurn => (int)Math.Clamp((long)BaseMovesPerTurn + equipmentMoveModifiers.Values.Sum(x => (long)x), 0, int.MaxValue);
+    public int EffectiveMoveDistancePerAction => (int)Math.Clamp((long)BaseMoveDistancePerAction + equipmentMoveDistanceModifiers.Values.Sum(x => (long)x), 1, int.MaxValue);
     public int RemainingMoves => Math.Max(0, EffectiveMovesPerTurn - MovesUsedThisTurn);
 
-    public BattleUnitPlacement(IUnitInstance unit, string name, BattlefieldRole role, int movesPerTurn)
+    public BattleUnitPlacement(IUnitInstance unit, string name, BattlefieldRole role, int movesPerTurn, int moveDistancePerAction = 1)
     {
         Unit = unit ?? throw new ArgumentNullException(nameof(unit));
-        if (movesPerTurn < 0 || !Enum.IsDefined(role)) throw new ArgumentException("角色类型或移动次数无效。");
-        Name = name; Role = role; BaseMovesPerTurn = movesPerTurn;
+        if (movesPerTurn < 0 || moveDistancePerAction < 1 || !Enum.IsDefined(role)) throw new ArgumentException("角色类型或移动次数无效。");
+        Name = name; Role = role; BaseMovesPerTurn = movesPerTurn; BaseMoveDistancePerAction = moveDistancePerAction;
     }
 
     /// <summary>Equipment instance IDs deduplicate two-handed equipment. Does not reset spent moves.</summary>
@@ -35,6 +38,14 @@ public sealed class BattleUnitPlacement
         if (string.IsNullOrWhiteSpace(equipmentInstanceId)) throw new ArgumentException("装备实例 ID 为空。");
         if (value == 0) equipmentMoveModifiers.Remove(equipmentInstanceId);
         else equipmentMoveModifiers[equipmentInstanceId] = value;
+    }
+
+    /// <summary>Changes how many entered cells one move action may contain; spent actions stay spent.</summary>
+    public void SetEquipmentMoveDistanceModifier(string equipmentInstanceId, int value)
+    {
+        if (string.IsNullOrWhiteSpace(equipmentInstanceId)) throw new ArgumentException("装备实例 ID 为空。");
+        if (value == 0) equipmentMoveDistanceModifiers.Remove(equipmentInstanceId);
+        else equipmentMoveDistanceModifiers[equipmentInstanceId] = value;
     }
 }
 
