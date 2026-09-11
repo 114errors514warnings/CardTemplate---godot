@@ -26,12 +26,15 @@
 | [State 牌 vs Skill 施加 State](卡牌与配置/State牌与Skill施加State.md) | State 牌进入 `StatePile` 生命周期、Skill 牌施加 AddState 直接进弃牌堆、回收机制 |
 | [总体卡牌设计](卡牌与配置/总体卡牌设计.md) | D/C/B/A/S 五级卡牌分级、初始牌组来源 |
 | [六边形战场卡牌设计](../角色设计/六边形战场卡牌设计.md) | 51 张旧牌的新版空间适配草案、距离与范围模板、旧版备份入口；尚未替换运行时配置 |
+| [卡牌参数](卡牌系统/卡牌参数.md) | CardId 8 位编号、CSV 字段、完整 EffectType / EffectTargetType / StateType 表、CSV 文件组织 |
+| [State 牌 vs Skill 施加 State](卡牌系统/State牌与Skill施加State.md) | State 牌进入 `StatePile` 生命周期、Skill 牌施加 AddState 直接进弃牌堆、回收机制 |
+| [总体卡牌设计](卡牌系统/总体卡牌设计.md) | D/C/B/A/S 五级卡牌分级、初始牌组来源 |
 
 ## 三、实体与标识
 
 | 文档 | 范围 |
 |------|------|
-| [UniqueInGameId](实体与标识/UniqueInGameId.md) | 7 位 ID 格式（0/1/3 前缀）、`UniqueIdGenerator`、多玩家实体组织 |
+| [UniqueInGameId](实体系统/UniqueInGameId.md) | 7 位 ID 格式（0/1/3 前缀）、`UniqueIdGenerator`、多玩家实体组织 |
 
 ## 四、工程规范
 
@@ -43,7 +46,7 @@
 
 | 文档 | 范围 |
 |------|------|
-| [战斗使用指南](UI使用/战斗使用指南.md) | 战前配置、出牌命令格式、参数规则、UniqueInGameId 使用 |
+| [战斗使用指南](游戏实测说明文档/战斗使用指南.md) | 战前配置、出牌命令格式、参数规则、UniqueInGameId 使用 |
 
 ## 六、数值平衡
 
@@ -63,7 +66,7 @@
 
 | 文档 | 范围 |
 |------|------|
-| [装备、材料、道具系统](装备、材料、道具系统/装备、材料、道具系统.md) | 材料分类（合成 / 打造）、道具（合成台制作）、装备（5 部位佩戴）、与村庄 / 商人 / 夜晚休息的联动 |
+| [装备、材料、道具系统](装备、材料、道具系统/装备、材料、道具系统.md) | 材料分类（合成 / 打造）、道具（合成台制作）、装备（双手武器/防具槽及保留的头盔、护甲、鞋、饰品）、与村庄 / 商人 / 夜晚休息的联动 |
 
 ## 九、界面交互
 
@@ -80,13 +83,13 @@
 | 旧文件 | 新位置 |
 |--------|--------|
 | `战斗规则.md.archived` | 拆分为 [战斗系统/战斗循环](战斗系统/战斗循环.md) + [战斗系统/目标规则](战斗系统/目标规则.md) + [战斗系统/能量与费用](战斗系统/能量与费用.md) |
-| `卡牌参数配置说明.md.archived` | 合并进 [卡牌与配置/卡牌参数](卡牌与配置/卡牌参数.md) |
-| `卡牌说明.md.archived` | 迁至 [卡牌与配置/State 牌 vs Skill 施加 State](卡牌与配置/State牌与Skill施加State.md) |
-| `实体规则.md.archived` | 迁至 [实体与标识/UniqueInGameId](实体与标识/UniqueInGameId.md) |
-| `总体卡牌设计思路.md.archived` | 迁至 [卡牌与配置/总体卡牌设计](卡牌与配置/总体卡牌设计.md) |
+| `卡牌参数配置说明.md.archived` | 合并进 [卡牌系统/卡牌参数](卡牌系统/卡牌参数.md) |
+| `卡牌说明.md.archived` | 迁至 [卡牌系统/State 牌 vs Skill 施加 State](卡牌系统/State牌与Skill施加State.md) |
+| `实体规则.md.archived` | 迁至 [实体系统/UniqueInGameId](实体系统/UniqueInGameId.md) |
+| `总体卡牌设计思路.md.archived` | 迁至 [卡牌系统/总体卡牌设计](卡牌系统/总体卡牌设计.md) |
 | `开发记录规则.md.archived` | 迁至 [工程规范/开发记录](工程规范/开发记录.md) |
-| `使用介绍.md.archived` | 迁至 [UI 使用/战斗使用指南](UI使用/战斗使用指南.md) |
-| `Effect相关枚举.md.archived` | 合并进 [战斗系统/Effect 系统](战斗系统/Effect系统.md) + [卡牌与配置/卡牌参数](卡牌与配置/卡牌参数.md) |
+| `使用介绍.md.archived` | 迁至 [UI 使用/战斗使用指南](游戏实测说明文档/战斗使用指南.md) |
+| `Effect相关枚举.md.archived` | 合并进 [战斗系统/Effect 系统](战斗系统/Effect系统.md) + [卡牌系统/卡牌参数](卡牌系统/卡牌参数.md) |
 
 ## 附录 B：核心概念快速索引
 
@@ -97,8 +100,8 @@
 | ClearFirstNormalDebuff 行为 | [状态系统 §4](战斗系统/状态系统.md#四clearfirstnormaldebuff-行为) |
 | 死亡之舞动态费用 | [能量与费用 §3.1](战斗系统/能量与费用.md#31-cardgetcurrentenergycostplayer-三段优先级) |
 | 城墙 / 蓄势待发 / 阵地 / 到我身后 | [状态系统 §2.2](战斗系统/状态系统.md#22-当前-csv-状态分布) + [Effect 系统 §3](战斗系统/Effect系统.md#三反击与回合外) + [目标规则 §3](战斗系统/目标规则.md#三城墙forcedtaunt目标重定向) |
-| 状态牌 vs Skill 牌 | [卡牌与配置/State 牌 vs Skill 施加 State](卡牌与配置/State牌与Skill施加State.md) |
-| 7 位 ID 格式 | [实体与标识/UniqueInGameId](实体与标识/UniqueInGameId.md#三前缀约定) |
+| 状态牌 vs Skill 牌 | [卡牌系统/State 牌 vs Skill 施加 State](卡牌系统/State牌与Skill施加State.md) |
+| 7 位 ID 格式 | [实体系统/UniqueInGameId](实体系统/UniqueInGameId.md#三前缀约定) |
 
 ## 附录 C：术语对照
 

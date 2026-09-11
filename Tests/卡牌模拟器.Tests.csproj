@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <Compile Remove="Scripts\**\*.cs" />
+    <None Include="..\DataBase\Battlefield\FoundationMap.json" Link="FoundationMap.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\DataBase\Equipment\Weapon.csv" Link="Weapon.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

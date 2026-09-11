@@ -1,0 +1,10 @@
+CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord,ConditionParams,SpatialShape,SpatialArgs,TrapId
+11001001,破空斩,Attack,1,Damage,对目标格敌人额外造成2点伤害,2;2,,,Single,Range=1,
+11001002,横扫,Attack,2,Damage,向选定方向及两侧相邻格横扫，范围内敌人额外受到1点伤害,2;1,,,Fan,Range=1,
+11001003,烈闪突,Attack,1,Damage,沿直线贯穿最多2格并向该方向突进,2;3,,,Line,Range=2;Length=2;Pierce;Dash,
+21001001,战术抽牌,Skill,0,DrawCard,抽2张牌,1;2,,,None,,
+21001002,威吓,Skill,1,AddState|AddState,对目标敌人施加2层易伤与2层虚弱,2;1;2|2;2;2,,,Single,Range=1,
+21001003,战意沸腾,Skill,1,AddState|AddState,自身获得1层燃烧与1层增加攻击力（演示状态施加）,1;3;1|1;6;1,,,None,,
+21001004,位移突袭,Skill,1,None,自身沿所选路线移动最多2格并消耗能量, ,,,SelfMove,Range=2,
+21001005,埋设陷阱,Skill,1,None,在目标格布置一次性的测试陷阱, ,,,Trap,Range=1,test_trap
+31001001,圣盾光环,State,1,Shield|AddState,防御并进入勇气铠甲状态,1|1;9;1,,,None,,

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://p4uyoifwn7ov"
+
+[deps]
+
+files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/CharacterDefaultDeck.CardId.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/CharacterDefaultDeck.Count.translation"]
+
+source_file="res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/CharacterDefaultDeck.csv"
+dest_files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/CharacterDefaultDeck.CardId.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/CharacterDefaultDeck.Count.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

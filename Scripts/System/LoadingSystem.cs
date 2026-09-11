@@ -322,6 +322,16 @@ public partial class LoadingSystem : Node
 
 	private static void MergeCardsFromCsvIntoCache(string filePath)
 	{
+		using (FileAccess headerFile = FileAccess.Open(filePath, FileAccess.ModeFlags.Read))
+		{
+			string header = headerFile?.GetLine() ?? string.Empty;
+			string[] columns = LoadCsv.ParseCSVFields(header);
+			if (columns.Length == 0 || !string.Equals(columns[0], "CardId", StringComparison.OrdinalIgnoreCase))
+			{
+				return;
+			}
+		}
+
 		Card[] cards = LoadCardCsv.LoadCardsFromCSV(filePath);
 		if (cards == null)
 		{

@@ -1,0 +1,28 @@
+{
+  "MapId": "foundation-test",
+  "Version": 1,
+  "Seed": 60908,
+  "CellRadius": 42,
+  "Shape": "Hexagon",
+  "Radius": 10,
+  "PlayerSpawnCoords": [{ "Q": 0, "R": 0 }, { "Q": 1, "R": 0 }, { "Q": 0, "R": 1 }],
+  "PlayerCharacterIds": [1001, 1002, 1002],
+  "MonsterIds": [3001, 3002, 3003, 3004, 3005, 3006],
+  "CellOverrides": [
+    { "Q": -3, "R": -1, "Kind": "Obstacle", "BlocksSight": true },
+    { "Q": -3, "R": 0, "Kind": "Obstacle", "BlocksSight": true },
+    { "Q": -3, "R": 1, "Kind": "Obstacle", "BlocksSight": true },
+    { "Q": 4, "R": -2, "Surface": "Pit" }
+  ],
+  "GenerationExcludedCoords": [{ "Q": 0, "R": 0 }, { "Q": 1, "R": 0 }, { "Q": 0, "R": 1 }, { "Q": -1, "R": 0 }],
+  "RandomObstacleCount": 25,
+  "RandomItemCount": 12,
+  "RandomItemDefinitions": ["测试石块", "测试药瓶"],
+  "MinEnemyDistance": 3,
+  "MaxGenerationAttempts": 32,
+  "ObjectPlacements": [
+    { "Q": -1, "R": 0, "DefinitionId": "治疗药剂", "Kind": "Item", "HealAmount": 6 },
+    { "Q": -1, "R": 0, "DefinitionId": "行军短剑", "Kind": "Equipment", "HandsRequired": 1, "AttackRange": 2, "MoveBonus": 1 },
+    { "Q": 0, "R": 0, "DefinitionId": "石头", "Kind": "Item", "SpatialShape": "Line", "ItemMaxRange": 3, "ItemLength": 3, "DamageAmount": 3 }
+  ]
+}

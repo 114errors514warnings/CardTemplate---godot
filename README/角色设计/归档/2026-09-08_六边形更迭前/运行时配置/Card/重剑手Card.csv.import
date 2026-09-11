@@ -8,7 +8,7 @@ uid="uid://0vsk50lrt7ip"
 
 files=["res://DataBase/Card/重剑手Card.CardName.translation", "res://DataBase/Card/重剑手Card.CardType.translation", "res://DataBase/Card/重剑手Card.EnergyCost.translation", "res://DataBase/Card/重剑手Card.EffectType.translation", "res://DataBase/Card/重剑手Card.EffectDesc.translation", "res://DataBase/Card/重剑手Card.Params.translation", "res://DataBase/Card/重剑手Card.CardKeyWord.translation", "res://DataBase/Card/重剑手Card.ConditionParams.translation"]
 
-source_file="res://DataBase/Card/重剑手Card.csv"
+source_file="res://README/角色设计/归档/2026-09-08_六边形更迭前/运行时配置/Card/重剑手Card.csv"
 dest_files=["res://DataBase/Card/重剑手Card.CardName.translation", "res://DataBase/Card/重剑手Card.CardType.translation", "res://DataBase/Card/重剑手Card.EnergyCost.translation", "res://DataBase/Card/重剑手Card.EffectType.translation", "res://DataBase/Card/重剑手Card.EffectDesc.translation", "res://DataBase/Card/重剑手Card.Params.translation", "res://DataBase/Card/重剑手Card.CardKeyWord.translation", "res://DataBase/Card/重剑手Card.ConditionParams.translation"]
 
 [params]

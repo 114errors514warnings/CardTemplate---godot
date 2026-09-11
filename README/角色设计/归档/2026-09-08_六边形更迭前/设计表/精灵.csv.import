@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://fgq5k6000vf8"
+
+[deps]
+
+files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.费用.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.类型.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.等级.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.效果.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation"]
+
+source_file="res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.csv"
+dest_files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.费用.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.类型.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.等级.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.效果.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/精灵.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
