@@ -28,6 +28,8 @@ public partial class BattlefieldView : Control
     private float activeAttackElapsed;
     private bool activeAttackImpactApplied;
     private readonly Dictionary<int, (int Hp, int Shield)> presentationStats = new();
+    private Texture2D moveIntentIcon;
+    private Texture2D attackIntentIcon;
     public event Action<string, Vector2> HoverDetails;
     public event Action<AxialHex> PointerPressed;
     public event Action<AxialHex> PointerDragged;
@@ -46,6 +48,8 @@ public partial class BattlefieldView : Control
     {
         if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
         visualUnitPositions.Clear(); moveAnimationQueue.Clear(); attackAnimationQueue.Clear();
+        moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_move.png");
+        attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_attack.png");
         Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
         CenterSelected();
     }
@@ -188,7 +192,10 @@ public partial class BattlefieldView : Control
         {
             if (dragging && motion.ButtonMask.HasFlag(MouseButtonMask.Right))
             {
-                Pan += motion.Relative; ClampPan(); HoverDetails?.Invoke("", Vector2.Zero); hover = null; QueueRedraw(); return;
+                Pan += motion.Relative;
+                // Cached movement endpoints are screen-space positions; pan them with the board.
+                foreach (int unitId in visualUnitPositions.Keys.ToArray()) visualUnitPositions[unitId] += motion.Relative;
+                ClampPan(); HoverDetails?.Invoke("", Vector2.Zero); hover = null; QueueRedraw(); return;
             }
             dragging = false;
             hover = CellAt(motion.Position);
@@ -212,7 +219,7 @@ public partial class BattlefieldView : Control
                 text += $"\n{definition.Name} ×{state.Value.Stacks}\n{definition.EffectDescription}\n衰减：{definition.DecayTiming} / {definition.DecayMode}";
             }
             if (p.Unit.States.Count == 0) text += "\n无状态";
-            if (p.Role == BattlefieldRole.Enemy) text += "\n意图：" + Session.GetEnemyIntentionText(p.UnitId);
+            if (p.Role == BattlefieldRole.Enemy) text += "\n意图：" + Session.GetEnemyIntentDisplay(p.UnitId).Tooltip;
         }
         if (cell.Kind == BattleCellKind.Obstacle) text += "\n障碍：不可通行";
         if (cell.Surface == BattleSurface.Pit) text += "\n坑洞：不可通行";
@@ -265,12 +272,37 @@ public partial class BattlefieldView : Control
             var shownStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
             CenterText(center + new Vector2(0, 15), $"HP {shownStats.Item1}", 12, color);
             if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));
+            if (p.Role == BattlefieldRole.Enemy)
+            {
+                EnemyIntentDisplay intent = Session.GetEnemyIntentDisplay(p.UnitId);
+                if (intent.Certainty == EnemyIntentPreviewCertainty.UnknownNumbers)
+                {
+                    if (moveIntentIcon != null) DrawTextureRect(moveIntentIcon, new Rect2(center + new Vector2(-24, -66), new Vector2(16, 16)), false);
+                    if (attackIntentIcon != null) DrawTextureRect(attackIntentIcon, new Rect2(center + new Vector2(8, -66), new Vector2(16, 16)), false);
+                }
+                else if (attackIntentIcon != null)
+                    DrawTextureRect(attackIntentIcon, new Rect2(center + new Vector2(-31, -66), new Vector2(16, 16)), false);
+            }
             CenterText(center + new Vector2(0, 42), p.Unit.States.Count == 0 ? "无状态" :
                 string.Join(" ", p.Unit.States.Take(3).Select(x => $"{GetStateDefinition(x.Key).Name[..1]}{x.Value.Stacks}")), 12, new Color("b7c5ce"));
         }
         DrawCastPreview();
         DrawMovePath();
+        DrawKnownEnemyIntentPreview();
         DrawAttackPresentation();
+    }
+
+    private void DrawKnownEnemyIntentPreview()
+    {
+        if (!hover.HasValue || Session.Occupancy.At(hover.Value)?.Role != BattlefieldRole.Enemy) return;
+        int enemyId = Session.Occupancy.At(hover.Value).UnitId;
+        foreach (AxialHex cell in Session.GetKnownEnemyIntentPreviewCells(enemyId))
+        {
+            Vector2 center = CellPosition(cell); float r = (float)Session.Definition.CellRadius;
+            Vector2[] hex = Enumerable.Range(0, 6).Select(i => center + Vector2.FromAngle(Mathf.DegToRad(60 * i - 30)) * r).ToArray();
+            DrawColoredPolygon(hex, new Color(1f, .20f, .18f, .25f));
+            for (int i = 0; i < 6; i++) DrawLine(hex[i], hex[(i + 1) % 6], new Color("ff7165"), 2f, true);
+        }
     }
 
     private void DrawAttackPresentation()
@@ -281,8 +313,25 @@ public partial class BattlefieldView : Control
         Vector2 to = CellPosition(activeAttack.To);
         Color color = Session.Occupancy.Placements.TryGetValue(activeAttack.SourceUnitId, out var source) && source.Role == BattlefieldRole.Enemy
             ? new Color("ff9c78") : new Color("ffe18a");
-        bool ranged = activeAttack.Mode is WeaponAttackMode.RangedLine or WeaponAttackMode.ThrowSingle;
-        if (ranged)
+        bool isThrow = activeAttack.Mode == WeaponAttackMode.ThrowSingle;
+        bool ranged = activeAttack.Mode == WeaponAttackMode.RangedLine;
+        if (isThrow)
+        {
+            // Throwing is a true screen-space parabola, not a straight projectile line.
+            float travel = Mathf.Clamp(t / .62f, 0f, 1f);
+            float height = Math.Max(28f, from.DistanceTo(to) * .22f);
+            Vector2 last = from;
+            for (int i = 1; i <= 16; i++)
+            {
+                float u = travel * i / 16f;
+                Vector2 point = from.Lerp(to, u) + Vector2.Up * (Mathf.Sin(Mathf.Pi * u) * height);
+                DrawLine(last, point, color.Darkened(.32f), 2f, true);
+                last = point;
+            }
+            Vector2 projectile = from.Lerp(to, travel) + Vector2.Up * (Mathf.Sin(Mathf.Pi * travel) * height);
+            DrawCircle(projectile, 8, color);
+        }
+        else if (ranged)
         {
             Vector2 projectile = from.Lerp(to, Math.Min(1f, t * 1.7f));
             DrawLine(from, projectile, color.Darkened(.25f), 2.5f, true);
@@ -299,9 +348,10 @@ public partial class BattlefieldView : Control
             if (t is > .20f and < .68f)
                 DrawLine(slashCenter - normal * 20f, slashCenter + normal * 20f, color, 4f, true);
         }
-        if (t > .48f)
+        float impactStart = isThrow ? .62f : .48f;
+        if (t > impactStart)
         {
-            float alpha = 1f - (t - .48f) / .52f;
+            float alpha = 1f - (t - impactStart) / (1f - impactStart);
             DrawCircle(to, 20 + t * 14, new Color(color, .24f * alpha));
             DrawLine(to + new Vector2(-13, -13), to + new Vector2(13, 13), color, 3f, true);
             DrawLine(to + new Vector2(13, -13), to + new Vector2(-13, 13), color, 3f, true);

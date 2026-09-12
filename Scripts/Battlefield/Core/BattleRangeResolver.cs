@@ -152,6 +152,30 @@ public static class BattleRangeResolver
 		return best;
 	}
 
+	/// <summary>Returns a direction only when target lies on one of the six centre-to-centre hex rays.</summary>
+	public static bool TryGetExactLineDirection(AxialHex origin, AxialHex target, out AxialHex direction)
+	{
+		int dq = target.Q - origin.Q, dr = target.R - origin.R;
+		foreach (AxialHex candidate in SixNeighborOffsets)
+		{
+			int steps;
+			if (candidate.Q != 0)
+			{
+				if (dq % candidate.Q != 0) continue;
+				steps = dq / candidate.Q;
+				if (candidate.R * steps != dr) continue;
+			}
+			else
+			{
+				if (dq != 0 || dr % candidate.R != 0) continue;
+				steps = dr / candidate.R;
+			}
+			if (steps > 0) { direction = candidate; return true; }
+		}
+		direction = default;
+		return false;
+	}
+
 	/// <summary>
 	/// 投掷型道具：给定已选落点 target，求会受到影响的格集合。
 	/// 全部以 target 为落点中心；方向由 origin→target 决定（直线/扇形/环形）。

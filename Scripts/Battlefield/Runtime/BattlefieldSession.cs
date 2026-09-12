@@ -8,6 +8,7 @@ namespace CardSimulator.Battlefield;
 public sealed record BattlefieldAttackEvent(long EventId, int SourceUnitId, int? TargetUnitId,
     AxialHex From, AxialHex To, WeaponAttackMode Mode, int Damage, int ShieldAbsorbed, bool Defeated,
     int TargetHpBefore = -1, int TargetHpAfter = -1, int TargetShieldBefore = -1, int TargetShieldAfter = -1);
+public sealed record EnemyIntentDisplay(EnemyIntentPreviewCertainty Certainty, int Damage, int Hits, int ActionBudget, string Tooltip);
 
 /// <summary>Runnable spatial battle session using the existing Card, Effect and State pipelines.</summary>
 public sealed partial class BattlefieldSession : IDisposable
@@ -64,6 +65,9 @@ public sealed partial class BattlefieldSession : IDisposable
         public int EffectIndex;
         public int[][] Intention;
         public bool NeedsTargetInRange;
+        public AxialHex LandingCell;
+        public IReadOnlyList<AxialHex> PlannedPath;
+        public AxialHex? AttackDirection;
     }
 
     public bool HasPendingHandChoice => pendingChoice != null;
@@ -215,6 +219,8 @@ public sealed partial class BattlefieldSession : IDisposable
     public IReadOnlyCollection<AxialHex> GetDefaultAttackCandidates()
     {
         var source = Selected;
+        if (CurrentWeapon.Mode == WeaponAttackMode.RangedLine)
+            return BattleRangeResolver.Neighbors(source.Coord).Where(Board.Cells.ContainsKey).ToArray();
         return Board.Cells.Keys.Where(cell => BattleAttackTraceResolver.Resolve(Board, Occupancy, source.Coord, cell, CurrentWeapon).Count > 0).ToArray();
     }
 
@@ -254,6 +260,14 @@ public sealed partial class BattlefieldSession : IDisposable
             if (spec.Mode is WeaponAttackMode.AdjacentSingle or WeaponAttackMode.RangedLine or WeaponAttackMode.Thrust) break;
             // Melee line continues through units only when this strike broke their shield.
             if (spec.Mode == WeaponAttackMode.MeleeLine && beforeShield > 0 && victim.Unit.Shield > 0) break;
+        }
+        if (hitCount == 0 && spec.Mode == WeaponAttackMode.RangedLine)
+        {
+            AxialHex endpoint = cells.Last();
+            AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, null, source.Coord, endpoint,
+                spec.Mode, 0, 0, false));
+            Message?.Invoke($"{source.Name} 向选定方向射击，弹道未命中单位。 ");
+            Notify(); return true;
         }
         if (hitCount == 0 && spec.Mode != WeaponAttackMode.ThrowSingle) { error = "攻击路径上没有可命中的单位。"; return false; }
         Message?.Invoke($"{source.Name} 使用 {spec.DefinitionId} 普通攻击，命中 {hitCount} 个单位（不消耗资源）。");
@@ -733,9 +747,11 @@ public sealed partial class BattlefieldSession : IDisposable
                 continue;
             }
 
-            if (action.NeedsTargetInRange && action.MoveSteps < action.Spec.MoveBudget && !CanEnemyHit(action.Enemy, action.Target, action.Spec))
+            int plannedHits = action.Intention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
+            int moveLimit = action.Spec.ActionBudget > 0 ? Math.Min(action.Spec.MoveBudget, Math.Max(0, action.Spec.ActionBudget - plannedHits)) : action.Spec.MoveBudget;
+            if (action.NeedsTargetInRange && action.MoveSteps < moveLimit && !CanEnemyHit(action.Enemy, action.Target, action.Spec))
             {
-                AxialHex? step = BestStepToward(action.Enemy, action.Target);
+                AxialHex? step = action.MoveSteps < action.PlannedPath.Count ? action.PlannedPath[action.MoveSteps] : BestStepToward(action.Enemy, action.Target);
                 action.MoveSteps++;
                 if (step.HasValue && Movement.TryMoveWithoutPlayerCost(action.Enemy.UnitId, step.Value, out _)) return true;
             }
@@ -750,7 +766,7 @@ public sealed partial class BattlefieldSession : IDisposable
             if (action.EffectIndex < action.Intention.Length)
             {
                 int[] effect = action.Intention[action.EffectIndex++];
-                ExecuteEnemyIntentionEffect(action.Enemy, action.Target, effect);
+                ExecuteEnemyIntentionEffect(action.Enemy, action.Target, action.Spec, action.LandingCell, action.AttackDirection, effect);
                 Occupancy.SyncDeaths(); EvaluateOutcome();
                 return !IsFinished;
             }
@@ -771,12 +787,25 @@ public sealed partial class BattlefieldSession : IDisposable
             EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
             EnemyIntentPlan plan = EnemyIntentPlanner.Plan(Board, Occupancy, enemy, PlayerIds.Select(id => Occupancy.Placements[id]),
                 Occupancy.Placements.Values.FirstOrDefault(x => x.Role == BattlefieldRole.Protected && x.Presence == BattlefieldPresence.Active), spec, random);
-            if (plan?.Target == null) { SetOutcome(BattlePhase.Defeat, "没有存活玩家。"); return false; }
+            if (plan?.Target == null)
+            {
+                // 索敌失败不能等同于失败：可能只是占位刚变化或该意图无合法目标。
+                // 只有所有玩家的真实 HP 都归零时才允许进入失败。
+                if (PlayerIds.All(id => Occupancy.Placements[id].Unit.HP <= 0))
+                {
+                    SetOutcome(BattlePhase.Defeat, BuildPlayerFailureReason("索敌时未找到存活玩家"));
+                    return false;
+                }
+                Message?.Invoke($"{enemy.Name} 本次没有合法索敌目标，跳过行动。 ");
+                continue;
+            }
             int[][] intention = monster?.SelectedIntention;
             if (intention == null || intention.Length == 0) intention = new[] { new[] { (int)EffectType.Damage, 1, 0 } };
             activeMonsterAction = new MonsterActionState
             {
-                Enemy = enemy, Target = plan.Target, Spec = spec, Intention = intention,
+                Enemy = enemy, Target = plan.Target, Spec = spec, Intention = intention, LandingCell = plan.LandingCell ?? plan.Target.Coord,
+                PlannedPath = plan.Path ?? Array.Empty<AxialHex>(),
+                AttackDirection = plan.AttackDirection,
                 NeedsTargetInRange = intention.Any(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage),
             };
             Message?.Invoke($"{enemy.Name} 开始行动。"); Notify();
@@ -808,6 +837,46 @@ public sealed partial class BattlefieldSession : IDisposable
     {
         if (!Occupancy.Placements.TryGetValue(unitId, out var placement) || placement.Unit is not MonsterInstance monster || monster.SelectedIntention == null)
             return "无意图";
+        EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+        int hitCount = monster.SelectedIntention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
+        int bonus = monster.SelectedIntention.Where(effect => effect != null && effect.Length > 2 && (EffectType)effect[0] == EffectType.Damage).Select(effect => effect[2]).DefaultIfEmpty(0).Max();
+        if (spec.PreviewCertainty == EnemyIntentPreviewCertainty.UnknownNumbers) return "移动 / 攻击";
+        return $"{placement.Unit.Attack + bonus}×{Math.Max(1, hitCount)}";
+    }
+
+    public EnemyIntentDisplay GetEnemyIntentDisplay(int unitId)
+    {
+        if (!Occupancy.Placements.TryGetValue(unitId, out var placement) || placement.Unit is not MonsterInstance monster || monster.SelectedIntention == null)
+            return new EnemyIntentDisplay(EnemyIntentPreviewCertainty.UnknownNumbers, 0, 0, 0, "无可用意图。");
+        EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+        int hits = monster.SelectedIntention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
+        int bonus = monster.SelectedIntention.Where(effect => effect != null && effect.Length > 2 && (EffectType)effect[0] == EffectType.Damage).Select(effect => effect[2]).DefaultIfEmpty(0).Max();
+        int damage = placement.Unit.Attack + bonus;
+        string detail = spec.PreviewCertainty switch
+        {
+            EnemyIntentPreviewCertainty.UnknownNumbers => $"行动总额 {spec.ActionBudget}：移动与攻击次数将在敌方回合按索敌结果分配。",
+            EnemyIntentPreviewCertainty.KnownDamageUnknownRange => $"伤害 {damage}，攻击 {Math.Max(1, hits)} 次；{spec.AttackMode}，最多移动 {spec.MoveBudget} 格后索敌，范围将在敌方回合确定。",
+            _ => $"伤害 {damage}，攻击 {Math.Max(1, hits)} 次；固定 {spec.AttackMode}，距离 {spec.AttackRange}，悬停时显示范围。",
+        };
+        return new EnemyIntentDisplay(spec.PreviewCertainty, damage, Math.Max(1, hits), spec.ActionBudget, detail);
+    }
+
+    public IReadOnlyCollection<AxialHex> GetKnownEnemyIntentPreviewCells(int unitId)
+    {
+        if (!Occupancy.Placements.TryGetValue(unitId, out var p) || p.Unit is not MonsterInstance monster) return Array.Empty<AxialHex>();
+        EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+        if (spec.PreviewCertainty != EnemyIntentPreviewCertainty.KnownDamageKnownRange) return Array.Empty<AxialHex>();
+        AxialHex dir = spec.PreviewDirection ?? BattleRangeResolver.SixNeighborOffsets[0];
+        AxialHex landing = new(p.Coord.Q + dir.Q * spec.AttackRange, p.Coord.R + dir.R * spec.AttackRange);
+        if (spec.AttackMode == WeaponAttackMode.ThrowSingle && spec.AreaRadius > 0)
+            return BattleRangeResolver.CellsWithinRange(landing, spec.AreaRadius).Where(Board.Cells.ContainsKey).ToArray();
+        return BattleAttackTraceResolver.Resolve(Board, Occupancy, p.Coord, landing, new WeaponAttackSpec("preview", spec.AttackRange, 0, spec.AttackMode, 0));
+    }
+
+    private string GetLegacyEnemyIntentionText(int unitId)
+    {
+        if (!Occupancy.Placements.TryGetValue(unitId, out var placement) || placement.Unit is not MonsterInstance monster || monster.SelectedIntention == null)
+            return "无意图";
         var parts = new List<string>();
         foreach (int[] effect in monster.SelectedIntention)
         {
@@ -824,25 +893,36 @@ public sealed partial class BattlefieldSession : IDisposable
         return parts.Count == 0 ? "无意图" : string.Join(" / ", parts);
     }
 
-    private void ExecuteEnemyIntentionEffect(BattleUnitPlacement enemy, BattleUnitPlacement target, int[] effect)
+    private void ExecuteEnemyIntentionEffect(BattleUnitPlacement enemy, BattleUnitPlacement target, EnemyIntentSpec spec, AxialHex landing, AxialHex? attackDirection, int[] effect)
     {
         if (effect == null || effect.Length == 0 || target.Presence != BattlefieldPresence.Active) return;
         EffectType type = (EffectType)effect[0];
         if (type == EffectType.Damage)
         {
             int[] args = effect.Length > 2 ? effect.Skip(2).ToArray() : Array.Empty<int>();
-            int before = target.Unit.HP;
-            using (new BattlefieldEffectTargetScope(enemy.Unit, target.Unit, new[] { target.Unit }, Array.Empty<IUnitInstance>(),
-                playerTurn: false, canAttack: CanDefaultAttack))
+            IReadOnlyList<BattleUnitPlacement> victims = ResolveEnemyAffectedTargets(enemy, target, spec, landing, attackDirection);
+            if (victims.Count == 0 && spec.AttackMode == WeaponAttackMode.RangedLine && attackDirection.HasValue)
             {
-                EffectResult result = EffectSystem.ApplyAttack(enemy.Unit, target.Unit, args);
-                Message?.Invoke($"{enemy.Name} 执行攻击，命中 {target.Name}：{result.TotalValue} 伤害，HP {result.TargetHpBefore}→{result.TargetHpAfter}。 ");
-                AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, target.UnitId,
-                    enemy.Coord, target.Coord, intentSpecFor(enemy), Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
-                    Math.Max(0, result.TargetShieldBefore - result.TargetShieldAfter), result.TargetHpAfter <= 0,
-                    result.TargetHpBefore, result.TargetHpAfter, result.TargetShieldBefore, result.TargetShieldAfter));
+                var trace = BattleAttackSystem.ResolveFromDirection(Board, Occupancy, enemy.Coord, attackDirection.Value,
+                    new WeaponAttackSpec("intent", spec.AttackRange, 0, WeaponAttackMode.RangedLine, 0), enemy.UnitId);
+                AxialHex endpoint = trace.Count > 0 ? trace[^1] : enemy.Coord;
+                AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, null,
+                    enemy.Coord, endpoint, WeaponAttackMode.RangedLine, 0, 0, false));
+                Message?.Invoke($"{enemy.Name} 沿选定方向射击，未命中单位。 ");
             }
-            TrackHpLoss(target.Unit, before);
+            foreach (BattleUnitPlacement victim in victims)
+            {
+                int before = victim.Unit.HP;
+                using (new BattlefieldEffectTargetScope(enemy.Unit, victim.Unit, new[] { victim.Unit }, Array.Empty<IUnitInstance>(), playerTurn: false, canAttack: CanDefaultAttack))
+                {
+                    EffectResult result = EffectSystem.ApplyAttack(enemy.Unit, victim.Unit, args);
+                    AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, victim.UnitId,
+                        enemy.Coord, victim.Coord, spec.AttackMode, Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
+                        Math.Max(0, result.TargetShieldBefore - result.TargetShieldAfter), result.TargetHpAfter <= 0,
+                        result.TargetHpBefore, result.TargetHpAfter, result.TargetShieldBefore, result.TargetShieldAfter));
+                }
+                TrackHpLoss(victim.Unit, before);
+            }
         }
         else if (type == EffectType.Shield)
         {
@@ -853,6 +933,20 @@ public sealed partial class BattlefieldSession : IDisposable
             int stacks = effect.Length > 3 ? effect[3] : 1;
             StateSystem.AddOrUpdateState(target.Unit, (StateType)effect[2], stacks, ownerUnit: enemy.Unit);
         }
+    }
+
+    private IReadOnlyList<BattleUnitPlacement> ResolveEnemyAffectedTargets(BattleUnitPlacement enemy, BattleUnitPlacement target, EnemyIntentSpec spec, AxialHex landing, AxialHex? attackDirection)
+    {
+        IEnumerable<AxialHex> cells = spec.AttackMode == WeaponAttackMode.ThrowSingle && spec.AreaRadius > 0
+            ? BattleRangeResolver.CellsWithinRange(landing, spec.AreaRadius)
+            : spec.AttackMode == WeaponAttackMode.RangedLine && attackDirection.HasValue
+                ? BattleAttackSystem.ResolveFromDirection(Board, Occupancy, enemy.Coord, attackDirection.Value,
+                    new WeaponAttackSpec("intent", spec.AttackRange, 0, WeaponAttackMode.RangedLine, 0), enemy.UnitId)
+            : BattleAttackTraceResolver.Resolve(Board, Occupancy, enemy.Coord, landing, new WeaponAttackSpec("intent", spec.AttackRange, 0, spec.AttackMode, 0));
+        BattleUnitPlacement[] hits = Occupancy.Placements.Values.Where(p => p.Role == BattlefieldRole.Player && p.Presence == BattlefieldPresence.Active && cells.Contains(p.Coord)).ToArray();
+        // Directional projectiles never fall back to their planning target: only the actual trace may hit.
+        if (spec.AttackMode == WeaponAttackMode.RangedLine) return hits;
+        return hits.Length > 0 ? hits : new[] { target };
     }
 
     private WeaponAttackMode intentSpecFor(BattleUnitPlacement enemy) =>
@@ -1148,12 +1242,22 @@ public sealed partial class BattlefieldSession : IDisposable
     private void EvaluateOutcome()
     {
         Occupancy.SyncDeaths();
-        if (!PlayerIds.Any(id => Occupancy.Placements[id].Presence == BattlefieldPresence.Active && Occupancy.Placements[id].Unit.HP > 0))
-            SetOutcome(BattlePhase.Defeat, "全体玩家均已死亡。");
+        // 失败只由真实 HP 决定。Presence 是战场占位状态，不能把短暂/错误的离场标记当作死亡。
+        if (PlayerIds.All(id => Occupancy.Placements[id].Unit.HP <= 0))
+            SetOutcome(BattlePhase.Defeat, BuildPlayerFailureReason("全体玩家均已死亡"));
         else if (AllEnemiesDefeated) SetOutcome(BattlePhase.Victory, "所有敌人已被击败。");
         else if (Occupancy.Placements[SelectedId].Presence != BattlefieldPresence.Active)
-            SelectedId = PlayerIds.First(id => Occupancy.Placements[id].Presence == BattlefieldPresence.Active);
+        {
+            int replacement = PlayerIds.FirstOrDefault(id => Occupancy.Placements[id].Presence == BattlefieldPresence.Active && Occupancy.Placements[id].Unit.HP > 0);
+            if (replacement != 0) SelectedId = replacement;
+        }
     }
+
+    private string BuildPlayerFailureReason(string prefix) => prefix + "。玩家状态：" + string.Join("；", PlayerIds.Select(id =>
+    {
+        BattleUnitPlacement p = Occupancy.Placements[id];
+        return $"{p.Name}(HP={p.Unit.HP}, Presence={p.Presence})";
+    }));
 
     private void SetOutcome(BattlePhase outcome, string reason)
     {

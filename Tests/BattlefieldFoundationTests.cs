@@ -256,6 +256,16 @@ public class BattlefieldFoundationTests
     }
 
     [Fact]
+    public void WeaponTrace_RangedLineRejectsTargetsOutsideSixCentreRays()
+    {
+        var cells = BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 3).Select(x => new BattleCell(x));
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var ranged = new WeaponAttackSpec("bow", 3, 2, WeaponAttackMode.RangedLine, 0);
+        Assert.Empty(BattleAttackTraceResolver.Resolve(board, occupancy, new AxialHex(0, 0), new AxialHex(1, 1), ranged));
+        Assert.NotEmpty(BattleAttackTraceResolver.Resolve(board, occupancy, new AxialHex(0, 0), new AxialHex(2, 0), ranged));
+    }
+
+    [Fact]
     public void EnemyPlanner_ThrowSinglePrefersLowestHealthThenNearest()
     {
         var cells = BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 4).Select(x => new BattleCell(x));
@@ -267,5 +277,22 @@ public class BattlefieldFoundationTests
         var plan = EnemyIntentPlanner.Plan(board, occupancy, enemy, new[] { near, far }, null,
             new EnemyIntentSpec(WeaponAttackMode.ThrowSingle, 4, 0, EnemyActionOrder.MoveThenAttack, EnemyTargetPolicy.ThrowSingleLowestHealth), new Random(1));
         Assert.Same(near, plan.Target);
+    }
+
+    [Fact]
+    public void EnemyPlanner_RangedLinePrefersTargetReachableWithFewestMoves()
+    {
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 4).Select(x => new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+        var enemy = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 1, HP = 10 }, "enemy", BattlefieldRole.Enemy, 0);
+        var nearerButOffRay = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 2, HP = 10 }, "near", BattlefieldRole.Player, 0);
+        var fartherOnRay = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 3, HP = 10 }, "ray", BattlefieldRole.Player, 0);
+        Assert.True(occupancy.TryPlace(enemy, new(0, 0), out _));
+        Assert.True(occupancy.TryPlace(nearerButOffRay, new(1, 1), out _));
+        Assert.True(occupancy.TryPlace(fartherOnRay, new(3, 0), out _));
+        var plan = EnemyIntentPlanner.Plan(board, occupancy, enemy, new[] { nearerButOffRay, fartherOnRay }, null,
+            new EnemyIntentSpec(WeaponAttackMode.RangedLine, 4, 2, EnemyActionOrder.MoveThenAttack, EnemyTargetPolicy.Nearest), new Random(1));
+        Assert.Same(fartherOnRay, plan.Target);
+        Assert.Empty(plan.Path);
     }
 }

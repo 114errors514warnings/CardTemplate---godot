@@ -62,29 +62,13 @@ public static class BattleAttackTraceResolver
     public static IReadOnlyList<AxialHex> Resolve(BattleBoard board, BattleOccupancyService occupancy,
         AxialHex origin, AxialHex chosen, WeaponAttackSpec spec)
     {
-        if (board == null || occupancy == null || spec == null) return Array.Empty<AxialHex>();
-        if (spec.Mode == WeaponAttackMode.ThrowSingle)
-            return BattleRangeResolver.Distance(origin, chosen) <= spec.AttackRange && board.Cells.ContainsKey(chosen)
-                ? new[] { chosen } : Array.Empty<AxialHex>();
+        return BattleAttackSystem.ResolveFromSelectedCell(board, occupancy, origin, chosen, spec);
+    }
 
-        AxialHex direction = BattleRangeResolver.PickLineDirection(origin, chosen);
-        if (spec.Mode == WeaponAttackMode.Fan)
-            return BattleRangeResolver.ResolveFanCells(origin, direction, spec.AttackRange).Where(board.Cells.ContainsKey).ToArray();
-
-        var result = new List<AxialHex>();
-        int length = spec.Mode == WeaponAttackMode.AdjacentSingle ? 1 : spec.AttackRange;
-        for (int i = 1; i <= length; i++)
-        {
-            var cell = new AxialHex(origin.Q + direction.Q * i, origin.R + direction.R * i);
-            if (!board.Cells.TryGetValue(cell, out var data)) break;
-            result.Add(cell);
-            bool blocker = data.Kind == BattleCellKind.Obstacle || data.BlocksSight || occupancy.At(cell) != null;
-            if (spec.Mode is WeaponAttackMode.RangedLine or WeaponAttackMode.Thrust)
-            {
-                if (blocker) break;
-            }
-            else if (spec.Mode == WeaponAttackMode.MeleeLine && (data.Kind == BattleCellKind.Obstacle || data.BlocksSight)) break;
-        }
-        return result;
+    /// <summary>Fires or traces along one of the six centre-to-centre hex directions.</summary>
+    public static IReadOnlyList<AxialHex> ResolveDirection(BattleBoard board, BattleOccupancyService occupancy,
+        AxialHex origin, AxialHex direction, WeaponAttackSpec spec)
+    {
+        return BattleAttackSystem.ResolveFromDirection(board, occupancy, origin, direction, spec);
     }
 }

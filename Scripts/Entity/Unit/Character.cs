@@ -39,7 +39,8 @@ public class CharacterInstance : Character, IUnitInstance
             bool wasAlive = _hp > 0;
             _hp = value;
 
-            BattleSytem battle = BattleSytem.Current;
+            // 六边形战场使用自己的占位与死亡回调，不能被旧 BattleSytem 的全局实例接管。
+            BattleSytem battle = CardSimulator.Battlefield.BattlefieldEffectTargetScope.Current == null ? BattleSytem.Current : null;
             battle?.OnUnitHpChanged(this, oldHp, _hp);
 
             if (wasAlive && _hp <= 0)

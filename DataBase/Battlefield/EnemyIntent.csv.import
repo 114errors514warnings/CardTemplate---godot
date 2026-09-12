@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://beft81qrh2yj2"
+
+[deps]
+
+files=["res://DataBase/Battlefield/EnemyIntent.IntentionIndex.translation", "res://DataBase/Battlefield/EnemyIntent.PreviewCertainty.translation", "res://DataBase/Battlefield/EnemyIntent.AttackMode.translation", "res://DataBase/Battlefield/EnemyIntent.AttackRange.translation", "res://DataBase/Battlefield/EnemyIntent.MoveBudget.translation", "res://DataBase/Battlefield/EnemyIntent.ActionBudget.translation", "res://DataBase/Battlefield/EnemyIntent.ActionOrder.translation", "res://DataBase/Battlefield/EnemyIntent.TargetPolicy.translation", "res://DataBase/Battlefield/EnemyIntent.AreaRadius.translation", "res://DataBase/Battlefield/EnemyIntent.PreviewDirection.translation"]
+
+source_file="res://DataBase/Battlefield/EnemyIntent.csv"
+dest_files=["res://DataBase/Battlefield/EnemyIntent.IntentionIndex.translation", "res://DataBase/Battlefield/EnemyIntent.PreviewCertainty.translation", "res://DataBase/Battlefield/EnemyIntent.AttackMode.translation", "res://DataBase/Battlefield/EnemyIntent.AttackRange.translation", "res://DataBase/Battlefield/EnemyIntent.MoveBudget.translation", "res://DataBase/Battlefield/EnemyIntent.ActionBudget.translation", "res://DataBase/Battlefield/EnemyIntent.ActionOrder.translation", "res://DataBase/Battlefield/EnemyIntent.TargetPolicy.translation", "res://DataBase/Battlefield/EnemyIntent.AreaRadius.translation", "res://DataBase/Battlefield/EnemyIntent.PreviewDirection.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

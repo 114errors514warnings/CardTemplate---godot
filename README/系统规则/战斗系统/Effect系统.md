@@ -55,6 +55,8 @@ Params:     3;1;2|2
 
 ## 四、怪物意图
 
+> 本节的 `MonsterIntentionService` 规则服务于旧版战斗场景。六边形战场仍复用 CSV 中的 Effect 序列，但由 `BattlefieldSession` 以 `EnemyIntent.csv` 补充空间攻击、移动和索敌；范围攻击会对实际覆盖的全部玩家逐一调用伤害结算，而不是使用旧版随机目标流程。
+
 怪物意图（`MonsterInstance.Table`）是一组**预定义的 Effect 序列**，每条 Effect 单独一个 int[]：
 
 ```
