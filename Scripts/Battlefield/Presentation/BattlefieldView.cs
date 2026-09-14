@@ -10,19 +10,19 @@ public partial class BattlefieldView : Control
     public BattlefieldSession Session { get; private set; }
     public Vector2 Pan { get; private set; }
     public bool Moving { get; private set; }
-    public bool HasPendingPresentation => hasActiveMove || hasActiveAttack || moveAnimationQueue.Count > 0 || attackAnimationQueue.Count > 0;
+    public bool HasPendingPresentation => hasActiveMove || hasActiveAttack || presentationQueue.Count > 0;
     private bool dragging;
     private AxialHex? hover;
     public AxialHex? HoveredCell => hover;
     [Export] public float PlayerMoveCellsPerSecond = 5f;
     [Export] public float MonsterMoveCellsPerSecond = 4f;
     [Export] public float AttackPresentationSeconds = 0.55f;
-    private readonly Queue<BattlefieldEntry> moveAnimationQueue = new();
+    private sealed record PresentationStep(BattlefieldEntry Move, BattlefieldAttackEvent Attack);
+    private readonly LinkedList<PresentationStep> presentationQueue = new();
     private BattlefieldEntry activeMove;
     private bool hasActiveMove;
     private float activeMoveElapsed;
     private readonly Dictionary<int, Vector2> visualUnitPositions = new();
-    private readonly Queue<BattlefieldAttackEvent> attackAnimationQueue = new();
     private BattlefieldAttackEvent activeAttack;
     private bool hasActiveAttack;
     private float activeAttackElapsed;
@@ -47,7 +47,7 @@ public partial class BattlefieldView : Control
     public void Bind(BattlefieldSession session)
     {
         if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
-        visualUnitPositions.Clear(); moveAnimationQueue.Clear(); attackAnimationQueue.Clear();
+        visualUnitPositions.Clear(); presentationQueue.Clear();
         moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_move.png");
         attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_attack.png");
         Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
@@ -56,19 +56,53 @@ public partial class BattlefieldView : Control
     public override void _ExitTree()
     { if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; } }
 
-    private void OnUnitEntered(BattlefieldEntry entry) { moveAnimationQueue.Enqueue(entry); QueueRedraw(); }
+    private void OnUnitEntered(BattlefieldEntry entry) { presentationQueue.AddLast(new PresentationStep(entry, null)); QueueRedraw(); }
     private void OnAttackResolved(BattlefieldAttackEvent attack)
     {
-        if (attack.TargetUnitId.HasValue && attack.TargetHpBefore >= 0)
-            presentationStats[attack.TargetUnitId.Value] = (attack.TargetHpBefore, attack.TargetShieldBefore);
-        attackAnimationQueue.Enqueue(attack); QueueRedraw();
+        foreach (int unitId in AffectedUnitIds(attack))
+        {
+            if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
+                presentationStats[unitId] = (attack.TargetUnitId == unitId && attack.TargetHpBefore >= 0
+                    ? attack.TargetHpBefore : target.Unit.HP,
+                    attack.TargetUnitId == unitId && attack.TargetShieldBefore >= 0 ? attack.TargetShieldBefore : target.Unit.Shield);
+        }
+        if (!hasActiveAttack && presentationQueue.Last?.Value.Attack != null && CanMergePresentation(presentationQueue.Last.Value.Attack, attack))
+        {
+            BattlefieldAttackEvent prior = presentationQueue.Last.Value.Attack;
+            presentationQueue.Last.Value = presentationQueue.Last.Value with { Attack = prior with
+            {
+                AffectedCells = CellsFor(prior).Concat(CellsFor(attack)).Distinct().ToArray(),
+                AffectedUnitIds = AffectedUnitIds(prior).Concat(AffectedUnitIds(attack)).Distinct().ToArray(),
+                IsExplosion = prior.IsExplosion || attack.IsExplosion,
+            }};
+        }
+        else presentationQueue.AddLast(new PresentationStep(null, attack));
+        QueueRedraw();
     }
+
+    private static bool CanMergePresentation(BattlefieldAttackEvent prior, BattlefieldAttackEvent next) =>
+        next.EventId == prior.EventId + 1 && prior.SourceUnitId == next.SourceUnitId && prior.Mode == next.Mode && prior.From == next.From;
+    private static IEnumerable<AxialHex> CellsFor(BattlefieldAttackEvent attack) => attack.AffectedCells ?? new[] { attack.To };
+    private static IEnumerable<int> AffectedUnitIds(BattlefieldAttackEvent attack) => attack.AffectedUnitIds
+        ?? (attack.TargetUnitId.HasValue ? new[] { attack.TargetUnitId.Value } : Array.Empty<int>());
     public override void _Process(double delta)
     {
         if (Session == null) return;
         foreach (int unitId in visualUnitPositions.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
             visualUnitPositions.Remove(unitId);
-        if (!hasActiveMove && moveAnimationQueue.Count > 0) { activeMove = moveAnimationQueue.Dequeue(); hasActiveMove = true; activeMoveElapsed = 0; visualUnitPositions[activeMove.UnitId] = CellPosition(activeMove.From); }
+        if (!hasActiveMove && !hasActiveAttack && presentationQueue.First != null)
+        {
+            PresentationStep step = presentationQueue.First.Value; presentationQueue.RemoveFirst();
+            if (step.Move != null)
+            {
+                activeMove = step.Move; hasActiveMove = true; activeMoveElapsed = 0;
+                visualUnitPositions[activeMove.UnitId] = CellPosition(activeMove.From);
+            }
+            else
+            {
+                activeAttack = step.Attack; hasActiveAttack = true; activeAttackElapsed = 0; activeAttackImpactApplied = false;
+            }
+        }
         if (hasActiveMove)
         {
             var step = activeMove; float speed = Session.Occupancy.Placements.TryGetValue(step.UnitId, out var p) && p.Role == BattlefieldRole.Enemy ? MonsterMoveCellsPerSecond : PlayerMoveCellsPerSecond;
@@ -82,20 +116,19 @@ public partial class BattlefieldView : Control
                 hasActiveMove = false;
             }
         }
-        if (!hasActiveAttack && !hasActiveMove && moveAnimationQueue.Count == 0 && attackAnimationQueue.Count > 0)
-        { activeAttack = attackAnimationQueue.Dequeue(); hasActiveAttack = true; activeAttackElapsed = 0; activeAttackImpactApplied = false; }
         if (hasActiveAttack)
         {
             activeAttackElapsed += (float)delta;
-            if (!activeAttackImpactApplied && activeAttackElapsed >= AttackPresentationSeconds * .48f)
+            if (!activeAttackImpactApplied && activeAttackElapsed >= AttackPresentationSeconds * .94f)
             {
                 activeAttackImpactApplied = true;
-                if (activeAttack.TargetUnitId.HasValue && activeAttack.TargetHpAfter >= 0)
-                    presentationStats[activeAttack.TargetUnitId.Value] = (activeAttack.TargetHpAfter, activeAttack.TargetShieldAfter);
+                foreach (int unitId in AffectedUnitIds(activeAttack))
+                    if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
+                        presentationStats[unitId] = (target.Unit.HP, target.Unit.Shield);
             }
             if (activeAttackElapsed >= AttackPresentationSeconds)
             {
-                if (activeAttack.TargetUnitId.HasValue) presentationStats.Remove(activeAttack.TargetUnitId.Value);
+                foreach (int unitId in AffectedUnitIds(activeAttack)) presentationStats.Remove(unitId);
                 hasActiveAttack = false;
             }
         }
@@ -258,13 +291,18 @@ public partial class BattlefieldView : Control
                 Vector2 attackTo = CellPosition(activeAttack.To);
                 Vector2 direction = (attackTo - attackFrom).Normalized();
                 float attackT = Math.Min(1f, activeAttackElapsed / AttackPresentationSeconds);
-                if (p.UnitId == activeAttack.SourceUnitId && activeAttack.Mode is not WeaponAttackMode.RangedLine and not WeaponAttackMode.ThrowSingle)
-                    center += direction * (Mathf.Sin(Mathf.Pi * Math.Min(attackT, .55f) / .55f) * 12f);
-                if (p.UnitId == activeAttack.TargetUnitId && attackT is > .44f and < .78f)
-                    center += direction * (Mathf.Sin((attackT - .44f) / .34f * Mathf.Pi) * 7f);
+                if (p.UnitId == activeAttack.SourceUnitId && activeAttack.Mode == WeaponAttackMode.Thrust && attackT >= .5f)
+                    center = attackFrom.Lerp(attackTo, Mathf.Clamp((attackT - .5f) / .44f, 0f, 1f));
+                if (AffectedUnitIds(activeAttack).Contains(p.UnitId) && activeAttack.Mode is WeaponAttackMode.AdjacentSingle or WeaponAttackMode.Fan or WeaponAttackMode.Ring && attackT >= .84f)
+                {
+                    if (activeAttack.Mode is WeaponAttackMode.Fan or WeaponAttackMode.Ring)
+                        direction = new Vector2(-direction.Y, direction.X);
+                    center += direction * (Mathf.Sin(Mathf.Pi * Mathf.Clamp((attackT - .84f) / .16f, 0f, 1f)) * 10f);
+                }
             }
             if (!new Rect2(-60, -60, Size.X + 120, Size.Y + 120).HasPoint(center)) continue;
             Color color = p.Role == BattlefieldRole.Player ? new Color("69bec9") : new Color("d88885");
+            if (hasActiveAttack && activeAttackImpactApplied && AffectedUnitIds(activeAttack).Contains(p.UnitId)) color = Colors.Red;
             DrawCircle(center + new Vector2(0, -7), 16, color);
             CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
@@ -313,51 +351,74 @@ public partial class BattlefieldView : Control
         Vector2 to = CellPosition(activeAttack.To);
         Color color = Session.Occupancy.Placements.TryGetValue(activeAttack.SourceUnitId, out var source) && source.Role == BattlefieldRole.Enemy
             ? new Color("ff9c78") : new Color("ffe18a");
-        bool isThrow = activeAttack.Mode == WeaponAttackMode.ThrowSingle;
-        bool ranged = activeAttack.Mode == WeaponAttackMode.RangedLine;
-        if (isThrow)
+        if (activeAttack.Mode == WeaponAttackMode.ThrowSingle) DrawParabolaAttack(from, to, t, color);
+        else if (activeAttack.Mode == WeaponAttackMode.Fan) DrawSwing(from, to, t, color, 120f);
+        else if (activeAttack.Mode == WeaponAttackMode.Ring) DrawSwing(from, to, t, color, 360f);
+        else DrawLineStrike(from, to, t, color);
+
+        if (activeAttackImpactApplied)
         {
-            // Throwing is a true screen-space parabola, not a straight projectile line.
-            float travel = Mathf.Clamp(t / .62f, 0f, 1f);
-            float height = Math.Max(28f, from.DistanceTo(to) * .22f);
-            Vector2 last = from;
-            for (int i = 1; i <= 16; i++)
+            DrawAreaMarker(color);
+            foreach (int unitId in AffectedUnitIds(activeAttack))
             {
-                float u = travel * i / 16f;
-                Vector2 point = from.Lerp(to, u) + Vector2.Up * (Mathf.Sin(Mathf.Pi * u) * height);
-                DrawLine(last, point, color.Darkened(.32f), 2f, true);
-                last = point;
+                if (!Session.Occupancy.Placements.TryGetValue(unitId, out var target)) continue;
+                Vector2 impact = CellPosition(target.Coord);
+                DrawCircle(impact, 24, new Color(Colors.Red, .35f));
+                DrawLine(impact + new Vector2(-13, -13), impact + new Vector2(13, 13), Colors.Red, 3f, true);
+                DrawLine(impact + new Vector2(13, -13), impact + new Vector2(-13, 13), Colors.Red, 3f, true);
             }
-            Vector2 projectile = from.Lerp(to, travel) + Vector2.Up * (Mathf.Sin(Mathf.Pi * travel) * height);
-            DrawCircle(projectile, 8, color);
         }
-        else if (ranged)
+    }
+
+    private void DrawLineStrike(Vector2 from, Vector2 to, float t, Color color)
+    {
+        float phase = Mathf.Clamp(t / .88f, 0f, 1f);
+        Vector2 start = phase <= .5f ? from : from.Lerp(to, (phase - .5f) * 2f);
+        Vector2 end = phase <= .5f ? from.Lerp(to, phase * 2f) : to;
+        DrawLine(start, end, color, 4f, true);
+    }
+
+    private void DrawParabolaAttack(Vector2 from, Vector2 to, float t, Color color)
+    {
+        float reveal = t <= .5f ? t * 2f : 1f;
+        float eraseStart = t <= .5f ? 0f : (t - .5f) * 2f;
+        float height = Math.Max(28f, from.DistanceTo(to) * .22f);
+        Vector2? last = null;
+        for (int i = 0; i <= 24; i++)
         {
-            Vector2 projectile = from.Lerp(to, Math.Min(1f, t * 1.7f));
-            DrawLine(from, projectile, color.Darkened(.25f), 2.5f, true);
-            DrawCircle(projectile, 7, color);
+            float u = i / 24f;
+            if (u < eraseStart || u > reveal) continue;
+            Vector2 point = from.Lerp(to, u) + Vector2.Up * (Mathf.Sin(Mathf.Pi * u) * height);
+            if (last.HasValue) DrawLine(last.Value, point, color, 3f, true);
+            last = point;
         }
-        else
+    }
+
+    private void DrawSwing(Vector2 from, Vector2 to, float t, Color color, float degrees)
+    {
+        Vector2 direction = activeAttack.Direction.HasValue
+            ? CellPosition(new AxialHex(activeAttack.From.Q + activeAttack.Direction.Value.Q, activeAttack.From.R + activeAttack.Direction.Value.R)) - from
+            : to - from;
+        if (direction.LengthSquared() < .01f) direction = Vector2.Right;
+        float length = Math.Max(32f, from.DistanceTo(to));
+        float extend = Mathf.Clamp(t / .18f, 0f, 1f);
+        float angle = direction.Angle() - Mathf.DegToRad(degrees / 2f) + Mathf.DegToRad(degrees) * Mathf.Clamp((t - .18f) / .70f, 0f, 1f);
+        DrawLine(from, from + Vector2.FromAngle(angle) * length * extend, color, 4f, true);
+    }
+
+    private void DrawAreaMarker(Color color)
+    {
+        bool isArea = activeAttack.Mode is WeaponAttackMode.Fan or WeaponAttackMode.Ring
+            || activeAttack.Mode == WeaponAttackMode.ThrowSingle && CellsFor(activeAttack).Skip(1).Any()
+            || activeAttack.IsExplosion;
+        if (!isArea) return;
+        float r = (float)Session.Definition.CellRadius;
+        foreach (AxialHex cell in CellsFor(activeAttack).Distinct())
         {
-            Vector2 direction = (to - from).Normalized();
-            Vector2 normal = new Vector2(-direction.Y, direction.X);
-            float strike = Mathf.Clamp((t - .22f) / .30f, 0f, 1f);
-            Vector2 slashCenter = from.Lerp(to, strike * .72f);
-            float angle = direction.Angle();
-            DrawArc(from + direction * 15f, 30f, angle - 1.15f, angle + 1.15f, 18, color, 3.5f, true);
-            if (t is > .20f and < .68f)
-                DrawLine(slashCenter - normal * 20f, slashCenter + normal * 20f, color, 4f, true);
-        }
-        float impactStart = isThrow ? .62f : .48f;
-        if (t > impactStart)
-        {
-            float alpha = 1f - (t - impactStart) / (1f - impactStart);
-            DrawCircle(to, 20 + t * 14, new Color(color, .24f * alpha));
-            DrawLine(to + new Vector2(-13, -13), to + new Vector2(13, 13), color, 3f, true);
-            DrawLine(to + new Vector2(13, -13), to + new Vector2(-13, 13), color, 3f, true);
-            string damage = activeAttack.ShieldAbsorbed > 0
-                ? $"-{activeAttack.Damage} 盾-{activeAttack.ShieldAbsorbed}" : $"-{activeAttack.Damage}";
-            CenterText(to + new Vector2(0, -48 - t * 18), activeAttack.Defeated ? damage + " 击败" : damage, 15, color);
+            Vector2 center = CellPosition(cell);
+            Vector2[] hex = Enumerable.Range(0, 6).Select(i => center + Vector2.FromAngle(Mathf.DegToRad(60 * i - 30)) * r).ToArray();
+            DrawColoredPolygon(hex, new Color(color, .20f));
+            for (int i = 0; i < 6; i++) DrawLine(hex[i], hex[(i + 1) % 6], color, 2f, true);
         }
     }
 

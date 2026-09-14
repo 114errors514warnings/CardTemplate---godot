@@ -17,6 +17,8 @@ public static class BattleAttackSystem
             return Array.Empty<AxialHex>();
         if (spec.Mode == WeaponAttackMode.Fan)
             return BattleRangeResolver.ResolveFanCells(origin, direction, spec.AttackRange).Where(board.Cells.ContainsKey).ToArray();
+        if (spec.Mode == WeaponAttackMode.Ring)
+            return BattleRangeResolver.CellsWithinRange(origin, spec.AttackRange).Where(board.Cells.ContainsKey).ToArray();
         if (spec.Mode == WeaponAttackMode.ThrowSingle) return Array.Empty<AxialHex>();
 
         int length = spec.Mode == WeaponAttackMode.AdjacentSingle ? 1 : spec.AttackRange;
@@ -44,6 +46,10 @@ public static class BattleAttackSystem
         if (spec?.Mode == WeaponAttackMode.ThrowSingle)
             return BattleRangeResolver.Distance(origin, selectedCell) <= spec.AttackRange && board.Cells.ContainsKey(selectedCell)
                 ? new[] { selectedCell } : Array.Empty<AxialHex>();
+        if (spec?.Mode == WeaponAttackMode.Ring)
+            return BattleRangeResolver.Distance(origin, selectedCell) <= spec.AttackRange
+                ? BattleRangeResolver.CellsWithinRange(origin, spec.AttackRange).Where(board.Cells.ContainsKey).ToArray()
+                : Array.Empty<AxialHex>();
         if (!TrySelectDirection(origin, selectedCell, out AxialHex direction)) return Array.Empty<AxialHex>();
         return ResolveFromDirection(board, occupancy, origin, direction, spec, ignoredOccupantId);
     }

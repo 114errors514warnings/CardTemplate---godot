@@ -91,7 +91,7 @@ public class CharacterInstance : Character, IUnitInstance
         Attack = Ini_Attack;
         Defend = Ini_Defend;
         Shield = 0;
-        Max_costs = 3;
+        Max_costs = GameVariables.Load().DefaultEnergyPerTurn;
         costs = 0;
         posx = 0;
         posy = 0;
@@ -111,7 +111,7 @@ public class CharacterInstance : Character, IUnitInstance
         this.Attack = Attack;
         this.Defend = Defend;
         this.Shield = Shield;
-        Max_costs = 3;
+        Max_costs = GameVariables.Load().DefaultEnergyPerTurn;
         this.costs = costs;
         this.posx = posx;
         this.posy = posy;
@@ -130,7 +130,7 @@ public class CharacterInstance : Character, IUnitInstance
         Attack = c.Ini_Attack;
         Defend = c.Ini_Defend;
         Shield = 0;
-        Max_costs = 3;
+        Max_costs = GameVariables.Load().DefaultEnergyPerTurn;
         costs = 0;
         posx = 0;
         posy = 0;

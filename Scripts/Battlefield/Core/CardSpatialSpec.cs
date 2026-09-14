@@ -26,7 +26,7 @@ public sealed class CardSpatialSpec
 	public string TrapId = string.Empty;
 	public bool Penetrates;
 	public bool Explodes;
-	public bool Dashes;
+	public WeaponAttackMode? AttackMode;
 
 	public bool HasSpatial => Shape != CardSpatialShape.None;
 
@@ -54,11 +54,24 @@ public sealed class CardSpatialSpec
 				else if (TryArg(t, "Length", out int length)) spec.Length = Math.Max(1, length);
 				else if (t.Equals("Pierce", StringComparison.OrdinalIgnoreCase) || t.Equals("Penetrates", StringComparison.OrdinalIgnoreCase)) spec.Penetrates = true;
 				else if (t.Equals("Explode", StringComparison.OrdinalIgnoreCase) || t.Equals("Explodes", StringComparison.OrdinalIgnoreCase)) spec.Explodes = true;
-				else if (t.Equals("Dash", StringComparison.OrdinalIgnoreCase) || t.Equals("Dashes", StringComparison.OrdinalIgnoreCase)) spec.Dashes = true;
+				else if (TryAttackMode(t, out WeaponAttackMode mode)) spec.AttackMode = mode;
 			}
 		}
 
+		// Thrust 统一采用首目标拦截规则，不能与穿透共存。
+		if (spec.AttackMode == WeaponAttackMode.Thrust) spec.Penetrates = false;
 		return spec;
+	}
+
+	private static bool TryAttackMode(string token, out WeaponAttackMode mode)
+	{
+		mode = default;
+		const string key = "AttackMode=";
+		const string chineseKey = "AttackMode：";
+		if (!token.StartsWith(key, StringComparison.OrdinalIgnoreCase) && !token.StartsWith(chineseKey, StringComparison.OrdinalIgnoreCase)) return false;
+		int separator = token.IndexOf('=');
+		if (separator < 0) separator = token.IndexOf('：');
+		return Enum.TryParse(token[(separator + 1)..].Trim(), true, out mode);
 	}
 
 	private static string Field(string[] fields, int index) => index < fields.Length ? (fields[index] ?? string.Empty).Trim() : string.Empty;

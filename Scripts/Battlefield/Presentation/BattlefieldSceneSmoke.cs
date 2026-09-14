@@ -74,14 +74,14 @@ public static class BattlefieldSceneSmoke
             Check(session.HandCount(session.SelectedId) >= handBefore - 1, "draw card effect and lifecycle");
             Card burstCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001002);
             Check(burstCard != null && !session.GetCastCandidates(burstCard.CardId).Contains(session.Selected.Coord), "burst cannot target self cell");
-            Card dashCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001003);
-            Check(dashCard != null, "dash card loaded");
-            AxialHex dashTarget = session.GetCastCandidates(dashCard.CardId).First(cell =>
+            Card thrustCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001003);
+            Check(thrustCard != null, "thrust card loaded");
+            AxialHex thrustTarget = session.GetCastCandidates(thrustCard.CardId).First(cell =>
                 AxialHex.Distance(session.Selected.Coord, cell) == 2 &&
-                session.GetAffectedCells(dashCard.CardId, cell).All(path => session.Board.IsWalkable(path) && session.Occupancy.At(path) == null));
-            AxialHex dashStart = session.Selected.Coord;
-            Check(session.TryCastCard(dashCard.CardId, dashTarget, out castError), "dash without target: " + castError);
-            Check(session.Selected.Coord != dashStart && AxialHex.Distance(dashStart, session.Selected.Coord) == 2, "dash moves without enemy");
+                session.GetAffectedCells(thrustCard.CardId, cell).All(path => session.Board.IsWalkable(path) && session.Occupancy.At(path) == null));
+            AxialHex thrustStart = session.Selected.Coord;
+            Check(session.TryCastCard(thrustCard.CardId, thrustTarget, out castError), "thrust without target: " + castError);
+            Check(session.Selected.Coord != thrustStart && AxialHex.Distance(thrustStart, session.Selected.Coord) == 2, "thrust moves without enemy");
             Card attackCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001001);
             Check(attackCard != null, "spatial attack card loaded");
             var attackCell = BattleHexLayout.Neighbors(session.Selected.Coord).First(x => session.Occupancy.CanEnter(x));
@@ -109,7 +109,7 @@ public static class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, dash, burst self exclusion, spatial damage, monster turn, states, victory");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster turn, states, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)

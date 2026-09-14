@@ -20,12 +20,13 @@ public sealed class BattlefieldEffectTargetScope : IDisposable
     private readonly int sourceLostHp;
     private readonly bool playerTurn;
     private readonly Func<IUnitInstance, IUnitInstance, bool> canAttack;
+    private readonly bool spatialAttackTargets;
 
     public static BattlefieldEffectTargetScope Current => current.Value;
 
     public BattlefieldEffectTargetScope(IUnitInstance source, IUnitInstance selected,
         IReadOnlyList<IUnitInstance> enemies, IReadOnlyList<IUnitInstance> allies, int sourceLostHp = 0,
-        bool playerTurn = true, Func<IUnitInstance, IUnitInstance, bool> canAttack = null)
+        bool playerTurn = true, Func<IUnitInstance, IUnitInstance, bool> canAttack = null, bool spatialAttackTargets = false)
     {
         this.source = source;
         this.selected = selected;
@@ -34,6 +35,7 @@ public sealed class BattlefieldEffectTargetScope : IDisposable
         this.sourceLostHp = Math.Max(0, sourceLostHp);
         this.playerTurn = playerTurn;
         this.canAttack = canAttack;
+        this.spatialAttackTargets = spatialAttackTargets;
         previous = current.Value;
         current.Value = this;
     }
@@ -54,6 +56,7 @@ public sealed class BattlefieldEffectTargetScope : IDisposable
                 if (source != null) result.Add(source);
                 break;
             case EffectTargetType.SelectedTarget:
+                if (spatialAttackTargets && enemies.Count > 0) { result.AddRange(enemies); break; }
                 IUnitInstance target = selected ?? requestedSelected;
                 if (target != null) result.Add(target);
                 break;
@@ -70,7 +73,8 @@ public sealed class BattlefieldEffectTargetScope : IDisposable
                 break;
             case EffectTargetType.Auto:
             default:
-                result.Add(selected ?? requestedSelected ?? source);
+                if (spatialAttackTargets && enemies.Count > 0) result.AddRange(enemies);
+                else result.Add(selected ?? requestedSelected ?? source);
                 break;
         }
         result.RemoveAll(x => x == null || x.HP <= 0);

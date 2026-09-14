@@ -97,8 +97,10 @@ public static class EnemyIntentPlanner
 	}
 
 	/// <summary>
-	/// Finds the player which can be hit after the fewest legal movement steps.  Every checked shot is an exact
+	/// Finds the player which can be hit after the fewest legal movement steps. Every checked shot is an exact
 	/// six-direction centre ray; obstacles and intervening units invalidate that ray, but are never target candidates.
+	/// If the current turn cannot reach a firing cell, returns the current turn's prefix of the shortest route to a
+	/// future firing cell so a ranged enemy advances toward a real shot instead of idling.
 	/// </summary>
 	private static EnemyIntentPlan PlanRangedLine(BattleBoard board, BattleOccupancyService occupancy, BattleUnitPlacement enemy,
 		IReadOnlyList<BattleUnitPlacement> players, EnemyIntentSpec spec)
@@ -115,7 +117,6 @@ public static class EnemyIntentPlanner
 				if (CanRangedHitFrom(board, occupancy, enemy.UnitId, current.Cell, player.Coord, spec.AttackRange, out AxialHex direction))
 					options.Add((player, current.Path, direction));
 			}
-			if (current.Path.Count >= spec.MoveBudget) continue;
 			foreach (AxialHex next in BattleRangeResolver.Neighbors(current.Cell).OrderBy(x => x.Q).ThenBy(x => x.R))
 			{
 				if (!seen.Add(next) || !board.IsWalkable(next)) continue;
@@ -124,14 +125,27 @@ public static class EnemyIntentPlanner
 				queue.Enqueue((next, path));
 			}
 		}
-		if (options.Count == 0) return null;
-		int minSteps = options.Min(x => x.Path.Count);
-		IEnumerable<(BattleUnitPlacement Target, List<AxialHex> Path, AxialHex Direction)> best = options.Where(x => x.Path.Count == minSteps);
+		var immediateOptions = options.Where(x => x.Path.Count <= spec.MoveBudget).ToList();
+		if (immediateOptions.Count > 0)
+		{
+			var chosen = ChooseRangedLineOption(immediateOptions, spec);
+			return new EnemyIntentPlan(chosen.Target, chosen.Target.Coord, chosen.Path, chosen.Direction);
+		}
+
+		if (spec.MoveBudget <= 0 || options.Count == 0) return null;
+		var future = ChooseRangedLineOption(options, spec);
+		return new EnemyIntentPlan(future.Target, future.Target.Coord,
+			future.Path.Take(spec.MoveBudget).ToArray());
+	}
+
+	private static (BattleUnitPlacement Target, List<AxialHex> Path, AxialHex Direction) ChooseRangedLineOption(
+		IEnumerable<(BattleUnitPlacement Target, List<AxialHex> Path, AxialHex Direction)> options, EnemyIntentSpec spec)
+	{
 		if (spec.TargetPolicy == EnemyTargetPolicy.ThrowSingleLowestHealth)
-			best = best.OrderBy(x => x.Target.Unit.HP).ThenBy(x => x.Target.UnitId);
-		else best = best.OrderBy(x => x.Target.UnitId);
-		var chosen = best.First();
-		return new EnemyIntentPlan(chosen.Target, chosen.Target.Coord, chosen.Path, chosen.Direction);
+			return options.OrderBy(x => x.Path.Count).ThenBy(x => x.Target.Unit.HP).ThenBy(x => x.Target.UnitId)
+				.ThenBy(x => x.Direction.Q).ThenBy(x => x.Direction.R).First();
+		return options.OrderBy(x => x.Path.Count).ThenBy(x => x.Target.UnitId)
+			.ThenBy(x => x.Direction.Q).ThenBy(x => x.Direction.R).First();
 	}
 
 	private static bool CanRangedHitFrom(BattleBoard board, BattleOccupancyService occupancy, int movingEnemyId,

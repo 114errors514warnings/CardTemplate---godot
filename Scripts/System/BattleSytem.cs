@@ -803,7 +803,7 @@ public partial class BattleSytem : Node
         player.Defend = template.Ini_Defend;
         player.drawCardNum = template.drawCardNum;
         player.Shield = 0;
-        player.Max_costs = 3;
+        player.Max_costs = GameVariables.Load().DefaultEnergyPerTurn;
         player.costs = 0;
         player.posx = 0;
         player.posy = 0;

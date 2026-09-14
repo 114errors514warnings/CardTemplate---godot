@@ -6,7 +6,7 @@ using System.Linq;
 namespace CardSimulator.Battlefield;
 
 /// <summary>Weapon default attack modes. CSV uses these enum names exactly.</summary>
-public enum WeaponAttackMode { AdjacentSingle, MeleeLine, Fan, ThrowSingle, RangedLine, Thrust }
+public enum WeaponAttackMode { AdjacentSingle, MeleeLine, Fan, Ring, ThrowSingle, RangedLine, Thrust }
 
 /// <summary>Battlefield-only weapon rules. Card ranges consume AttackRange, while normal attacks consume Mode.</summary>
 public sealed record WeaponAttackSpec(string DefinitionId, int AttackRange, int HandsRequired,

@@ -42,6 +42,13 @@ public partial class HexBattleScene : Control
     private Control friendlyWarningShade;
     private Label friendlyWarningText;
     private Action pendingFriendlyHit;
+    private Action pendingFriendlyCancel;
+    private CheckBox suppressFriendlyTurnBox;
+    private CheckBox suppressFriendlyBattleBox;
+    private CheckBox suppressFriendlyRunBox;
+    private bool suppressFriendlyBattle;
+    private static bool suppressFriendlyRun;
+    private int suppressedFriendlyTurn = -1;
     private Control leftHandButton;
     private Control rightHandButton;
     private int draggedEquipmentHand = -1;
@@ -333,9 +340,12 @@ public partial class HexBattleScene : Control
         var warningBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; warningBox.AddThemeConstantOverride("separation", 16); warningPanel.AddChild(warningBox);
         warningBox.AddChild(Label("友方伤害警告", 24, new Color("ffb36b")));
         friendlyWarningText = Label("", 15, Colors.White); friendlyWarningText.AutowrapMode = TextServer.AutowrapMode.WordSmart; warningBox.AddChild(friendlyWarningText);
+        suppressFriendlyTurnBox = new CheckBox { Text = "本回合内不再弹出" }; warningBox.AddChild(suppressFriendlyTurnBox);
+        suppressFriendlyBattleBox = new CheckBox { Text = "本次战斗内不再弹出" }; warningBox.AddChild(suppressFriendlyBattleBox);
+        suppressFriendlyRunBox = new CheckBox { Text = "本局游戏内不再弹出" }; warningBox.AddChild(suppressFriendlyRunBox);
         var warningButtons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; warningButtons.AddThemeConstantOverride("separation", 18); warningBox.AddChild(warningButtons);
-        AddButton(warningButtons, "确认命中", () => { var action = pendingFriendlyHit; CloseFriendlyWarning(); action?.Invoke(); });
-        AddButton(warningButtons, "取消", () => { CloseFriendlyWarning(); CancelItemDrag(); });
+        AddButton(warningButtons, "确认命中", () => { ApplyFriendlyWarningSuppression(); var action = pendingFriendlyHit; CloseFriendlyWarning(); action?.Invoke(); });
+        AddButton(warningButtons, "取消", () => { var action = pendingFriendlyCancel; CloseFriendlyWarning(); action?.Invoke(); });
         // ── 牌堆弹窗 ──
         var pileShade = new ColorRect { Color = new Color(0, 0, 0, .55f), Visible = false, ZIndex = 35, ProcessMode = ProcessModeEnum.Always };
         pileShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(pileShade);
@@ -499,7 +509,7 @@ public partial class HexBattleScene : Control
         if (Session == null) return;
         var p = Session.Selected;
         title.Text = $"{FormatPhase(Session.Phase)} · 回合 {Session.Round}";
-        int maxEnergy = Math.Max(p.Unit.Energy, 3);
+        int maxEnergy = Math.Max(p.Unit.Energy, p.Unit is CharacterInstance c ? c.Max_costs : GameVariables.Load().DefaultEnergyPerTurn);
         resources.Text = $"{p.Name}\n能量 {p.Unit.Energy}/{maxEnergy}";
         moveInfo.Text = $"移动 {p.RemainingMoves}/{p.EffectiveMovesPerTurn} · 每次 {p.EffectiveMoveDistancePerAction} 格";
         for (int i = 0; i < 3; i++)
@@ -760,13 +770,25 @@ public partial class HexBattleScene : Control
     // 底部信息栏已移除：所有操作反馈统一打印到 Godot 控制台（Output 面板），便于日志排查。
     private void ShowMessage(string text) => GD.Print($"[战场] {text}");
     private bool NeedsFriendlyHitWarning(AxialHex target) => Session?.Occupancy.At(target)?.Role == BattlefieldRole.Player;
+    private bool IsFriendlyWarningSuppressed() => suppressFriendlyRun || suppressFriendlyBattle || suppressedFriendlyTurn == Session?.Round;
+    private void ApplyFriendlyWarningSuppression()
+    {
+        if (suppressFriendlyTurnBox.ButtonPressed) suppressedFriendlyTurn = Session?.Round ?? -1;
+        if (suppressFriendlyBattleBox.ButtonPressed) suppressFriendlyBattle = true;
+        if (suppressFriendlyRunBox.ButtonPressed) suppressFriendlyRun = true;
+    }
     private void ShowFriendlyHitWarning(GroundObject item, AxialHex target, Action confirm)
     {
-        pendingFriendlyHit = confirm;
-        friendlyWarningText.Text = $"{item.DefinitionId} 将命中友方单位。\n确认继续造成伤害吗？";
+        ShowFriendlyHitWarning($"{item.DefinitionId} 将命中友方单位。\n确认继续造成伤害吗？", confirm, CancelItemDrag);
+    }
+    private void ShowFriendlyHitWarning(string text, Action confirm, Action cancel)
+    {
+        pendingFriendlyHit = confirm; pendingFriendlyCancel = cancel;
+        suppressFriendlyTurnBox.ButtonPressed = false; suppressFriendlyBattleBox.ButtonPressed = false; suppressFriendlyRunBox.ButtonPressed = false;
+        friendlyWarningText.Text = text;
         friendlyWarningShade.Visible = true;
     }
-    private void CloseFriendlyWarning() { pendingFriendlyHit = null; friendlyWarningShade.Visible = false; }
+    private void CloseFriendlyWarning() { pendingFriendlyHit = null; pendingFriendlyCancel = null; friendlyWarningShade.Visible = false; }
     private void ShowTooltip(string text, Vector2 screenPosition)
     {
         tooltip.Visible = text.Length > 0 && !pauseShade.Visible;
@@ -963,6 +985,7 @@ public partial class HexBattleScene : Control
             bool valid = exited && hover.HasValue && Session.GetCastCandidates(draggedCard.CardId).Contains(hover.Value);
             if (valid)
             {
+                if (TryShowCardFriendlyWarning(hover.Value)) return;
                 if (TryCastPendingTo(hover.Value)) CleanupAfterDrag();
                 else CancelCardDrag();
             }
@@ -977,6 +1000,21 @@ public partial class HexBattleScene : Control
             }
             else { CancelCardDrag(); ShowMessage("未拖出手牌区，已取消出牌。"); }
         }
+    }
+
+    private bool TryShowCardFriendlyWarning(AxialHex target)
+    {
+        if (Session == null || draggedCard == null || IsFriendlyWarningSuppressed() || !Session.CardCanCauseNegativeEffect(draggedCard.CardId)) return false;
+        var allies = Session.GetFriendlyAffectedTargets(draggedCard.CardId, target);
+        if (allies.Count == 0) return false;
+        int cardId = draggedCard.CardId;
+        string names = string.Join("、", allies.Select(x => x.Name));
+        ShowFriendlyHitWarning($"{draggedCard.CardName} 将对友方单位 {names} 造成伤害或负面效果。\n确认继续吗？", () =>
+        {
+            if (Session.TryCastCard(cardId, target, out string error)) CleanupAfterDrag();
+            else { CancelCardDrag(); ShowMessage("出牌失败：" + error); }
+        }, CancelCardDrag);
+        return true;
     }
 
     private void CleanupAfterDrag()

@@ -7,7 +7,9 @@ namespace CardSimulator.Battlefield;
 /// <summary>Presentation-only result of one resolved strike. Rules have already applied the result.</summary>
 public sealed record BattlefieldAttackEvent(long EventId, int SourceUnitId, int? TargetUnitId,
     AxialHex From, AxialHex To, WeaponAttackMode Mode, int Damage, int ShieldAbsorbed, bool Defeated,
-    int TargetHpBefore = -1, int TargetHpAfter = -1, int TargetShieldBefore = -1, int TargetShieldAfter = -1);
+    int TargetHpBefore = -1, int TargetHpAfter = -1, int TargetShieldBefore = -1, int TargetShieldAfter = -1,
+    IReadOnlyCollection<AxialHex> AffectedCells = null, AxialHex? Direction = null,
+    IReadOnlyCollection<int> AffectedUnitIds = null, bool IsExplosion = false);
 public sealed record EnemyIntentDisplay(EnemyIntentPreviewCertainty Certainty, int Damage, int Hits, int ActionBudget, string Tooltip);
 
 /// <summary>Runnable spatial battle session using the existing Card, Effect and State pipelines.</summary>
@@ -113,6 +115,12 @@ public sealed partial class BattlefieldSession : IDisposable
             var cells = new List<AxialHex>();
             foreach (var direction in BattleRangeResolver.SixNeighborOffsets)
             {
+                if (spec.AttackMode == WeaponAttackMode.Thrust)
+                {
+                    var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, spec.Length), 0, WeaponAttackMode.Thrust, 0);
+                    cells.AddRange(BattleAttackTraceResolver.ResolveDirection(Board, Occupancy, origin, direction, thrust));
+                    continue;
+                }
                 for (int i = 1; i <= effectiveRange; i++)
                 {
                     var cell = new AxialHex(origin.Q + direction.Q * i, origin.R + direction.R * i);
@@ -133,8 +141,16 @@ public sealed partial class BattlefieldSession : IDisposable
         CardSpatialSpec spec = GetSpatialSpec(cardId);
         if (spec.Shape == CardSpatialShape.Line)
         {
+            if (spec.AttackMode == WeaponAttackMode.Thrust)
+            {
+                var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, spec.Length), 0, WeaponAttackMode.Thrust, 0);
+                return BattleAttackTraceResolver.Resolve(Board, Occupancy, Selected.Coord, target, thrust).ToArray();
+            }
             AxialHex dir = BattleRangeResolver.PickLineDirection(Selected.Coord, target);
-            return ResolveLineUntilBlocked(dir, Math.Max(1, spec.Length), spec.Penetrates);
+            var line = ResolveLineUntilBlocked(dir, Math.Max(1, spec.Length), spec.Penetrates).ToHashSet();
+            if (spec.Explodes && line.Count > 0)
+                line.UnionWith(BattleRangeResolver.CellsWithinRange(line.Last(), spec.Radius).Where(Board.Cells.ContainsKey));
+            return line;
         }
         return BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
     }
@@ -254,7 +270,9 @@ public sealed partial class BattlefieldSession : IDisposable
             int damage = Math.Max(0, beforeHp - victim.Unit.HP);
             AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, victim.UnitId,
                 source.Coord, cell, spec.Mode, damage, Math.Max(0, beforeShield - victim.Unit.Shield), victim.Unit.HP <= 0,
-                beforeHp, victim.Unit.HP, beforeShield, victim.Unit.Shield));
+                beforeHp, victim.Unit.HP, beforeShield, victim.Unit.Shield, cells,
+                BattleRangeResolver.PickLineDirection(source.Coord, target)));
+            if (spec.Mode == WeaponAttackMode.Thrust) TryApplyThrustKnockback(source, victim, cell);
             TrackHpLoss(victim.Unit, beforeHp); hitCount++;
             Occupancy.SyncDeaths();
             if (spec.Mode is WeaponAttackMode.AdjacentSingle or WeaponAttackMode.RangedLine or WeaponAttackMode.Thrust) break;
@@ -265,7 +283,8 @@ public sealed partial class BattlefieldSession : IDisposable
         {
             AxialHex endpoint = cells.Last();
             AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, null, source.Coord, endpoint,
-                spec.Mode, 0, 0, false));
+                spec.Mode, 0, 0, false, AffectedCells: cells,
+                Direction: BattleRangeResolver.PickLineDirection(source.Coord, target)));
             Message?.Invoke($"{source.Name} 向选定方向射击，弹道未命中单位。 ");
             Notify(); return true;
         }
@@ -900,14 +919,16 @@ public sealed partial class BattlefieldSession : IDisposable
         if (type == EffectType.Damage)
         {
             int[] args = effect.Length > 2 ? effect.Skip(2).ToArray() : Array.Empty<int>();
-            IReadOnlyList<BattleUnitPlacement> victims = ResolveEnemyAffectedTargets(enemy, target, spec, landing, attackDirection);
+            IReadOnlyList<BattleUnitPlacement> victims = ResolveEnemyAffectedTargets(enemy, target, spec, landing, attackDirection,
+                out IReadOnlyCollection<AxialHex> affectedCells);
             if (victims.Count == 0 && spec.AttackMode == WeaponAttackMode.RangedLine && attackDirection.HasValue)
             {
                 var trace = BattleAttackSystem.ResolveFromDirection(Board, Occupancy, enemy.Coord, attackDirection.Value,
                     new WeaponAttackSpec("intent", spec.AttackRange, 0, WeaponAttackMode.RangedLine, 0), enemy.UnitId);
                 AxialHex endpoint = trace.Count > 0 ? trace[^1] : enemy.Coord;
                 AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, null,
-                    enemy.Coord, endpoint, WeaponAttackMode.RangedLine, 0, 0, false));
+                    enemy.Coord, endpoint, WeaponAttackMode.RangedLine, 0, 0, false, AffectedCells: affectedCells,
+                    Direction: attackDirection));
                 Message?.Invoke($"{enemy.Name} 沿选定方向射击，未命中单位。 ");
             }
             foreach (BattleUnitPlacement victim in victims)
@@ -917,9 +938,12 @@ public sealed partial class BattlefieldSession : IDisposable
                 {
                     EffectResult result = EffectSystem.ApplyAttack(enemy.Unit, victim.Unit, args);
                     AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, enemy.UnitId, victim.UnitId,
-                        enemy.Coord, victim.Coord, spec.AttackMode, Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
+                        enemy.Coord, spec.AttackMode == WeaponAttackMode.ThrowSingle ? landing : victim.Coord,
+                        spec.AttackMode, Math.Max(0, result.TargetHpBefore - result.TargetHpAfter),
                         Math.Max(0, result.TargetShieldBefore - result.TargetShieldAfter), result.TargetHpAfter <= 0,
-                        result.TargetHpBefore, result.TargetHpAfter, result.TargetShieldBefore, result.TargetShieldAfter));
+                        result.TargetHpBefore, result.TargetHpAfter, result.TargetShieldBefore, result.TargetShieldAfter,
+                        affectedCells, attackDirection ?? BattleRangeResolver.PickLineDirection(enemy.Coord, landing)));
+                    if (spec.AttackMode == WeaponAttackMode.Thrust) TryApplyThrustKnockback(enemy, victim, victim.Coord);
                 }
                 TrackHpLoss(victim.Unit, before);
             }
@@ -935,7 +959,8 @@ public sealed partial class BattlefieldSession : IDisposable
         }
     }
 
-    private IReadOnlyList<BattleUnitPlacement> ResolveEnemyAffectedTargets(BattleUnitPlacement enemy, BattleUnitPlacement target, EnemyIntentSpec spec, AxialHex landing, AxialHex? attackDirection)
+    private IReadOnlyList<BattleUnitPlacement> ResolveEnemyAffectedTargets(BattleUnitPlacement enemy, BattleUnitPlacement target,
+        EnemyIntentSpec spec, AxialHex landing, AxialHex? attackDirection, out IReadOnlyCollection<AxialHex> affectedCells)
     {
         IEnumerable<AxialHex> cells = spec.AttackMode == WeaponAttackMode.ThrowSingle && spec.AreaRadius > 0
             ? BattleRangeResolver.CellsWithinRange(landing, spec.AreaRadius)
@@ -943,7 +968,9 @@ public sealed partial class BattlefieldSession : IDisposable
                 ? BattleAttackSystem.ResolveFromDirection(Board, Occupancy, enemy.Coord, attackDirection.Value,
                     new WeaponAttackSpec("intent", spec.AttackRange, 0, WeaponAttackMode.RangedLine, 0), enemy.UnitId)
             : BattleAttackTraceResolver.Resolve(Board, Occupancy, enemy.Coord, landing, new WeaponAttackSpec("intent", spec.AttackRange, 0, spec.AttackMode, 0));
-        BattleUnitPlacement[] hits = Occupancy.Placements.Values.Where(p => p.Role == BattlefieldRole.Player && p.Presence == BattlefieldPresence.Active && cells.Contains(p.Coord)).ToArray();
+        affectedCells = cells.ToArray();
+        BattleUnitPlacement[] hits = Occupancy.Placements.Values.Where(p => p.UnitId != enemy.UnitId &&
+            p.Presence == BattlefieldPresence.Active && cells.Contains(p.Coord)).ToArray();
         // Directional projectiles never fall back to their planning target: only the actual trace may hit.
         if (spec.AttackMode == WeaponAttackMode.RangedLine) return hits;
         return hits.Length > 0 ? hits : new[] { target };
@@ -977,6 +1004,14 @@ public sealed partial class BattlefieldSession : IDisposable
         BattleAttackTraceResolver.Resolve(Board, Occupancy, enemy.Coord, target.Coord,
             new WeaponAttackSpec("enemy", spec.AttackRange, 0, spec.AttackMode, 0)).Contains(target.Coord);
 
+    private void TryApplyThrustKnockback(BattleUnitPlacement source, BattleUnitPlacement victim, AxialHex victimCoord)
+    {
+        if (victim.Presence != BattlefieldPresence.Active || victim.Unit.HP <= 0 ||
+            !BattleAttackSystem.TrySelectDirection(source.Coord, victimCoord, out AxialHex direction)) return;
+        AxialHex destination = new(victimCoord.Q + direction.Q, victimCoord.R + direction.R);
+        Movement.TryMoveWithoutPlayerCost(victim.UnitId, destination, out _);
+    }
+
     private AxialHex? BestStepToward(BattleUnitPlacement enemy, BattleUnitPlacement target)
     {
         var queue = new Queue<AxialHex>();
@@ -997,6 +1032,31 @@ public sealed partial class BattlefieldSession : IDisposable
     }
 
     // ── 空间出牌路由：空间层筛目标，既有 Card/Effect/State 管线结算 ──
+
+    public IReadOnlyList<BattleUnitPlacement> GetFriendlyAffectedTargets(int cardId, AxialHex target)
+    {
+        CardSpatialSpec spec = GetSpatialSpec(cardId);
+        if (spec.Shape is not (CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line or CardSpatialShape.Fan)) return Array.Empty<BattleUnitPlacement>();
+        IReadOnlyCollection<AxialHex> affected = spec.Shape == CardSpatialShape.Line
+            ? GetAffectedCells(cardId, target)
+            : BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
+        return affected.Select(Occupancy.At).Where(x => x != null && x.Presence == BattlefieldPresence.Active && x.Role == Selected.Role).ToArray();
+    }
+
+    public bool CardCanCauseNegativeEffect(int cardId)
+    {
+        Card card = GetHand(SelectedId).FirstOrDefault(x => x?.CardId == cardId);
+        if (card == null) return false;
+        for (int i = 0; i < card.EffectTypes.Length; i++)
+        {
+            EffectType type = card.EffectTypes[i];
+            int[] args = card.Params != null && i < card.Params.Length ? card.Params[i] : Array.Empty<int>();
+            if (type is EffectType.Damage or EffectType.DamageByBattleLostHp or EffectType.ShieldSlam or EffectType.HpLoss or EffectType.ClearState or EffectType.ClearAllStates) return true;
+            if (type == EffectType.AddCost && args.Length > 1 && args[1] < 0) return true;
+            if (type == EffectType.AddState && args.Length > 1 && Enum.IsDefined(typeof(StateType), args[1]) && StateSystem.IsDebuff((StateType)args[1])) return true;
+        }
+        return false;
+    }
 
     public bool TryCastCard(int cardId, AxialHex target, out string error)
     {
@@ -1050,27 +1110,39 @@ public sealed partial class BattlefieldSession : IDisposable
             {
                 if (!GetCastCandidates(cardId).Contains(target)) { error = "超出卡牌射程或被单位/障碍阻挡。"; return false; }
                 var affected = spec.Shape == CardSpatialShape.Line
-                    ? ResolveLineUntilBlocked(BattleRangeResolver.PickLineDirection(p.Coord, target), Math.Max(1, spec.Length), spec.Penetrates)
+                    ? GetAffectedCells(cardId, target)
                     : BattleRangeResolver.ResolveAffectedCells(p.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
-                var enemies = new List<BattleUnitPlacement>();
+                var affectedTargets = new List<BattleUnitPlacement>();
                 var seen = new HashSet<int>();
                 foreach (var cell in affected)
                 {
                     var unit = Occupancy.At(cell);
-                    if (unit != null && unit.Role == BattlefieldRole.Enemy && seen.Add(unit.UnitId)) enemies.Add(unit);
+                    if (unit != null && unit.Presence == BattlefieldPresence.Active && seen.Add(unit.UnitId)) affectedTargets.Add(unit);
                 }
                 // 允许“对空格/无敌人区域”出牌（打空）：卡牌照常消耗，伤害落空，其余效果仍结算。
                 // 目标格只需在射程内即可（无论其中是否存在单位）；无敌人时传入 null 目标并让效果层跳过空目标。
-                BattleUnitPlacement selected = enemies.Count > 0 ? enemies[0] : null;
-                if (enemies.Count == 0 && spec.Dashes)
+                BattleUnitPlacement selected = Occupancy.At(target);
+                if (selected == null || !affectedTargets.Contains(selected)) selected = affectedTargets.FirstOrDefault();
+                if (affectedTargets.Count == 0 && spec.AttackMode == WeaponAttackMode.Thrust)
                 {
+                    AxialHex endpoint = affected.LastOrDefault();
+                    if (endpoint == default) endpoint = target;
+                    AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, p.UnitId, null, p.Coord,
+                        endpoint, WeaponAttackMode.Thrust, 0, 0, false, AffectedCells: affected,
+                        Direction: BattleRangeResolver.PickLineDirection(p.Coord, target)));
                     FinalizeNoTargetSpatialCard(p, handCard, actualCost);
                     ExecuteDash(p, target, spec);
                     return true;
                 }
 
-                bool applied = ApplyCardThroughExistingPipeline(p, handCard, selected, enemies, actualCost, out error);
-                if (applied && spec.Dashes && !IsFinished) ExecuteDash(p, target, spec);
+                bool applied = ApplyCardThroughExistingPipeline(p, handCard, selected, affectedTargets, actualCost, out error,
+                    affectedCells: affected, presentationCenter: target);
+                if (applied && spec.AttackMode == WeaponAttackMode.Thrust && !IsFinished)
+                {
+                    AxialHex? blockedTarget = selected?.Coord;
+                    if (selected != null) TryApplyThrustKnockback(p, selected, selected.Coord);
+                    ExecuteDash(p, target, spec, blockedTarget);
+                }
                 return applied;
             }
 
@@ -1084,7 +1156,8 @@ public sealed partial class BattlefieldSession : IDisposable
     }
 
     private bool ApplyCardThroughExistingPipeline(BattleUnitPlacement source, Card card, BattleUnitPlacement selected,
-        IReadOnlyList<BattleUnitPlacement> enemies, int cost, out string error, IReadOnlyList<BattleUnitPlacement> allies = null)
+        IReadOnlyList<BattleUnitPlacement> enemies, int cost, out string error, IReadOnlyList<BattleUnitPlacement> allies = null,
+        IReadOnlyCollection<AxialHex> affectedCells = null, AxialHex? presentationCenter = null)
     {
         error = "";
         var allyList = allies ?? ActiveAlliesWithin(source, 1);
@@ -1094,20 +1167,34 @@ public sealed partial class BattlefieldSession : IDisposable
         Card.CardApplyResult result;
         using (new BattlefieldEffectTargetScope(source.Unit, selected?.Unit,
             enemies.Select(x => x.Unit).ToArray(), allyList.Select(x => x.Unit).ToArray(), hpLostThisBattle.GetValueOrDefault(source.UnitId),
-            playerTurn: true, canAttack: CanDefaultAttack))
+            playerTurn: true, canAttack: CanDefaultAttack, spatialAttackTargets: card.Category == CardCategory.Attack && affectedCells != null))
         {
             result = card.Apply(source.Unit, selected?.Unit);
         }
         if (!result.Success) { error = result.ErrorMessage; return false; }
+        bool emittedAttackPresentation = false;
         foreach (var unit in tracked)
         {
             int hpLoss = Math.Max(0, beforeHp[unit.UnitId] - unit.Unit.HP);
             int shieldLoss = Math.Max(0, beforeShield[unit.UnitId] - unit.Unit.Shield);
             TrackHpLoss(unit.Unit, beforeHp[unit.UnitId]);
             if (card.Category == CardCategory.Attack && (hpLoss > 0 || shieldLoss > 0))
+            {
                 AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, unit.UnitId, source.Coord,
-                    unit.Coord, VisualModeForCard(card), hpLoss, shieldLoss, unit.Unit.HP <= 0,
-                    beforeHp[unit.UnitId], unit.Unit.HP, beforeShield[unit.UnitId], unit.Unit.Shield));
+                    presentationCenter ?? unit.Coord, VisualModeForCard(card), hpLoss, shieldLoss, unit.Unit.HP <= 0,
+                    beforeHp[unit.UnitId], unit.Unit.HP, beforeShield[unit.UnitId], unit.Unit.Shield, affectedCells,
+                    BattleRangeResolver.PickLineDirection(source.Coord, selected?.Coord ?? unit.Coord),
+                    IsExplosion: GetSpatialSpec(card.CardId).Explodes));
+                emittedAttackPresentation = true;
+            }
+        }
+        if (card.Category == CardCategory.Attack && !emittedAttackPresentation)
+        {
+            AxialHex endpoint = presentationCenter ?? selected?.Coord ?? source.Coord;
+            AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, null, source.Coord,
+                endpoint, VisualModeForCard(card), 0, 0, false, AffectedCells: affectedCells,
+                Direction: BattleRangeResolver.PickLineDirection(source.Coord, endpoint),
+                IsExplosion: GetSpatialSpec(card.CardId).Explodes));
         }
         source.Unit.Energy -= cost;
         cardsPlayedThisTurn[source.UnitId] = cardsPlayedThisTurn.GetValueOrDefault(source.UnitId) + (card.Category == CardCategory.State ? 0 : 1);
@@ -1128,7 +1215,7 @@ public sealed partial class BattlefieldSession : IDisposable
         return spec.Shape switch
         {
             CardSpatialShape.Fan => WeaponAttackMode.Fan,
-            CardSpatialShape.Line when spec.Dashes => WeaponAttackMode.Thrust,
+            _ when spec.AttackMode.HasValue => spec.AttackMode.Value,
             CardSpatialShape.Line => WeaponAttackMode.RangedLine,
             CardSpatialShape.Burst => WeaponAttackMode.ThrowSingle,
             _ => CurrentWeapon.Mode,
@@ -1146,7 +1233,7 @@ public sealed partial class BattlefieldSession : IDisposable
         Message?.Invoke($"{source.Name} 打出 {card.CardName}，该方向没有敌人，伤害落空。消耗 {cost} 能量。");
     }
 
-    private void ExecuteDash(BattleUnitPlacement source, AxialHex target, CardSpatialSpec spec)
+    private void ExecuteDash(BattleUnitPlacement source, AxialHex target, CardSpatialSpec spec, AxialHex? blockedTarget = null)
     {
         AxialHex direction = BattleRangeResolver.PickLineDirection(source.Coord, target);
         int requested = Math.Min(Math.Max(1, spec.Length), AxialHex.Distance(source.Coord, target));
@@ -1154,6 +1241,7 @@ public sealed partial class BattlefieldSession : IDisposable
         for (int i = 0; i < requested; i++)
         {
             AxialHex next = new AxialHex(source.Coord.Q + direction.Q, source.Coord.R + direction.R);
+            if (blockedTarget.HasValue && next == blockedTarget.Value) break;
             if (!Movement.TryMoveWithoutPlayerCost(source.UnitId, next, out _)) break;
             moved++;
             if (source.Presence != BattlefieldPresence.Active || source.Unit.HP <= 0) break;

@@ -1,0 +1,4 @@
+Scope,CharacterId,DefaultEnergyPerTurn,DefaultDrawCardsPerTurn,MovesPerTurn
+Global,,3,5,
+Character,1001,,,3
+Character,1002,,,3

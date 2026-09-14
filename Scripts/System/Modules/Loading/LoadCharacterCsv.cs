@@ -10,7 +10,7 @@ public partial class LoadCharacterCsv : Node
 {
 	/// <summary>
 	/// 从CSV文件加载所有角色
-	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,drawCardNum,MovesPerTurn（可选）
+	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend。回合变量读取 GameVariables.csv。
 	/// </summary>
 	/// <param name="filePath">CSV文件路径</param>
 	/// <returns>角色数组</returns>
@@ -53,7 +53,7 @@ public partial class LoadCharacterCsv : Node
 		{
 			string[] fields = LoadCsv.ParseCSVFields(line);
 
-			if (fields.Length < 6)
+			if (fields.Length < 5)
 			{
 				GD.PrintErr($"Invalid character CSV format. Expected at least 6 fields, got {fields.Length}");
 				return null;
@@ -65,11 +65,8 @@ public partial class LoadCharacterCsv : Node
 			int maxHp = int.Parse(fields[2]);
 			int iniAttack = int.Parse(fields[3]);
 			int iniDefend = int.Parse(fields[4]);
-			int drawCardNum = int.Parse(fields[5]);
-
-			int movesPerTurn = fields.Length > 6 && !string.IsNullOrWhiteSpace(fields[6]) ? int.Parse(fields[6]) : 0;
-			if (movesPerTurn < 0) throw new FormatException("MovesPerTurn 不能为负数。");
-			return new Character(id, name, maxHp, iniAttack, iniDefend, drawCardNum) { MovesPerTurn = movesPerTurn };
+			GameVariables variables = GameVariables.Load();
+			return new Character(id, name, maxHp, iniAttack, iniDefend, variables.DefaultDrawCardsPerTurn) { MovesPerTurn = variables.GetMovesPerTurn(id) };
 		}
 		catch (Exception ex)
 		{

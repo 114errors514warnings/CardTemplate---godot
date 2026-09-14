@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CardSimulator;
 using CardSimulator.Battlefield;
 using Xunit;
 
@@ -266,6 +267,59 @@ public class BattlefieldFoundationTests
     }
 
     [Fact]
+    public void WeaponTrace_RingCoversEveryCellWithinConfiguredRange()
+    {
+        var cells = BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 2).Select(x => new BattleCell(x));
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var ring = new WeaponAttackSpec("ring", 1, 2, WeaponAttackMode.Ring, 0);
+
+        var affected = BattleAttackTraceResolver.Resolve(board, occupancy, new AxialHex(0, 0), new AxialHex(1, 0), ring);
+
+        Assert.Equal(7, affected.Count);
+        Assert.Contains(new AxialHex(0, 0), affected);
+        Assert.Contains(new AxialHex(1, 0), affected);
+        Assert.Contains(new AxialHex(-1, 1), affected);
+    }
+
+    [Fact]
+    public void WeaponTrace_ThrustStopsAtFirstUnit()
+    {
+        var cells = new[] { new BattleCell(new(0, 0)), new BattleCell(new(1, 0)), new BattleCell(new(2, 0)), new BattleCell(new(3, 0)) };
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var blocker = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 9, HP = 10 }, "blocker", BattlefieldRole.Player, 0);
+        Assert.True(occupancy.TryPlace(blocker, new(2, 0), out _));
+        var thrust = new WeaponAttackSpec("thrust", 3, 2, WeaponAttackMode.Thrust, 0);
+
+        var affected = BattleAttackTraceResolver.Resolve(board, occupancy, new AxialHex(0, 0), new AxialHex(3, 0), thrust);
+
+        Assert.Equal(new[] { new AxialHex(1, 0), new AxialHex(2, 0) }, affected);
+        Assert.DoesNotContain(new AxialHex(3, 0), affected);
+    }
+
+    [Fact]
+    public void CardSpatialSpec_ThrustOverridesPierce()
+    {
+        var fields = new string[12]; fields[9] = "Line"; fields[10] = "Range=2;Length=2;Pierce;AttackMode=Thrust";
+        var spec = CardSpatialSpec.ParseFields(fields);
+        Assert.Equal(WeaponAttackMode.Thrust, spec.AttackMode);
+        Assert.False(spec.Penetrates);
+    }
+
+    [Fact]
+    public void SpatialAttackScope_SelectedTargetIncludesFriendlyAndEnemyUnitsInAffectedArea()
+    {
+        var source = new TestUnitInstance { UniqueInGameId = 1, HP = 10 };
+        var friendly = new TestUnitInstance { UniqueInGameId = 2, HP = 10 };
+        var enemy = new TestUnitInstance { UniqueInGameId = 3, HP = 10 };
+        using var scope = new BattlefieldEffectTargetScope(source, friendly, new IUnitInstance[] { friendly, enemy },
+            Array.Empty<IUnitInstance>(), spatialAttackTargets: true);
+
+        Assert.True(scope.TryResolve(source, friendly, EffectTargetType.SelectedTarget, out var targets));
+        Assert.Equal(new IUnitInstance[] { friendly, enemy }, targets);
+    }
+
+
+    [Fact]
     public void EnemyPlanner_ThrowSinglePrefersLowestHealthThenNearest()
     {
         var cells = BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 4).Select(x => new BattleCell(x));
@@ -294,5 +348,25 @@ public class BattlefieldFoundationTests
             new EnemyIntentSpec(WeaponAttackMode.RangedLine, 4, 2, EnemyActionOrder.MoveThenAttack, EnemyTargetPolicy.Nearest), new Random(1));
         Assert.Same(fartherOnRay, plan.Target);
         Assert.Empty(plan.Path);
+    }
+
+    [Fact]
+    public void EnemyPlanner_RangedLineAdvancesTowardFutureFiringCellWhenThisTurnCannotShoot()
+    {
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 5).Select(x => new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+        var enemy = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 1, HP = 10 }, "enemy", BattlefieldRole.Enemy, 0);
+        var target = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 2, HP = 10 }, "target", BattlefieldRole.Player, 0);
+        Assert.True(occupancy.TryPlace(enemy, new(0, 0), out _));
+        Assert.True(occupancy.TryPlace(target, new(4, 1), out _));
+
+        var spec = new EnemyIntentSpec(WeaponAttackMode.RangedLine, 2, 2,
+            EnemyActionOrder.MoveThenAttack, EnemyTargetPolicy.Nearest);
+        var plan = EnemyIntentPlanner.Plan(board, occupancy, enemy, new[] { target }, null, spec, new Random(1));
+
+        Assert.Same(target, plan.Target);
+        Assert.Equal(2, plan.Path.Count);
+        Assert.DoesNotContain(target.Coord, BattleAttackTraceResolver.Resolve(board, occupancy, plan.Path[^1], target.Coord,
+            new WeaponAttackSpec("bow", 2, 0, WeaponAttackMode.RangedLine, 0)));
     }
 }
