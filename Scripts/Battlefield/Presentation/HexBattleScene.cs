@@ -85,6 +85,9 @@ public partial class HexBattleScene : Control
     // —— 调试面板（EnableDebugPanel 为真时才创建）——
     private HexBattleDebugPanel debugPanel;
     [Export] public bool EnableDebugPanel = true;
+    [Export] public bool EnableCommandApi = true;
+    [Export] public int CommandApiPort = 17880;
+    private BattleCommandApi commandApi;
 
     public override void _Ready()
     {
@@ -104,6 +107,14 @@ public partial class HexBattleScene : Control
             MapView.PointerPressed += OnMovePointerPressed;
             MapView.PointerDragged += OnMovePointerDragged;
             MapView.PointerReleased += OnMovePointerReleased;
+            if (EnableCommandApi)
+            {
+                commandApi = new BattleCommandApi(Session, RunMonsterQueue,
+                    () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
+                    CaptureApiScreenshot, CommandApiPort);
+                commandApi.Start();
+                ShowMessage($"战斗指令 API 已启动：http://127.0.0.1:{CommandApiPort}/api/game/");
+            }
             RefreshHud();
             SetupDebugPanel();
             ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后悬停预览路线，拖拽绘制路线。Esc 取消/暂停。");
@@ -127,6 +138,17 @@ public partial class HexBattleScene : Control
         debugPanel.Setup(Session, MapView, ShowMessage);
         AddChild(debugPanel);
         debugPanel.Visible = false;
+    }
+
+    private string CaptureApiScreenshot(string requestedName)
+    {
+        string safeName = string.IsNullOrWhiteSpace(requestedName) ? "battle" : string.Concat(requestedName.Where(char.IsLetterOrDigit));
+        if (safeName.Length == 0) safeName = "battle";
+        string relative = $"res://Tests/ApiCaptures/{safeName}-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+        string absolute = ProjectSettings.GlobalizePath(relative);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(absolute));
+        Error error = GetViewport().GetTexture().GetImage().SavePng(absolute);
+        return error == Error.Ok ? relative : null;
     }
 
     private async void RunMonsterQueue()
@@ -600,6 +622,7 @@ public partial class HexBattleScene : Control
 
     public override void _Process(double delta)
     {
+        commandApi?.ProcessPending();
         if (Session == null || !movePlanning || moveDragActive || moveAwaitingConfirmation || !MapView.HoveredCell.HasValue) return;
         UpdateMovePreview(MapView.HoveredCell.Value, maximumActions: 1);
     }
@@ -1445,6 +1468,7 @@ public partial class HexBattleScene : Control
         MapView.PointerPressed -= OnMovePointerPressed;
         MapView.PointerDragged -= OnMovePointerDragged;
         MapView.PointerReleased -= OnMovePointerReleased;
+        commandApi?.Dispose(); commandApi = null;
         Session.Dispose();
     }
 

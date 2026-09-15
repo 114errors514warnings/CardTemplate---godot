@@ -219,6 +219,7 @@ public sealed partial class BattlefieldSession : IDisposable
 
     public BattleUnitPlacement Selected => Occupancy.Placements[SelectedId];
     public PlayerLoadout SelectedLoadout => loadouts[SelectedId];
+    public PlayerLoadout GetLoadout(int playerId) => loadouts.TryGetValue(playerId, out var loadout) ? loadout : null;
     public HandSlot SelectedHand => selectedHands[SelectedId];
     public int CurrentAttackRange
     {

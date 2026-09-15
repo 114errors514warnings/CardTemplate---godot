@@ -41,11 +41,11 @@ public static class BattlefieldSceneSmoke
             Check(view.CellAt(view.CellPosition(session.Selected.Coord)) == session.Selected.Coord, "panned hit test");
             var destinations = session.Movement.LegalDestinations(firstId);
             Check(destinations.Count > 0, "available step");
-            int energy = session.Selected.Unit.Energy;
-            view.SetMoving(true);
-            view._GuiInput(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = view.CellPosition(destinations[0]) });
-            Check(session.Selected.Unit.Energy == energy - 1 && session.Selected.MovesUsedThisTurn == 1, "one step one energy");
-            Check(session.Selected.Unit.HP == hp, "movement preserves HP");
+            var movingPlayer = session.Occupancy.Placements[firstId];
+            int energy = movingPlayer.Unit.Energy;
+            Check(session.Movement.TryMove(firstId, destinations[0], out _), "api-compatible one step");
+            Check(movingPlayer.Unit.Energy == energy - 1 && movingPlayer.MovesUsedThisTurn == 1, "one step one energy");
+            Check(movingPlayer.Unit.HP == hp, "movement preserves HP");
             Check(!session.Movement.TryMove(firstId, second.Coord, out _), "occupied rejected");
             session.SetTestEquipmentBonus(2);
             Check(session.Selected.RemainingMoves == 4 && session.Selected.MovesUsedThisTurn == 1, "equipment immediate");
@@ -58,7 +58,7 @@ public static class BattlefieldSceneSmoke
             session.Occupancy.CommitMove(session.Selected, lootCell);
             GroundObject equipment = session.Board.Cells[lootCell].Items.First(x => x.Kind == GroundObjectKind.Equipment);
             Check(session.TryEquipFromCurrentCell(equipment.InstanceId, BattlefieldSession.HandSlot.Left, out string inventoryError), "equip: " + inventoryError);
-            Check(session.CurrentAttackRange == 2 && session.Selected.EffectiveMovesPerTurn == 4, "equipment modifiers");
+            Check(session.CurrentAttackRange == BattleWeaponCatalog.Resolve(equipment).AttackRange && session.Selected.EffectiveMovesPerTurn == 4, "equipment modifiers");
             GroundObject item = session.Board.Cells[lootCell].Items.First(x => x.Kind == GroundObjectKind.Item);
             session.Selected.Unit.HP -= 4;
             Check(session.TryPickItemFromCurrentCell(item.InstanceId, 0, out inventoryError), "pickup: " + inventoryError);
@@ -102,10 +102,12 @@ public static class BattlefieldSceneSmoke
             Check(session.Phase == BattlefieldSession.BattlePhase.Victory, "victory outcome");
             view.CenterSelected(); view.SetMoving(true); view.QueueRedraw();
             await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
-            if (OS.GetCmdlineUserArgs().Contains("--battlefield-capture"))
+            if (OS.GetCmdlineUserArgs().Contains("--battlefield-capture") || OS.GetCmdlineUserArgs().Contains("--battlefield-api-capture"))
             {
-                await scene.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-                string path = "res://README/施工文档/2026/2026.09/六边形基础层实测.png";
+                await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
+                string path = OS.GetCmdlineUserArgs().Contains("--battlefield-api-capture")
+                    ? "res://Tests/api-battlefield-smoke.png"
+                    : "res://README/施工文档/2026/2026.09/六边形基础层实测.png";
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
