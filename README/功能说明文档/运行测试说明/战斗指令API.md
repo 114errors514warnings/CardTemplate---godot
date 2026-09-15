@@ -7,20 +7,21 @@
 - `GET /api/game/`：读取当前战斗状态，包含全部单位（敌方意图、HP、护盾、坐标、Presence）、各角色手牌、当前角色的左右手/随身栏，以及全图地面物品与触发物件实例 ID。
 - `POST /api/game/`：提交 JSON 指令。
 
-通用字段：`type` 为指令名；`unitId` 可选，不填时使用当前角色；格点使用 `q`、`r` 与 `hasTarget:true`；手位 `hand` 为 `left` 或 `right`。
+通用字段：`type` 为指令名；仅 `battle.select_unit` 使用 `unitId` 切换当前角色；其他玩家操作均使用当前角色。格点使用 `q`、`r` 与 `hasTarget:true`；手位 `hand` 为 `left` 或 `right`。
 
 ## 玩家指令
 
 | type | 主要字段 | 行为 |
 |---|---|---|
-| `battle.move` | `unitId`, `path:[{"q":1,"r":0}]` | 提交完整移动路径 |
-| `battle.play_card` | `unitId`, `cardId`, `hasTarget`, `q`, `r` | 出牌并指定格点目标 |
+| `battle.select_unit` | `unitId` | 选择当前角色 |
+| `battle.move` | `path:[{"q":1,"r":0}]` | 提交完整移动路径 |
+| `battle.play_card` | `cardId`, `hasTarget`, `q`, `r` | 出牌并指定格点目标 |
 | `battle.end_turn` | 无 | 结束回合并启动怪物行动队列 |
-| `battle.pick_item` | `unitId`, `instanceId`, `slot` | 将当前格道具拾取到随身栏 |
-| `battle.use_item` | `unitId`, `slot` 或 `fromCurrentCell:true, instanceId`, 可选目标 | 使用随身或地面道具 |
+| `battle.pick_item` | `instanceId`, `slot` | 将当前格道具拾取到随身栏 |
+| `battle.use_item` | `slot` 或 `fromCurrentCell:true, instanceId`, 可选目标 | 使用随身或地面道具 |
 | `battle.throw_item` | 同 `battle.use_item`，但必须提供目标 | 向目标格投掷/使用目标型道具 |
-| `battle.equip` | `unitId`, `instanceId`, `hand` | 将当前格装备装入手位 |
-| `battle.drop_equipment` | `unitId`, `hand` | 将手位装备卸至当前格 |
+| `battle.equip` | `instanceId`, `hand` | 将当前格装备装入手位 |
+| `battle.drop_equipment` | `hand` | 将手位装备卸至当前格 |
 
 ## 只读测试辅助
 
@@ -39,7 +40,6 @@
 ```json
 {
   "type": "battle.play_card",
-  "unitId": 1,
   "cardId": 11001001,
   "hasTarget": true,
   "q": 1,

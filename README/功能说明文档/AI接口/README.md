@@ -25,7 +25,7 @@ API 不提供任何越权调试能力：不重置、固定随机数、生成单�
 | `battle.state` | 只读 | 完整战斗快照 |
 | `battle.select_unit` | 玩家 | 选择存活角色 |
 | `battle.legal_actions` | 只读 | 当前角色可执行的移动、卡牌目标、当前格物件 |
-| `battle.move` | 玩家 | 提交合法完整路径 |
+| `battle.move` | 玩家 | 当前角色提交合法完整路径 |
 | `battle.play_card` | 玩家 | 使用当前手牌并选择目标格 |
 | `battle.end_turn` | 玩家 | 结束玩家回合，正常触发怪物回合 |
 | `battle.pick_item` | 玩家 | 拾取当前格道具到随身栏 |

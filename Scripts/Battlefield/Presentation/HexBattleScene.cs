@@ -87,7 +87,7 @@ public partial class HexBattleScene : Control
     [Export] public bool EnableDebugPanel = true;
     [Export] public bool EnableCommandApi = true;
     [Export] public int CommandApiPort = 17880;
-    private BattleCommandApi commandApi;
+    private BattleApiHost commandApi;
 
     public override void _Ready()
     {
@@ -109,7 +109,7 @@ public partial class HexBattleScene : Control
             MapView.PointerReleased += OnMovePointerReleased;
             if (EnableCommandApi)
             {
-                commandApi = new BattleCommandApi(Session, RunMonsterQueue,
+                commandApi = new BattleApiHost(Session, RunMonsterQueue,
                     () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
                     CaptureApiScreenshot, CommandApiPort);
                 commandApi.Start();

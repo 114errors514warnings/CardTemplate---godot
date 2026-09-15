@@ -2,4 +2,4 @@
 
 - [战斗使用指南](战斗使用指南.md)
 - [战斗指令API](战斗指令API.md)
-- [AI API](AI_API/README.md)
+- [AI接口](../AI接口/README.md)
