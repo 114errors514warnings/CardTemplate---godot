@@ -6,10 +6,10 @@ uid="uid://b0t8kpqwjms84"
 
 [deps]
 
-files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.费用.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.类型.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.等级.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.效果.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation"]
+files=["res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.费用.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.类型.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.等级.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.效果.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation"]
 
-source_file="res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.csv"
-dest_files=["res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.费用.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.类型.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.等级.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.效果.translation", "res://README/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation"]
+source_file="res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.csv"
+dest_files=["res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.费用.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.类型.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.等级.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.效果.translation", "res://README/玩法说明文档/角色设计/归档/2026-09-08_六边形更迭前/设计表/通用卡牌.en.translation"]
 
 [params]
 

@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bc11wqhemr16j"
-path="res://.godot/imported/放在道具栏后.png-ac17a76f7514bea607312db7f4c0165f.ctex"
+path="res://.godot/imported/放在道具栏后.png-bc686d68d4389ac6fa05bde8904b8318.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://README/系统规则/界面交互/战斗/参考游戏截图/放在道具栏后.png"
-dest_files=["res://.godot/imported/放在道具栏后.png-ac17a76f7514bea607312db7f4c0165f.ctex"]
+source_file="res://README/交互说明文档/战斗/参考游戏截图/放在道具栏后.png"
+dest_files=["res://.godot/imported/放在道具栏后.png-bc686d68d4389ac6fa05bde8904b8318.ctex"]
 
 [params]
 

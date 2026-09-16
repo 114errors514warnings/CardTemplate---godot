@@ -53,6 +53,8 @@ public sealed class RunCharacterSlotSave
 	public int CharacterId;
 	public int CurrentHp;
 	public int MaxHp;
+	/// <summary>局外装备状态；战斗只还原此值，不在每场战斗创建职业默认武器。</summary>
+	public string EquippedWeaponDefinitionId = string.Empty;
 }
 
 public sealed class RunDeckEntry

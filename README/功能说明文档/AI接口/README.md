@@ -23,8 +23,10 @@ API 不提供任何越权调试能力：不重置、固定随机数、生成单�
 | type | 权限 | 用途 |
 |---|---|---|
 | `battle.state` | 只读 | 完整战斗快照 |
+| `battle.hand` / `battle.inventory` / `battle.unit` / `battle.board` | 只读 | 按需读取局部状态 |
 | `battle.select_unit` | 玩家 | 选择存活角色 |
 | `battle.legal_actions` | 只读 | 当前角色可执行的移动、卡牌目标、当前格物件 |
+| `battle.legal_move` / `battle.preview_move` / `battle.legal_card` | 只读 | 按需读取移动或指定卡牌合法性 |
 | `battle.move` | 玩家 | 当前角色提交合法完整路径 |
 | `battle.play_card` | 玩家 | 使用当前手牌并选择目标格 |
 | `battle.end_turn` | 玩家 | 结束玩家回合，正常触发怪物回合 |

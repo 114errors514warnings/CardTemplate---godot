@@ -1,24 +1,20 @@
 // RunBattleScene.cs
-// 新战斗界面：实例化原 CardBattleScene 为子场景（复用全部战斗逻辑），
-// 注入本局角色/永久卡组快照/怪物/HP；轮询胜负；胜利弹结算选卡，失败清档回主菜单。
+// 正式运行局的六边形战斗宿主：注入角色、永久卡组、装备状态与遭遇怪物，负责结算回写。
 using Godot;
 using System;
 using System.Collections.Generic;
+using CardSimulator.Battlefield;
 
 public partial class RunBattleScene : Control
 {
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 
-	private CardBattleScene battleView;
-	private BattleSytem battle;
-
-	private bool battleStarted;
-	private bool battleEnded;
+	private HexBattleScene battleView;
+	private BattlefieldSession battlefield;
 	private bool outcomeResolved;
 	private bool resultShown;
 	private bool resultWasVictory;
-	private double resultDelay;
 
 	private CanvasLayer resultLayer;
 	private int chosenCardId;
@@ -58,156 +54,33 @@ public partial class RunBattleScene : Control
 			return;
 		}
 
-		// 实例化原战斗场景为子场景
-		PackedScene battleScene = GD.Load<PackedScene>("res://Scenes/Battle/CardBattleScene.tscn");
+		// 正式运行局复用六边形战场表现；角色、卡组和怪物由 RunSession 注入。
+		PackedScene battleScene = GD.Load<PackedScene>("res://Scenes/Battle/HexBattleScene.tscn");
 		if (battleScene == null)
 		{
-			GD.PrintErr("[RunBattle] 无法加载 CardBattleScene.tscn。");
+			GD.PrintErr("[RunBattle] 无法加载 HexBattleScene.tscn。");
 			CallDeferred(nameof(GoToMainMenuAbort));
 			return;
 		}
 
-		battleView = battleScene.Instantiate<CardBattleScene>();
-		battleView.AutoStartBattle = false;
-		battleView.SetupWindowScene = null;
-		battleView.DebugPanelScene = null;
+		battleView = battleScene.Instantiate<HexBattleScene>();
+		battleView.UseRunSession = true;
+		battleView.ShowBuiltInResult = false;
+		battleView.EnableCommandApi = false;
+		battleView.EnableDebugPanel = false;
+		battleView.BattleReady += session => battlefield = session;
+		battleView.BattleFinished += OnHexBattleFinished;
 		AddChild(battleView);
-
-		// 隐藏原场景顶部调试按钮
-		battleView.GetNodeOrNull<Control>("MainMargin/MainVBox/TopBar/SetupWindowButton")?.SetDeferred("visible", false);
-		battleView.GetNodeOrNull<Control>("MainMargin/MainVBox/TopBar/DebugPanelButton")?.SetDeferred("visible", false);
-
-		battle = battleView.GetNodeOrNull<BattleSytem>("BattleSytem");
-		if (battle == null)
-		{
-			GD.PrintErr("[RunBattle] 子场景中未找到 BattleSytem 节点。");
-			CallDeferred(nameof(GoToMainMenuAbort));
-			return;
-		}
-
-		StartConfiguredBattle(session);
 	}
 
-	private void StartConfiguredBattle(RunSession session)
+	private void OnHexBattleFinished(BattlefieldSession.BattlePhase outcome)
 	{
-		BattleSetupData data = battle.EnsureSetupData();
-		// RunBattleScene 是运行局的唯一配置来源；清除场景中预置的调试角色/怪物，
-		// 否则第三槽位等情况下会把默认角色挤到实际战斗顺序前面。
-		data.CharacterOrder.Clear();
-		data.CharacterIds.Clear();
-		data.CharacterId = 0;
-		data.MonsterIds.Clear();
-
-		// 角色（允许重复）
-		foreach (RunCharacterSlotSave slot in session.Current.CharacterSlots)
-		{
-			data.AddCharacterId(slot.CharacterId);
-		}
-
-		// 怪物
-		foreach (int monsterId in session.PendingEncounter.MonsterIds)
-		{
-			data.AddMonsterId(monsterId);
-		}
-
-		// 每槽整副永久卡组快照（含升级级数）——原战斗用快照替代默认卡组
-		for (int i = 0; i < session.Current.DeckSlots.Count; i++)
-		{
-			data.SetPlayerFullDeckSnapshot(i, session.Current.DeckSlots[i]);
-		}
-
-		bool started = battle.StartGameFromSetupData();
-		if (!started)
-		{
-			GD.PrintErr("[RunBattle] 战斗开局失败。");
-			CallDeferred(nameof(GoToMainMenuAbort));
-			return;
-		}
-
-		// 回填本局 HP（开局默认满血）
-		List<CharacterInstance> orderedPlayers = battle.UnitRegistry.GetOrderedPlayers();
-		for (int i = 0; i < orderedPlayers.Count && i < session.Current.CharacterSlots.Count; i++)
-		{
-			RunCharacterSlotSave slot = session.Current.CharacterSlots[i];
-			CharacterInstance player = orderedPlayers[i];
-			if (player != null)
-			{
-				int hp = Math.Max(1, Math.Min(player.Max_HP, slot.CurrentHp));
-				player.HP = hp;
-			}
-		}
-
-		battleStarted = true;
-		battleEnded = false;
-		outcomeResolved = false;
-		resultShown = false;
-	}
-
-	public override void _Process(double delta)
-	{
-		if (!battleStarted || battle == null || resultShown)
-		{
-			return;
-		}
-
-		// 战斗结束判定：IsBattleStarted true→false 视为本场结束（首次转移时记录）
-		if (!battleEnded && !battle.IsBattleStarted)
-		{
-			battleEnded = true;
-			resultDelay = 0d;
-			return;
-		}
-
-		if (!battleEnded)
-		{
-			return;
-		}
-
-		resultDelay += delta;
-		if (outcomeResolved)
-		{
-			return;
-		}
-
-		// 等 0.8s 让死亡结算/横幅播完
-		if (resultDelay < 0.8d)
-		{
-			return;
-		}
-
-		// 胜负：胜利 = EndBattle（清怪保留角色）；失败 = EndGame（清角色与怪）
-		bool victory = battle.Players != null
-			&& battle.Players.Count > 0
-			&& (battle.Monsters == null || battle.Monsters.Count == 0 || battle.GetAlivePlayers().Count > 0);
-		if (battle.Players == null)
-		{
-			victory = false;
-		}
-
-		if (victory && battle.Monsters != null && battle.Monsters.Values != null)
-		{
-			foreach (MonsterInstance m in battle.Monsters.Values)
-			{
-				if (m != null && m.HP > 0)
-				{
-					victory = false;
-					break;
-				}
-			}
-		}
-
+		if (resultShown) return;
 		outcomeResolved = true;
 		resultShown = true;
-		resultWasVictory = victory;
-
-		if (victory)
-		{
-			ShowVictoryResult();
-		}
-		else
-		{
-			ShowDefeatResult();
-		}
+		resultWasVictory = outcome == BattlefieldSession.BattlePhase.Victory;
+		if (resultWasVictory) ShowVictoryResult();
+		else ShowDefeatResult();
 	}
 
 	private void ShowVictoryResult()
@@ -234,21 +107,22 @@ public partial class RunBattleScene : Control
 	/// <summary>把战后角色 HP 与 DefaultDeck（含每张永久升级级数）回写进存档。</summary>
 	private void WriteBackLiveCharacters(RunSession session)
 	{
-		if (battle == null)
+		if (battlefield == null)
 		{
 			return;
 		}
 
-		List<CharacterInstance> orderedPlayers = battle.UnitRegistry.GetOrderedPlayers();
-		for (int i = 0; i < orderedPlayers.Count && i < session.Current.CharacterSlots.Count; i++)
+		for (int i = 0; i < battlefield.PlayerIds.Count && i < session.Current.CharacterSlots.Count; i++)
 		{
-			CharacterInstance player = orderedPlayers[i];
-			if (player == null)
+			if (!battlefield.Occupancy.Placements.TryGetValue(battlefield.PlayerIds[i], out BattleUnitPlacement placement)
+				|| placement.Unit is not CharacterInstance player)
 			{
 				continue;
 			}
 
 			session.Current.CharacterSlots[i].CurrentHp = Math.Max(0, player.HP);
+			BattlefieldSession.PlayerLoadout loadout = battlefield.GetLoadout(placement.UnitId);
+			session.Current.CharacterSlots[i].EquippedWeaponDefinitionId = loadout?.LeftHand?.DefinitionId ?? string.Empty;
 
 			List<RunDeckEntry> deckSnapshot = new List<RunDeckEntry>();
 			foreach (Card card in player.DefaultDeck)

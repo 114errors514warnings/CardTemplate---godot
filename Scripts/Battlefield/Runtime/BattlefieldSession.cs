@@ -266,7 +266,8 @@ public sealed partial class BattlefieldSession : IDisposable
             using (new BattlefieldEffectTargetScope(source.Unit, victim.Unit, new[] { victim.Unit }, Array.Empty<IUnitInstance>(),
                 hpLostThisBattle.GetValueOrDefault(source.UnitId), playerTurn: true, canAttack: CanDefaultAttack))
             {
-                EffectSystem.ApplyAttack(source.Unit, victim.Unit, spec.DamageBonus == 0 ? Array.Empty<int>() : new[] { spec.DamageBonus });
+                // Weapon attack bonus has already been applied to the equipped user's Attack stat.
+                EffectSystem.ApplyAttack(source.Unit, victim.Unit, Array.Empty<int>());
             }
             int damage = Math.Max(0, beforeHp - victim.Unit.HP);
             AttackResolved?.Invoke(new BattlefieldAttackEvent(++attackEventSequence, source.UnitId, victim.UnitId,
@@ -319,12 +320,14 @@ public sealed partial class BattlefieldSession : IDisposable
         foreach (var old in replaced)
         {
             Selected.SetEquipmentMoveModifier(old.InstanceId, 0);
+            Selected.SetEquipmentCombatModifiers(old.InstanceId, 0, 0);
             if (!Board.TryAddObject(Selected.Coord, old, out error)) throw new InvalidOperationException("换装事务失败：" + error);
         }
         if (equipment.HandsRequired == 2) loadout.LeftHand = loadout.RightHand = equipment;
         else if (hand == HandSlot.Left) loadout.LeftHand = equipment;
         else loadout.RightHand = equipment;
         Selected.SetEquipmentMoveModifier(equipment.InstanceId, equippedWeapon.MoveBonus);
+        Selected.SetEquipmentCombatModifiers(equipment.InstanceId, equippedWeapon.DamageBonus, equippedWeapon.DefenseValue);
         selectedHands[SelectedId] = hand; Notify();
         Message?.Invoke($"{Selected.Name} 装备 {equipment.DefinitionId}：攻击距离 {equippedWeapon.AttackRange}，移动额度 {equippedWeapon.MoveBonus:+#;-#;0}。");
         return true;
@@ -366,6 +369,7 @@ public sealed partial class BattlefieldSession : IDisposable
             if (ReferenceEquals(SelectedLoadout.LeftHand, weapon)) SelectedLoadout.LeftHand = null;
             if (ReferenceEquals(SelectedLoadout.RightHand, weapon)) SelectedLoadout.RightHand = null;
             Selected.SetEquipmentMoveModifier(weapon.InstanceId, 0);
+            Selected.SetEquipmentCombatModifiers(weapon.InstanceId, 0, 0);
         }, out error);
     }
 
@@ -392,7 +396,9 @@ public sealed partial class BattlefieldSession : IDisposable
         if (!Board.TryAddObject(Selected.Coord, weapon, out error)) return false;
         if (ReferenceEquals(SelectedLoadout.LeftHand, weapon)) SelectedLoadout.LeftHand = null;
         if (ReferenceEquals(SelectedLoadout.RightHand, weapon)) SelectedLoadout.RightHand = null;
-        Selected.SetEquipmentMoveModifier(weapon.InstanceId, 0); Notify(); return true;
+        Selected.SetEquipmentMoveModifier(weapon.InstanceId, 0);
+        Selected.SetEquipmentCombatModifiers(weapon.InstanceId, 0, 0);
+        Notify(); return true;
     }
 
     private bool TryThrowWeapon(GroundObject weapon, AxialHex target, Action removeWeapon, out string error)
@@ -674,6 +680,53 @@ public sealed partial class BattlefieldSession : IDisposable
             hands[playerId] = character.handcards;
             DrawCards(playerId, drawCardCount(placement));
         }
+    }
+
+    /// <summary>Replaces the temporary default decks with the persisted run state after normal battlefield construction.</summary>
+    public void RestoreRunState(IReadOnlyList<RunCharacterSlotSave> characterSlots, IReadOnlyList<List<RunDeckEntry>> deckSlots)
+    {
+        if (characterSlots == null || deckSlots == null || characterSlots.Count != PlayerIds.Count || deckSlots.Count != PlayerIds.Count)
+            throw new ArgumentException("运行局角色或卡组槽位数量与六边形战场不一致。");
+        for (int i = 0; i < PlayerIds.Count; i++)
+        {
+            var placement = Occupancy.Placements[PlayerIds[i]];
+            if (placement.Unit is not CharacterInstance character) continue;
+            RunCharacterSlotSave slot = characterSlots[i];
+            character.HP = Math.Max(1, Math.Min(character.Max_HP, slot.CurrentHp));
+            RestoreRunWeapon(placement, slot.EquippedWeaponDefinitionId, i);
+            character.DefaultDeck.Clear();
+            var draw = new List<Card>();
+            foreach (RunDeckEntry entry in deckSlots[i] ?? new List<RunDeckEntry>())
+            {
+                if (entry == null || !LoadingSystem.CardDictionary.TryGetValue(entry.CardId, out Card template)) continue;
+                Card deckCard = template.CreateDeckInstance();
+                deckCard.PermanentUpgradeLevel = Math.Max(0, entry.PermanentUpgradeLevel);
+                character.DefaultDeck.Add(deckCard);
+                draw.Add(deckCard.CreateBattleInstanceFromDeckCard());
+            }
+            character.drawpile = draw;
+            character.discardpile = new List<Card>();
+            character.handcards = new List<Card>();
+            drawPiles[placement.UnitId] = character.drawpile;
+            discardPiles[placement.UnitId] = character.discardpile;
+            hands[placement.UnitId] = character.handcards;
+            DrawCards(placement.UnitId, drawCardCount(placement));
+        }
+        Notify();
+    }
+
+    private void RestoreRunWeapon(BattleUnitPlacement placement, string definitionId, int slotIndex)
+    {
+        if (string.IsNullOrWhiteSpace(definitionId)) return;
+        WeaponAttackSpec weapon = BattleWeaponCatalog.ForDefinition(definitionId)
+            ?? throw new ArgumentException($"运行局装备不存在：{definitionId}");
+        var item = new GroundObject($"run-equipped-{slotIndex + 1}", definitionId, GroundObjectKind.Equipment,
+            handsRequired: weapon.HandsRequired, attackRange: weapon.AttackRange, moveBonus: weapon.MoveBonus);
+        PlayerLoadout loadout = loadouts[placement.UnitId];
+        if (weapon.HandsRequired == 2) loadout.LeftHand = loadout.RightHand = item;
+        else loadout.LeftHand = item;
+        placement.SetEquipmentMoveModifier(item.InstanceId, weapon.MoveBonus);
+        placement.SetEquipmentCombatModifiers(item.InstanceId, weapon.DamageBonus, weapon.DefenseValue);
     }
 
     private static int drawCardCount(BattleUnitPlacement placement)
@@ -1070,6 +1123,11 @@ public sealed partial class BattlefieldSession : IDisposable
         Card handCard = null;
         foreach (Card c in GetHand(p.UnitId)) if (c != null && c.CardId == cardId) { handCard = c; break; }
         if (handCard == null) { error = "手牌中没有这张卡。"; return false; }
+        if (CurrentWeapon.BlocksDefenseShield && handCard.EffectTypes.Contains(EffectType.Shield))
+        {
+            error = $"装备 {CurrentWeapon.DefinitionId} 时无法通过防御牌获得护盾。";
+            return false;
+        }
 
         var spec = GetSpatialSpec(cardId);
 

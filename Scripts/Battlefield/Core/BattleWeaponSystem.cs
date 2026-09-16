@@ -10,7 +10,8 @@ public enum WeaponAttackMode { AdjacentSingle, MeleeLine, Fan, Ring, ThrowSingle
 
 /// <summary>Battlefield-only weapon rules. Card ranges consume AttackRange, while normal attacks consume Mode.</summary>
 public sealed record WeaponAttackSpec(string DefinitionId, int AttackRange, int HandsRequired,
-    WeaponAttackMode Mode, int DefenseValue, int DamageBonus = 0, int MoveBonus = 0, int ResourceCost = 0)
+    WeaponAttackMode Mode, int DefenseValue, int DamageBonus = 0, int MoveBonus = 0, int ResourceCost = 0,
+    bool BlocksDefenseShield = false)
 {
     public static readonly WeaponAttackSpec Unarmed = new("unarmed", 1, 0, WeaponAttackMode.AdjacentSingle, 0, 0);
 }
@@ -40,7 +41,10 @@ public static class BattleWeaponCatalog
                 !int.TryParse(fields[7], out int moveBonus) || !int.TryParse(fields[8], out int resourceCost) ||
                 hands is < 1 or > 2 || range < 1 || defense < 0 || resourceCost < 0)
                 throw new ArgumentException($"武器 CSV 行无效：{line}");
-            if (!loaded.TryAdd(fields[1], new WeaponAttackSpec(fields[1], range, hands, mode, defense, damage, moveBonus, resourceCost)))
+            bool blocksDefenseShield = fields.Length >= 10 && bool.TryParse(fields[9], out bool parsedBlocks) && parsedBlocks;
+            if (fields.Length >= 10 && !bool.TryParse(fields[9], out _))
+                throw new ArgumentException($"武器 CSV 的 BlocksDefenseShield 必须为 true 或 false：{line}");
+            if (!loaded.TryAdd(fields[1], new WeaponAttackSpec(fields[1], range, hands, mode, defense, damage, moveBonus, resourceCost, blocksDefenseShield)))
                 throw new ArgumentException($"武器 DefinitionId 重复：{fields[1]}");
         }
         specs = loaded; return specs;

@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://kmdi3l1x4a34"
-path="res://.godot/imported/六边形战场UI示意图_2026-09-08_调整前.png-ddbd7ae33417ab5dc071634bcfb92dda.ctex"
+path="res://.godot/imported/六边形战场UI示意图_2026-09-08_调整前.png-66d669872654df5eda9d1a0584653fee.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://README/系统规则/界面交互/战斗/归档/六边形战场UI示意图_2026-09-08_调整前.png"
-dest_files=["res://.godot/imported/六边形战场UI示意图_2026-09-08_调整前.png-ddbd7ae33417ab5dc071634bcfb92dda.ctex"]
+source_file="res://README/交互说明文档/战斗/归档/六边形战场UI示意图_2026-09-08_调整前.png"
+dest_files=["res://.godot/imported/六边形战场UI示意图_2026-09-08_调整前.png-66d669872654df5eda9d1a0584653fee.ctex"]
 
 [params]
 

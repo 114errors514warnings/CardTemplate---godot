@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://btop5qg3a37fu"
-path="res://.godot/imported/手牌重叠悬停示意图.png-108b429ef6c21269131d71325c3e713e.ctex"
+path="res://.godot/imported/手牌重叠悬停示意图.png-d685f7893fb2895d1baeb52c879efed4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://README/系统规则/界面交互/战斗/手牌重叠悬停示意图.png"
-dest_files=["res://.godot/imported/手牌重叠悬停示意图.png-108b429ef6c21269131d71325c3e713e.ctex"]
+source_file="res://README/交互说明文档/战斗/手牌重叠悬停示意图.png"
+dest_files=["res://.godot/imported/手牌重叠悬停示意图.png-d685f7893fb2895d1baeb52c879efed4.ctex"]
 
 [params]
 

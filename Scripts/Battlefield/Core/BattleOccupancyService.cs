@@ -21,6 +21,7 @@ public sealed class BattleUnitPlacement
     public int MovesUsedThisTurn { get; internal set; }
     private readonly Dictionary<string, int> equipmentMoveModifiers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> equipmentMoveDistanceModifiers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (int Attack, int Defend)> equipmentCombatModifiers = new(StringComparer.Ordinal);
     public int EffectiveMovesPerTurn => (int)Math.Clamp((long)BaseMovesPerTurn + equipmentMoveModifiers.Values.Sum(x => (long)x), 0, int.MaxValue);
     public int EffectiveMoveDistancePerAction => (int)Math.Clamp((long)BaseMoveDistancePerAction + equipmentMoveDistanceModifiers.Values.Sum(x => (long)x), 1, int.MaxValue);
     public int RemainingMoves => Math.Max(0, EffectiveMovesPerTurn - MovesUsedThisTurn);
@@ -46,6 +47,22 @@ public sealed class BattleUnitPlacement
         if (string.IsNullOrWhiteSpace(equipmentInstanceId)) throw new ArgumentException("装备实例 ID 为空。");
         if (value == 0) equipmentMoveDistanceModifiers.Remove(equipmentInstanceId);
         else equipmentMoveDistanceModifiers[equipmentInstanceId] = value;
+    }
+
+    /// <summary>Applies reversible equipment stat modifiers exactly once per equipment instance.</summary>
+    public void SetEquipmentCombatModifiers(string equipmentInstanceId, int attack, int defend)
+    {
+        if (string.IsNullOrWhiteSpace(equipmentInstanceId)) throw new ArgumentException("装备实例 ID 为空。");
+        if (equipmentCombatModifiers.TryGetValue(equipmentInstanceId, out var old))
+        {
+            Unit.Attack -= old.Attack;
+            Unit.Defend -= old.Defend;
+            equipmentCombatModifiers.Remove(equipmentInstanceId);
+        }
+        if (attack == 0 && defend == 0) return;
+        equipmentCombatModifiers[equipmentInstanceId] = (attack, defend);
+        Unit.Attack += attack;
+        Unit.Defend += defend;
     }
 }
 

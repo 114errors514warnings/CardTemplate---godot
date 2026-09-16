@@ -113,12 +113,14 @@ public partial class MainMenuScene : Control
 		}
 		else
 		{
-			statusLabel.Text = "开始一段新的冒险";
-			startButton = CreateMenuButton("开始游戏");
+			statusLabel.Text = "选择一种新的冒险方式";
+			startButton = CreateMenuButton("纯净模式");
 			startButton.Pressed += OnStartPressed;
+			Button storyButton = CreateMenuButton("剧情模式");
+			storyButton.Pressed += OnStoryModePressed;
 		}
 
-		Button battlefieldButton = CreateMenuButton("六边形战斗");
+		Button battlefieldButton = CreateMenuButton("六边形测试关");
 		battlefieldButton.Pressed += () => GetTree().ChangeSceneToFile("res://Scenes/Battle/HexBattleScene.tscn");
 
 		Button exitButton = CreateMenuButton("退出");
@@ -128,6 +130,18 @@ public partial class MainMenuScene : Control
 	private void OnStartPressed()
 	{
 		GetTree().ChangeSceneToFile(CharacterSelectScenePath);
+	}
+
+	private void OnStoryModePressed()
+	{
+		if (RunSession.Instance == null)
+		{
+			GD.PrintErr("[主菜单] RunSession 单例不存在（未配置 autoload？）。");
+			return;
+		}
+		// 剧情模式跳过组队；固定的三人队仍使用与纯净模式相同的地图/遭遇流程。
+		RunSession.Instance.StartNewRun(new List<int> { 1002, 1003, 1004 });
+		GetTree().ChangeSceneToFile(MapScenePath);
 	}
 
 	private void OnContinuePressed()

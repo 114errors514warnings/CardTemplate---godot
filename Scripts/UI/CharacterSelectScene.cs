@@ -9,7 +9,8 @@ public partial class CharacterSelectScene : Control
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 
-	[Export] public Godot.Collections.Array<int> AvailableCharacterIds = new Godot.Collections.Array<int> { 1001, 1002 };
+	// 纯净模式：仅三位正式可玩角色，允许三个槽位重复选择。
+	[Export] public Godot.Collections.Array<int> AvailableCharacterIds = new Godot.Collections.Array<int> { 1002, 1003, 1004 };
 
 	private const int SlotCount = 3;
 	private readonly int[] selectedIds = new int[SlotCount];

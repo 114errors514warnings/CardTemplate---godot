@@ -79,6 +79,7 @@ public partial class RunSession : Node
 				CharacterId = characterId,
 				CurrentHp = template.MAX_HP,
 				MaxHp = template.MAX_HP,
+				EquippedWeaponDefinitionId = GetInitialWeaponDefinition(characterId),
 			});
 
 			List<RunDeckEntry> deck = new List<RunDeckEntry>();
@@ -101,6 +102,14 @@ public partial class RunSession : Node
 		Current = data;
 		Save();
 	}
+
+	private static string GetInitialWeaponDefinition(int characterId) => characterId switch
+	{
+		1002 => "双手剑",
+		1003 => "弓箭",
+		1004 => "法典",
+		_ => string.Empty,
+	};
 
 	public bool LoadSave()
 	{

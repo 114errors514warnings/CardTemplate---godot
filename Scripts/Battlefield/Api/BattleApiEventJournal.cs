@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using CardSimulator.Battlefield;
 
 /// <summary>Read-only, ordered event journal for API-driven test assertions.</summary>
 public sealed class BattleApiEventJournal : IDisposable
 {
-    private readonly ConcurrentQueue<object> events = new();
+    private readonly ConcurrentQueue<ApiBattleEvent> events = new();
     private readonly BattlefieldSession session;
     private readonly Action<string> messageHandler;
     private readonly Action<BattlefieldEntry> enteredHandler;
@@ -26,8 +27,16 @@ public sealed class BattleApiEventJournal : IDisposable
         session.Finished += finishedHandler;
     }
 
-    public object[] Snapshot() => events.ToArray();
-    private void Add(string kind, object data) => events.Enqueue(new { id = ++nextId, kind, data });
+    public ApiBattleEvent[] Read(long afterEventId, int limit)
+    {
+        int actualLimit = Math.Clamp(limit <= 0 ? 50 : limit, 1, 500);
+        return events.Where(x => x.Id > afterEventId).Take(actualLimit).ToArray();
+    }
+    private void Add(string kind, object data)
+    {
+        events.Enqueue(new ApiBattleEvent { Id = ++nextId, Kind = kind, Data = data });
+        while (events.Count > 500) events.TryDequeue(out _);
+    }
     public void Dispose()
     {
         session.Message -= messageHandler;
@@ -36,3 +45,5 @@ public sealed class BattleApiEventJournal : IDisposable
         session.Finished -= finishedHandler;
     }
 }
+
+public sealed class ApiBattleEvent { public long Id { get; set; } public string Kind { get; set; } public object Data { get; set; } }

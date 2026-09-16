@@ -12,7 +12,7 @@ public sealed class BattleApiHost : IDisposable
     private readonly BattleApiRouter router;
     private readonly BattleApiHttpServer server;
 
-    public BattleApiHost(BattlefieldSession session, Action enemyTurnStarted, Func<bool> isIdle, Func<string, string> capture, int port)
+    public BattleApiHost(BattlefieldSession session, Action enemyTurnStarted, Func<bool> isIdle, Func<string, string, string> capture, int port)
     {
         var snapshot = new BattleApiSnapshot(session);
         journal = new BattleApiEventJournal(session);

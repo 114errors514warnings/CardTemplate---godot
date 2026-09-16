@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://derkw3y2xpf50"
-path="res://.godot/imported/地图示意图.png-0083213a5978e07bbadbc574fb81d5a5.ctex"
+path="res://.godot/imported/地图示意图.png-0947c60e16f3bd313acbe5e216d1b011.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://README/系统规则/地图玩法/地图示意图.png"
-dest_files=["res://.godot/imported/地图示意图.png-0083213a5978e07bbadbc574fb81d5a5.ctex"]
+source_file="res://README/玩法说明文档/系统规则/地图玩法/地图示意图.png"
+dest_files=["res://.godot/imported/地图示意图.png-0947c60e16f3bd313acbe5e216d1b011.ctex"]
 
 [params]
 

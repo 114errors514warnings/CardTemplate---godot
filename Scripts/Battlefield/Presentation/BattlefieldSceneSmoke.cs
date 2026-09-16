@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using CardSimulator;
 using CardSimulator.Battlefield;
@@ -72,6 +73,25 @@ public static class BattlefieldSceneSmoke
             int handBefore = session.HandCount(session.SelectedId);
             Check(session.TryCastCard(selfCard.CardId, session.Selected.Coord, out string castError), "existing card pipeline: " + castError);
             Check(session.HandCount(session.SelectedId) >= handBefore - 1, "draw card effect and lifecycle");
+            int attackBeforeBow = session.Selected.Unit.Attack;
+            var bow = new GroundObject("smoke-bow", "弓箭", GroundObjectKind.Equipment, handsRequired: 2, attackRange: 5);
+            Check(session.Board.TryAddObject(session.Selected.Coord, bow, out inventoryError), "place configured bow: " + inventoryError);
+            Check(session.TryEquipFromCurrentCell(bow.InstanceId, BattlefieldSession.HandSlot.Left, out inventoryError), "equip configured bow: " + inventoryError);
+            Check(session.Selected.Unit.Attack == attackBeforeBow + 2 && session.CurrentWeapon.Mode == WeaponAttackMode.RangedLine,
+                "bow applies attack and ranged-line mode");
+            Card defenseCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 20000001);
+            Check(defenseCard != null && !session.TryCastCard(defenseCard.CardId, session.Selected.Coord, out castError)
+                && castError.Contains("无法通过防御牌获得护盾"), "bow blocks defense shield");
+            int attackBeforeSword = session.Selected.Unit.Attack, defenseBeforeSword = session.Selected.Unit.Defend;
+            var twoHandSword = new GroundObject("smoke-two-hand-sword", "双手剑", GroundObjectKind.Equipment, handsRequired: 2, attackRange: 1);
+            Check(session.Board.TryAddObject(session.Selected.Coord, twoHandSword, out inventoryError), "place configured two-hand sword: " + inventoryError);
+            Check(session.TryEquipFromCurrentCell(twoHandSword.InstanceId, BattlefieldSession.HandSlot.Left, out inventoryError), "equip configured two-hand sword: " + inventoryError);
+            Check(session.Selected.Unit.Attack == attackBeforeSword - 1 && session.Selected.Unit.Defend == defenseBeforeSword + 1,
+                "two-hand sword applies attack and defense");
+            var tome = new GroundObject("smoke-tome", "法典", GroundObjectKind.Equipment, handsRequired: 2, attackRange: 4);
+            Check(session.Board.TryAddObject(session.Selected.Coord, tome, out inventoryError), "place configured tome: " + inventoryError);
+            Check(session.TryEquipFromCurrentCell(tome.InstanceId, BattlefieldSession.HandSlot.Left, out inventoryError)
+                && session.CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle, "tome applies throw attack mode");
             Card burstCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001002);
             Check(burstCard != null && !session.GetCastCandidates(burstCard.CardId).Contains(session.Selected.Coord), "burst cannot target self cell");
             Card thrustCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 11001003);
@@ -90,6 +110,7 @@ public static class BattlefieldSceneSmoke
             int targetHp = attackEnemy.Unit.HP;
             Check(session.TryCastCard(attackCard.CardId, attackCell, out castError), "spatial damage pipeline: " + castError);
             Check(attackEnemy.Unit.HP < targetHp, "spatial card damages only validated target");
+            VerifyRunBattleInjection();
             var enemyBefore = session.Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active)
                 .ToDictionary(x => x.UnitId, x => x.Coord);
             session.EndCurrentTurn();
@@ -119,6 +140,38 @@ public static class BattlefieldSceneSmoke
             GD.PrintErr("BATTLEFIELD_SMOKE_FAIL: " + ex);
             scene.GetTree().Quit(1);
         }
+    }
+
+    private static void VerifyRunBattleInjection()
+    {
+        string path = LoadingSystem.GetFilePathByKey("Data.Battlefield.Foundation");
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        var definition = BattleMapDefinition.Parse(file.GetAsText());
+        definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        definition.MonsterIds = new List<int> { 3101 };
+        var runBattle = new BattlefieldSession(definition);
+        var slots = new List<RunCharacterSlotSave>
+        {
+            new() { CharacterId = 1002, CurrentHp = 24, MaxHp = 30, EquippedWeaponDefinitionId = "双手剑" },
+            new() { CharacterId = 1003, CurrentHp = 25, MaxHp = 30, EquippedWeaponDefinitionId = "弓箭" },
+            new() { CharacterId = 1004, CurrentHp = 26, MaxHp = 30, EquippedWeaponDefinitionId = "法典" },
+        };
+        var decks = new List<List<RunDeckEntry>>
+        {
+            new() { new() { CardId = 10000001 }, new() { CardId = 20000001 } },
+            new() { new() { CardId = 10000001 }, new() { CardId = 20000001 } },
+            new() { new() { CardId = 10000001 }, new() { CardId = 20000001 } },
+        };
+        runBattle.RestoreRunState(slots, decks);
+        Check(runBattle.Selected.Name == "重剑手" && runBattle.Selected.Unit.HP == 24 && runBattle.CurrentWeapon.DefinitionId == "双手剑"
+            && runBattle.Selected.Unit.Attack == 3 && runBattle.Selected.Unit.Defend == 3, "run inject heavy sword and stats");
+        runBattle.Select(runBattle.PlayerIds[1]);
+        Check(runBattle.Selected.Name == "精灵" && runBattle.Selected.Unit.HP == 25 && runBattle.CurrentWeapon.DefinitionId == "弓箭"
+            && runBattle.CurrentWeapon.Mode == WeaponAttackMode.RangedLine, "run inject elf bow");
+        runBattle.Select(runBattle.PlayerIds[2]);
+        Check(runBattle.Selected.Name == "法师" && runBattle.Selected.Unit.HP == 26 && runBattle.CurrentWeapon.DefinitionId == "法典"
+            && runBattle.CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle, "run inject mage tome");
+        runBattle.Dispose();
     }
     private static void Check(bool condition, string name)
     { if (!condition) throw new InvalidOperationException(name); }

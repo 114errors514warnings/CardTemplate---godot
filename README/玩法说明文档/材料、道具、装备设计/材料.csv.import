@@ -6,10 +6,10 @@ uid="uid://c6jl0yu7unhf5"
 
 [deps]
 
-files=["res://README/材料、道具、装备设计/材料.类别.translation", "res://README/材料、道具、装备设计/材料.细分.translation", "res://README/材料、道具、装备设计/材料.稀有度.translation"]
+files=["res://README/玩法说明文档/材料、道具、装备设计/材料.类别.translation", "res://README/玩法说明文档/材料、道具、装备设计/材料.细分.translation", "res://README/玩法说明文档/材料、道具、装备设计/材料.稀有度.translation"]
 
-source_file="res://README/材料、道具、装备设计/材料.csv"
-dest_files=["res://README/材料、道具、装备设计/材料.类别.translation", "res://README/材料、道具、装备设计/材料.细分.translation", "res://README/材料、道具、装备设计/材料.稀有度.translation"]
+source_file="res://README/玩法说明文档/材料、道具、装备设计/材料.csv"
+dest_files=["res://README/玩法说明文档/材料、道具、装备设计/材料.类别.translation", "res://README/玩法说明文档/材料、道具、装备设计/材料.细分.translation", "res://README/玩法说明文档/材料、道具、装备设计/材料.稀有度.translation"]
 
 [params]
 

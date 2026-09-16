@@ -27,6 +27,8 @@ public partial class HexBattleScene : Control
     private bool moveExecuting;
     private IReadOnlyList<AxialHex> plannedMovePath = Array.Empty<AxialHex>();
     private Control handRow;
+    private Control handPanelNode;
+    private EventStoryOverlay storyOverlay;
     private Label moveInfo;
     private Button drawPileButton;
     private Button discardPileButton;
@@ -87,6 +89,11 @@ public partial class HexBattleScene : Control
     [Export] public bool EnableDebugPanel = true;
     [Export] public bool EnableCommandApi = true;
     [Export] public int CommandApiPort = 17880;
+    /// <summary>When hosted by RunBattleScene, roster and monsters are read from the pending run encounter.</summary>
+    [Export] public bool UseRunSession;
+    [Export] public bool ShowBuiltInResult = true;
+    public event Action<BattlefieldSession> BattleReady;
+    public event Action<BattlefieldSession.BattlePhase> BattleFinished;
     private BattleApiHost commandApi;
 
     public override void _Ready()
@@ -98,10 +105,14 @@ public partial class HexBattleScene : Control
             string path = LoadingSystem.GetFilePathByKey("Data.Battlefield.Foundation");
             using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
             if (file == null) throw new InvalidOperationException($"无法打开战场 JSON：{path}");
-            Session = new BattlefieldSession(BattleMapDefinition.Parse(file.GetAsText()));
+            BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
+            if (UseRunSession) ConfigureRunDefinition(definition);
+            Session = new BattlefieldSession(definition);
+            if (UseRunSession) Session.RestoreRunState(RunSession.Instance.Current.CharacterSlots, RunSession.Instance.Current.DeckSlots);
             Session.Changed += RefreshHud;
             Session.Message += ShowMessage;
-            Session.Finished += ShowResult;
+            if (ShowBuiltInResult) Session.Finished += ShowResult;
+            Session.Finished += outcome => BattleFinished?.Invoke(outcome);
             MapView.Bind(Session);
             MapView.HoverDetails += ShowTooltip;
             MapView.PointerPressed += OnMovePointerPressed;
@@ -109,17 +120,30 @@ public partial class HexBattleScene : Control
             MapView.PointerReleased += OnMovePointerReleased;
             if (EnableCommandApi)
             {
-                commandApi = new BattleApiHost(Session, RunMonsterQueue,
-                    () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
-                    CaptureApiScreenshot, CommandApiPort);
-                commandApi.Start();
-                ShowMessage($"战斗指令 API 已启动：http://127.0.0.1:{CommandApiPort}/api/game/");
+                try
+                {
+                    commandApi = new BattleApiHost(Session, RunMonsterQueue,
+                        () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
+                        CaptureApiScreenshot, CommandApiPort);
+                    commandApi.Start();
+                    ShowMessage($"战斗指令 API 已启动：http://127.0.0.1:{CommandApiPort}/api/game/");
+                }
+                catch (Exception apiException)
+                {
+                    commandApi?.Dispose(); commandApi = null;
+                    GD.PrintErr("[战场] 战斗指令 API 未启动：" + apiException.Message);
+                }
             }
             RefreshHud();
+            BattleReady?.Invoke(Session);
             SetupDebugPanel();
             ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后悬停预览路线，拖拽绘制路线。Esc 取消/暂停。");
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke"))
                 CallDeferred(nameof(RunSmoke));
+            if (OS.GetCmdlineUserArgs().Contains("--story-smoke"))
+                CallDeferred(nameof(OpenStoryTest));
+            if (OS.GetCmdlineUserArgs().Contains("--story-capture"))
+                CallDeferred(nameof(CaptureStorySmoke));
         }
         catch (Exception ex)
         {
@@ -127,6 +151,18 @@ public partial class HexBattleScene : Control
             GD.PrintErr(ex);
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke")) GetTree().Quit(1);
         }
+    }
+
+    private static void ConfigureRunDefinition(BattleMapDefinition definition)
+    {
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null) throw new InvalidOperationException("运行局存档不存在。");
+        if (run.PendingEncounter == null) run.PendingEncounter = run.BuildPendingEncounterRowFromSave();
+        if (run.PendingEncounter == null || run.PendingEncounter.MonsterIds == null || run.PendingEncounter.MonsterIds.Length == 0)
+            throw new InvalidOperationException("运行局未配置待处理遭遇。");
+        definition.PlayerCharacterIds = run.Current.CharacterSlots.Select(x => x.CharacterId).ToList();
+        definition.MonsterIds = run.PendingEncounter.MonsterIds.ToList();
+        definition.Validate();
     }
 
     private void SetupDebugPanel()
@@ -140,14 +176,84 @@ public partial class HexBattleScene : Control
         debugPanel.Visible = false;
     }
 
-    private string CaptureApiScreenshot(string requestedName)
+    private void OpenStoryTest()
+    {
+        if (storyOverlay != null || Session == null) return;
+        CancelPendingCast(); EndMovePlanning(false);
+        handPanelNode.Visible = false;
+        var lines = new List<StoryLine>
+        {
+            new("scout", "旅行者", "前方的道路被夜色吞没了。", StorySide.Left),
+            new("warrior", "勇士", "我们可以继续前进，也可以在这里停下。", StorySide.Right),
+            new("scout", "旅行者", "先听听四周的动静，再做决定。", StorySide.Left),
+        };
+        var choices = new List<StoryChoice>
+        {
+            new("就地休息", "恢复当前角色 4 点生命", ApplyStoryRest),
+            new("继续前进", "当前角色受到 3 点伤害，获得 10 金币", ApplyStoryPushForward),
+        };
+        storyOverlay = new EventStoryOverlay(new StoryEventDefinition("测试事件", "旅行者提醒队伍：夜色将至，需要决定继续前进还是就地休息。", lines, choices), () =>
+        {
+            handPanelNode.Visible = true;
+            storyOverlay = null;
+        });
+        AddChild(storyOverlay);
+    }
+
+    private void ApplyStoryRest()
+    {
+        if (Session == null) return;
+        IUnitInstance player = Session.Selected.Unit;
+        int before = player.HP;
+        player.HP = Math.Min(player.Max_HP, player.HP + 4);
+        RefreshHud();
+        ShowMessage($"剧情结果：{Session.Selected.Name} 休息，生命 {before}→{player.HP}。");
+    }
+
+    private void ApplyStoryPushForward()
+    {
+        if (Session == null) return;
+        IUnitInstance player = Session.Selected.Unit;
+        int before = player.HP;
+        player.HP = Math.Max(0, player.HP - 3);
+        RunSession run = RunSession.Instance;
+        if (run?.Current != null)
+        {
+            run.Current.Gold += 10;
+            run.Save();
+            ShowMessage($"剧情结果：{Session.Selected.Name} 生命 {before}→{player.HP}，获得 10 金币。");
+        }
+        else
+        {
+            ShowMessage($"剧情结果：{Session.Selected.Name} 生命 {before}→{player.HP}。测试战场未加载局内存档，10 金币未写入存档。");
+        }
+        RefreshHud();
+    }
+
+    private async void CaptureStorySmoke()
+    {
+        OpenStoryTest();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        string path = ProjectSettings.GlobalizePath("res://Tests/story-layout-smoke.png");
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
+        Error error = GetViewport().GetTexture().GetImage().SavePng(path);
+        if (error == Error.Ok) GD.Print("STORY_SMOKE_CAPTURE_PASS: " + path);
+        else GD.PrintErr("STORY_SMOKE_CAPTURE_FAIL: " + error);
+        GetTree().Quit(error == Error.Ok ? 0 : 1);
+    }
+
+    private string CaptureApiScreenshot(string requestedName, string captureMode)
     {
         string safeName = string.IsNullOrWhiteSpace(requestedName) ? "battle" : string.Concat(requestedName.Where(char.IsLetterOrDigit));
         if (safeName.Length == 0) safeName = "battle";
         string relative = $"res://Tests/ApiCaptures/{safeName}-{DateTime.Now:yyyyMMdd-HHmmss}.png";
         string absolute = ProjectSettings.GlobalizePath(relative);
         System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(absolute));
-        Error error = GetViewport().GetTexture().GetImage().SavePng(absolute);
+        Image image = GetViewport().GetTexture().GetImage();
+        if (string.Equals(captureMode, "compressed", StringComparison.OrdinalIgnoreCase))
+            image.Resize(1280, 720, Image.Interpolation.Lanczos);
+        Error error = image.SavePng(absolute);
         return error == Error.Ok ? relative : null;
     }
 
@@ -197,6 +303,7 @@ public partial class HexBattleScene : Control
         Place(topRight, 0.78f, 0.02f, 0.985f, 0.075f);
         AddChild(topRight);
         AddButton(topRight, "定位当前角色", () => MapView.CenterSelected()).CustomMinimumSize = new Vector2(120, 0);
+        AddButton(topRight, "剧情测试", OpenStoryTest).CustomMinimumSize = new Vector2(88, 0);
         if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.ToggleVisible(); }).CustomMinimumSize = new Vector2(88, 0);
         AddButton(topRight, "暂停", () => SetPaused(true)).CustomMinimumSize = new Vector2(88, 0);
 
@@ -269,6 +376,7 @@ public partial class HexBattleScene : Control
         // 顶边固定，底板向下延伸覆盖底部地图；卡面在底板可用高度中居中。
         Place(handPanel, 0.23f, 0.69f, 0.72f, 0.99f);
         AddChild(handPanel);
+        handPanelNode = handPanel;
         var tabRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; tabRow.AddThemeConstantOverride("separation", 6); handPanel.AddChild(tabRow);
         for (int i = 0; i < 3; i++)
         {

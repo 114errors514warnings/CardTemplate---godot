@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bj0g7by6e77uj"
-path="res://.godot/imported/正常情况显示界面.png-5b242d1dad8ceac3e9dadaa0a21b00d0.ctex"
+path="res://.godot/imported/正常情况显示界面.png-5b4015bb7dbfb8630c9f4b933485cd14.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://README/系统规则/界面交互/战斗/参考游戏截图/正常情况显示界面.png"
-dest_files=["res://.godot/imported/正常情况显示界面.png-5b242d1dad8ceac3e9dadaa0a21b00d0.ctex"]
+source_file="res://README/交互说明文档/战斗/参考游戏截图/正常情况显示界面.png"
+dest_files=["res://.godot/imported/正常情况显示界面.png-5b4015bb7dbfb8630c9f4b933485cd14.ctex"]
 
 [params]
 
