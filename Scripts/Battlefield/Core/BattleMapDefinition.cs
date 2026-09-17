@@ -62,6 +62,8 @@ public sealed class BattleMapDefinition
     public int MaxGenerationAttempts { get; set; } = 32;
     public List<int> PlayerCharacterIds { get; set; } = new();
     public List<int> MonsterIds { get; set; } = new();
+    /// <summary>Runtime-composed level spawns; never written in permanent map JSON.</summary>
+    [JsonIgnore] public List<HexCoordinateData> FixedEnemySpawnCoords { get; set; } = new();
 
     public static BattleMapDefinition Parse(string json)
     {
@@ -80,7 +82,7 @@ public sealed class BattleMapDefinition
         if (Radius < 1 || Radius > 64) throw new ArgumentException("地图半径应在 1–64 范围内。");
         if (Cells == null || CellOverrides == null || PlayerSpawnCoords == null || ExitAnchors == null ||
             GenerationExcludedCoords == null || ObjectPlacements == null || RandomItemDefinitions == null ||
-            PlayerCharacterIds == null || MonsterIds == null) throw new ArgumentException("地图集合字段不能为 null。");
+            PlayerCharacterIds == null || MonsterIds == null || FixedEnemySpawnCoords == null) throw new ArgumentException("地图集合字段不能为 null。");
         if (PlayerSpawnCoords.Count != 3 || PlayerCharacterIds.Count != 3) throw new ArgumentException("必须配置三个玩家槽与出生格。");
         if (Cells.Count > 20000 || CellOverrides.Count > 20000 || ObjectPlacements.Count > 20000 || MonsterIds.Count > 1000)
             throw new ArgumentException("地图配置超过支持容量。");
@@ -96,5 +98,7 @@ public sealed class BattleMapDefinition
                 if (AxialHex.Distance(PlayerSpawnCoords[i].ToHex(), PlayerSpawnCoords[j].ToHex()) != 1)
                     throw new ArgumentException("三个出生格必须两两相邻。");
         }
+        if (FixedEnemySpawnCoords.Count != 0 && FixedEnemySpawnCoords.Count != MonsterIds.Count)
+            throw new ArgumentException("固定怪物出生点数量必须与怪物数量一致。");
     }
 }

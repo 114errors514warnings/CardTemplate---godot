@@ -1,0 +1,23 @@
+{
+  "MapId": "M-F1-001",
+  "Version": 1,
+  "Seed": 1001,
+  "CellRadius": 42,
+  "Shape": "Hexagon",
+  "Radius": 6,
+  "PlayerSpawnCoords": [{ "Q": 0, "R": 0 }, { "Q": 1, "R": 0 }, { "Q": 0, "R": 1 }],
+  "PlayerCharacterIds": [1002, 1003, 1004],
+  "MonsterIds": [3101],
+  "CellOverrides": [
+    { "Q": -2, "R": -2, "Kind": "Obstacle", "BlocksSight": true },
+    { "Q": 2, "R": -2, "Kind": "Obstacle", "BlocksSight": true },
+    { "Q": 0, "R": -3, "Surface": "Pit" }
+  ],
+  "GenerationExcludedCoords": [{ "Q": 0, "R": 0 }, { "Q": 1, "R": 0 }, { "Q": 0, "R": 1 }],
+  "RandomObstacleCount": 0,
+  "RandomItemCount": 0,
+  "RandomItemDefinitions": [],
+  "MinEnemyDistance": 0,
+  "MaxGenerationAttempts": 1,
+  "ObjectPlacements": []
+}

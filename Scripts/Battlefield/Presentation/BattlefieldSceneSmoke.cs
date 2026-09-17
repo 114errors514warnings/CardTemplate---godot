@@ -111,6 +111,7 @@ public static class BattlefieldSceneSmoke
             Check(session.TryCastCard(attackCard.CardId, attackCell, out castError), "spatial damage pipeline: " + castError);
             Check(attackEnemy.Unit.HP < targetHp, "spatial card damages only validated target");
             VerifyRunBattleInjection();
+            VerifyFirstFormalLevel();
             var enemyBefore = session.Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active)
                 .ToDictionary(x => x.UnitId, x => x.Coord);
             session.EndCurrentTurn();
@@ -172,6 +173,24 @@ public static class BattlefieldSceneSmoke
         Check(runBattle.Selected.Name == "法师" && runBattle.Selected.Unit.HP == 26 && runBattle.CurrentWeapon.DefinitionId == "法典"
             && runBattle.CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle, "run inject mage tome");
         runBattle.Dispose();
+    }
+
+    private static void VerifyFirstFormalLevel()
+    {
+        BattleLevelConfig level = BattleLevelCatalog.Load("F1-001");
+        Check(level.MapId == "M-F1-001" && level.Objects.Count == 3 && level.Objects.All(x => x.ObjectType == "Monster"), "first formal level parsed");
+        string mapPath = BattleLevelCatalog.ResolveMapPath(level.MapId);
+        using var file = FileAccess.Open(mapPath, FileAccess.ModeFlags.Read);
+        Check(file != null, "first formal map opened");
+        BattleMapDefinition map = BattleMapDefinition.Parse(file.GetAsText());
+        map.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        map.MonsterIds = level.Objects.Select(x => int.Parse(x.DefinitionId)).ToList();
+        map.FixedEnemySpawnCoords = level.Objects.Select(x => new HexCoordinateData { Q = x.Q, R = x.R }).ToList();
+        map.ObjectPlacements.Clear(); map.RandomItemCount = 0; map.RandomItemDefinitions.Clear();
+        var formal = new BattlefieldSession(map);
+        Check(formal.Occupancy.Placements.Values.Count(x => x.Role == BattlefieldRole.Enemy) == 3
+            && formal.Generated.EnemyCoords.SequenceEqual(level.Objects.Select(x => new AxialHex(x.Q, x.R))), "first formal level fixed monsters deployed");
+        formal.Dispose();
     }
     private static void Check(bool condition, string name)
     { if (!condition) throw new InvalidOperationException(name); }

@@ -1,0 +1,3 @@
+RewardGroup,RewardType,ReferenceId,MinAmount,MaxAmount,Probability
+Gold,Gold,,100,120,1
+Material,Material,101,2,2,1

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://d3btj1th063s4"
+
+[deps]
+
+files=["res://DataBase/Reward/Config/2002.RewardType.translation", "res://DataBase/Reward/Config/2002.ReferenceId.translation", "res://DataBase/Reward/Config/2002.MinAmount.translation", "res://DataBase/Reward/Config/2002.MaxAmount.translation", "res://DataBase/Reward/Config/2002.Probability.translation"]
+
+source_file="res://DataBase/Reward/Config/2002.csv"
+dest_files=["res://DataBase/Reward/Config/2002.RewardType.translation", "res://DataBase/Reward/Config/2002.ReferenceId.translation", "res://DataBase/Reward/Config/2002.MinAmount.translation", "res://DataBase/Reward/Config/2002.MaxAmount.translation", "res://DataBase/Reward/Config/2002.Probability.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

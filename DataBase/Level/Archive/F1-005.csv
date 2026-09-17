@@ -1,0 +1,6 @@
+MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra
+M-TEST-FOUNDATION,2001,HighRiskCombat,High,F1-005-M01,Monster,3105,-2,-5,,,
+M-TEST-FOUNDATION,2001,HighRiskCombat,High,F1-005-M02,Monster,3105,2,-5,,,
+M-TEST-FOUNDATION,2001,HighRiskCombat,High,F1-005-M03,Monster,3102,-1,-4,,,
+M-TEST-FOUNDATION,2001,HighRiskCombat,High,F1-005-M04,Monster,3102,1,-4,,,
+M-TEST-FOUNDATION,2001,HighRiskCombat,High,F1-005-M05,Monster,3101,0,-7,,,

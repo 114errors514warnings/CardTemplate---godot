@@ -16,13 +16,19 @@ public sealed record StoryEventDefinition(string Title, string Synopsis, IReadOn
 /// <summary>Modal story overlay. It owns only presentation and calls supplied callbacks for event results.</summary>
 public partial class EventStoryOverlay : Control
 {
+    private sealed class StoryLogEntry
+    {
+        public string SpeakerName;
+        public readonly List<string> Lines = new();
+        public StoryLogEntry(string speakerName, string text) { SpeakerName = speakerName; Lines.Add(text); }
+    }
     /// <summary>剧情浮层的功能按钮标识：对话记录 / 隐藏界面 / 自动播放 / 跳过对话。新增功能按钮只需加枚举项并在 Build 里 AddFunctionButton。</summary>
     private enum OverlayFunction { Log, Hide, Auto, Skip }
 
     private readonly StoryEventDefinition definition;
     private readonly Action onClosed;
-    private readonly List<string> history = new();
-    private PanelContainer leftPortrait, rightPortrait, bubble, logPanel, skipPanel;
+    private readonly List<StoryLogEntry> history = new();
+    private PanelContainer leftPortrait, rightPortrait, bubble, logPanel, skipPanel, autoMenu;
     private Polygon2D bubbleTail;
     private Label leftName, rightName, speakerLabel, textLabel;
     private VBoxContainer choices;
@@ -63,8 +69,9 @@ public partial class EventStoryOverlay : Control
         var shade = new ColorRect { Color = new Color(0.02f, 0.03f, 0.05f, .72f), MouseFilter = MouseFilterEnum.Ignore };
         shade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(shade);
         // Portrait placeholders reserve the lower corners for future upper-body art.
-        leftPortrait = Portrait("左侧人物", out leftName); Place(leftPortrait, .02f, .31f, .29f, .90f); AddChild(leftPortrait);
-        rightPortrait = Portrait("右侧人物", out rightName); Place(rightPortrait, .71f, .31f, .98f, .90f); AddChild(rightPortrait);
+        // Portraits reserve only the lower corners; future upper-body art stays close to the edges and preserves the background.
+        leftPortrait = Portrait("左侧人物", out leftName); Place(leftPortrait, .01f, .64f, .17f, .98f); AddChild(leftPortrait);
+        rightPortrait = Portrait("右侧人物", out rightName); Place(rightPortrait, .83f, .64f, .99f, .98f); AddChild(rightPortrait);
 
         bubbleTail = new Polygon2D { Visible = false, ZIndex = 1 }; AddChild(bubbleTail);
         bubble = new PanelContainer { MouseFilter = MouseFilterEnum.Ignore, ZIndex = 2 }; bubble.AddThemeStyleboxOverride("panel", Box(new Color(0.07f, .09f, .13f, .96f))); Place(bubble, .20f, .67f, .80f, .88f); AddChild(bubble);
@@ -76,11 +83,11 @@ public partial class EventStoryOverlay : Control
         controls = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin }; controls.AddThemeConstantOverride("separation", 10); Place(controls, .02f, .025f, .37f, .08f); AddChild(controls);
         AddFunctionButton(OverlayFunction.Log, "Log", controls, ToggleLog).CustomMinimumSize = new Vector2(90, 38);
         AddFunctionButton(OverlayFunction.Hide, "隐藏", controls, ToggleHidden).CustomMinimumSize = new Vector2(90, 38);
-        AddFunctionButton(OverlayFunction.Auto, "Auto: 关闭", controls, CycleAuto).CustomMinimumSize = new Vector2(90, 38);
+        AddFunctionButton(OverlayFunction.Auto, "Auto: 关闭", controls, ToggleAutoMenu).CustomMinimumSize = new Vector2(90, 38);
         Place(AddFunctionButton(OverlayFunction.Skip, "跳过", this, ToggleSkip), .89f, .025f, .98f, .08f);
 
         choices = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, Visible = false }; choices.AddThemeConstantOverride("separation", 14); Place(choices, .30f, .30f, .70f, .66f); AddChild(choices);
-        BuildLog(); BuildSkip();
+        BuildLog(); BuildSkip(); BuildAutoMenu();
     }
 
     private PanelContainer Portrait(string placeholder, out Label name)
@@ -103,10 +110,13 @@ public partial class EventStoryOverlay : Control
 
     private void BuildLog()
     {
-        logPanel = new PanelContainer { Visible = false, MouseFilter = MouseFilterEnum.Stop }; logPanel.AddThemeStyleboxOverride("panel", Box(new Color(.04f, .05f, .08f, .98f))); Place(logPanel, .16f, .10f, .84f, .78f); AddChild(logPanel);
-        var box = new VBoxContainer(); logPanel.AddChild(box); var title = Text("对话记录", 24); box.AddChild(title);
+        // Log is a modal above bubble, portraits, choices and all other story UI.
+        logPanel = new PanelContainer { Visible = false, MouseFilter = MouseFilterEnum.Stop, ZIndex = 30 }; logPanel.AddThemeStyleboxOverride("panel", Box(new Color(.04f, .05f, .08f, 1f))); Place(logPanel, .16f, .10f, .84f, .78f); AddChild(logPanel);
+        var box = new VBoxContainer(); logPanel.AddChild(box);
+        var header = new HBoxContainer(); box.AddChild(header);
+        var title = Text("对话记录", 24); title.SizeFlagsHorizontal = SizeFlags.ExpandFill; header.AddChild(title);
+        var close = new Button { Text = "关闭", CustomMinimumSize = new Vector2(84, 34) }; close.Pressed += ToggleLog; header.AddChild(close);
         logBody = new RichTextLabel { BbcodeEnabled = false, ScrollActive = true, SizeFlagsVertical = SizeFlags.ExpandFill }; logBody.Name = "Body"; box.AddChild(logBody);
-        var close = new Button { Text = "关闭" }; close.Pressed += ToggleLog; box.AddChild(close);
     }
     private void BuildSkip()
     {
@@ -116,6 +126,24 @@ public partial class EventStoryOverlay : Control
         var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; row.AddThemeConstantOverride("separation", 16); box.AddChild(row);
         var confirm = new Button { Text = "确认跳过" }; confirm.Pressed += Skip; row.AddChild(confirm);
         var cancel = new Button { Text = "返回剧情" }; cancel.Pressed += ToggleSkip; row.AddChild(cancel);
+    }
+    private void BuildAutoMenu()
+    {
+        autoMenu = new PanelContainer { Visible = false, MouseFilter = MouseFilterEnum.Stop, ZIndex = 10 };
+        autoMenu.AddThemeStyleboxOverride("panel", Box(new Color(.04f, .06f, .09f, .98f), 8));
+        // Directly below the third control (Auto); fixed anchors keep the menu stable at every resolution.
+        Place(autoMenu, .145f, .085f, .255f, .285f); AddChild(autoMenu);
+        var box = new VBoxContainer(); box.AddThemeConstantOverride("separation", 4); autoMenu.AddChild(box);
+        AddAutoOption(box, "关闭", 0);
+        AddAutoOption(box, "1×", 1);
+        AddAutoOption(box, "2×", 2);
+        AddAutoOption(box, "4×", 3);
+    }
+    private void AddAutoOption(Control parent, string text, int speedIndex)
+    {
+        var button = new Button { Text = text, CustomMinimumSize = new Vector2(92, 30) };
+        button.Pressed += () => SetAutoSpeed(speedIndex);
+        parent.AddChild(button);
     }
 
     private void ShowLine(int index)
@@ -163,7 +191,7 @@ public partial class EventStoryOverlay : Control
 
     public override void _Process(double delta)
     {
-        if (hidden || logPanel.Visible || skipPanel.Visible || waitingChoice || lineIndex >= definition.Lines.Count) return;
+        if (hidden || logPanel.Visible || skipPanel.Visible || autoMenu.Visible || waitingChoice || lineIndex >= definition.Lines.Count) return;
         var line = definition.Lines[lineIndex]; float speed = autoSpeedIndex switch { 1 => 45f, 2 => 90f, 3 => 180f, _ => 45f };
         if (visibleChars < line.Text.Length)
         {
@@ -182,6 +210,7 @@ public partial class EventStoryOverlay : Control
     {
         if (input is not InputEventMouseButton mouse || mouse.ButtonIndex != MouseButton.Left || !mouse.Pressed) return;
         if (hidden) { ToggleHidden(); AcceptEvent(); return; }
+        if (autoMenu.Visible) { autoMenu.Visible = false; AcceptEvent(); return; }
         if (!logPanel.Visible && !skipPanel.Visible && !waitingChoice) Advance();
         AcceptEvent();
     }
@@ -189,7 +218,10 @@ public partial class EventStoryOverlay : Control
     {
         var line = definition.Lines[lineIndex];
         if (visibleChars < line.Text.Length) { visibleChars = line.Text.Length; textLabel.Text = line.Text; return; }
-        history.Add($"{line.SpeakerName}：{line.Text}"); ShowLine(lineIndex + 1);
+        // The active line is deliberately not written until it is advanced; Log therefore contains every prior line only.
+        if (history.Count > 0 && history[^1].SpeakerName == line.SpeakerName) history[^1].Lines.Add(line.Text);
+        else history.Add(new StoryLogEntry(line.SpeakerName, line.Text));
+        ShowLine(lineIndex + 1);
     }
     private void ShowChoicesOrClose(bool showSkipSynopsis = false)
     {
@@ -215,12 +247,26 @@ public partial class EventStoryOverlay : Control
     private void ToggleLog()
     {
         logPanel.Visible = !logPanel.Visible;
-        if (logPanel.Visible && logBody != null) logBody.Text = string.Join("\n\n", history);
+        if (logPanel.Visible && logBody != null)
+        {
+            logBody.Text = string.Join("\n\n", history.Select(entry => entry.SpeakerName + "\n" + string.Join("\n", entry.Lines)));
+            CallDeferred(nameof(ScrollLogToLatest));
+        }
     }
-    private void ToggleHidden() { hidden = !hidden; bubble.Visible = !hidden; bubbleTail.Visible = !hidden && bubbleTail.Polygon.Length > 0; controls.Visible = !hidden; choices.Visible = !hidden && waitingChoice; }
-    private void CycleAuto()
+    private void ScrollLogToLatest()
     {
-        autoSpeedIndex = (autoSpeedIndex + 1) % 4;
+        if (logBody != null) logBody.ScrollToLine(Math.Max(0, logBody.GetLineCount() - 1));
+    }
+    private void ToggleHidden() { hidden = !hidden; bubble.Visible = !hidden; bubbleTail.Visible = !hidden && bubbleTail.Polygon.Length > 0; controls.Visible = !hidden; autoMenu.Visible = false; choices.Visible = !hidden && waitingChoice; }
+    private void ToggleAutoMenu()
+    {
+        if (hidden || waitingChoice) return;
+        autoMenu.Visible = !autoMenu.Visible;
+    }
+    private void SetAutoSpeed(int speedIndex)
+    {
+        autoSpeedIndex = Math.Clamp(speedIndex, 0, 3);
+        autoMenu.Visible = false;
         if (functionButtons.TryGetValue(OverlayFunction.Auto, out var button))
             button.Text = autoSpeedIndex == 0 ? "Auto: 关闭" : $"Auto: {1 << (autoSpeedIndex - 1)}×";
     }
@@ -228,7 +274,7 @@ public partial class EventStoryOverlay : Control
     private void Skip()
     {
         if (waitingChoice) return;
-        history.Add("（已跳过：" + definition.Synopsis + "）");
+        history.Add(new StoryLogEntry("剧情梗概", "（已跳过：" + definition.Synopsis + "）"));
         skipPanel.Visible = false;
         // Skipping condenses the presentation only; it never selects an outcome for the player.
         ShowChoicesOrClose(showSkipSynopsis: true);

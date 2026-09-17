@@ -37,7 +37,8 @@ public partial class HexBattleScene : Control
     private Label pileTitle;
     private GridContainer pileList;
     private Label pileDetail;
-    private readonly ColorRect[] energyPips = new ColorRect[3];
+    private PanelContainer energyDisplay;
+    private Label energyLabel;
     private bool victoryShown;
     private Control resultShade;
     private Label resultTitle;
@@ -102,11 +103,17 @@ public partial class HexBattleScene : Control
         try
         {
             LoadingSystem.EnsureAllDataLoaded();
+            BattleLevelConfig level = null;
             string path = LoadingSystem.GetFilePathByKey("Data.Battlefield.Foundation");
+            if (UseRunSession && !string.IsNullOrWhiteSpace(RunSession.Instance?.Current?.PendingLevelId))
+            {
+                level = BattleLevelCatalog.Load(RunSession.Instance.Current.PendingLevelId);
+                path = BattleLevelCatalog.ResolveMapPath(level.MapId);
+            }
             using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
             if (file == null) throw new InvalidOperationException($"无法打开战场 JSON：{path}");
             BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
-            if (UseRunSession) ConfigureRunDefinition(definition);
+            if (UseRunSession) ConfigureRunDefinition(definition, level);
             Session = new BattlefieldSession(definition);
             if (UseRunSession) Session.RestoreRunState(RunSession.Instance.Current.CharacterSlots, RunSession.Instance.Current.DeckSlots);
             Session.Changed += RefreshHud;
@@ -153,7 +160,7 @@ public partial class HexBattleScene : Control
         }
     }
 
-    private static void ConfigureRunDefinition(BattleMapDefinition definition)
+    private static void ConfigureRunDefinition(BattleMapDefinition definition, BattleLevelConfig level)
     {
         RunSession run = RunSession.Instance;
         if (run?.Current == null) throw new InvalidOperationException("运行局存档不存在。");
@@ -161,7 +168,14 @@ public partial class HexBattleScene : Control
         if (run.PendingEncounter == null || run.PendingEncounter.MonsterIds == null || run.PendingEncounter.MonsterIds.Length == 0)
             throw new InvalidOperationException("运行局未配置待处理遭遇。");
         definition.PlayerCharacterIds = run.Current.CharacterSlots.Select(x => x.CharacterId).ToList();
-        definition.MonsterIds = run.PendingEncounter.MonsterIds.ToList();
+        if (level != null)
+        {
+            var monsters = level.Objects.Where(x => x.ObjectType == "Monster").ToList();
+            definition.MonsterIds = monsters.Select(x => int.Parse(x.DefinitionId)).ToList();
+            definition.FixedEnemySpawnCoords = monsters.Select(x => new HexCoordinateData { Q = x.Q, R = x.R }).ToList();
+            definition.ObjectPlacements.Clear(); definition.RandomItemCount = 0; definition.RandomItemDefinitions.Clear();
+        }
+        else definition.MonsterIds = run.PendingEncounter.MonsterIds.ToList();
         definition.Validate();
     }
 
@@ -359,12 +373,9 @@ public partial class HexBattleScene : Control
         AddChild(resPanel);
         var resBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; resBox.AddThemeConstantOverride("separation", 6); resPanel.AddChild(resBox);
         resources = Label("", 16, Colors.White); resBox.AddChild(resources);
-        var pips = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; pips.AddThemeConstantOverride("separation", 4); resBox.AddChild(pips);
-        for (int i = 0; i < 3; i++)
-        {
-            energyPips[i] = new ColorRect { Color = new Color(0.35f, 0.75f, 0.95f), CustomMinimumSize = new Vector2(13, 13) };
-            pips.AddChild(energyPips[i]);
-        }
+        energyDisplay = new PanelContainer { MouseFilter = MouseFilterEnum.Ignore };
+        energyLabel = Label("", 16, Colors.White); energyLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        energyDisplay.AddChild(energyLabel); resBox.AddChild(energyDisplay);
         moveInfo = Label("", 12, new Color("c8d0d8")); resBox.AddChild(moveInfo);
         var pileButtons = new VBoxContainer(); pileButtons.AddThemeConstantOverride("separation", 4); resBox.AddChild(pileButtons);
         drawPileButton = MakePileButton("抽牌堆", () => ShowPile("抽牌堆", Session?.GetDrawPile(Session.SelectedId))); pileButtons.AddChild(drawPileButton);
@@ -463,7 +474,7 @@ public partial class HexBattleScene : Control
         resultTitle = new Label { HorizontalAlignment = HorizontalAlignment.Center }; resultTitle.AddThemeFontSizeOverride("font_size", 34); resultBox.AddChild(resultTitle);
         AddButton(resultBox, "重新开始本场", () => GetTree().ReloadCurrentScene());
         AddButton(resultBox, "返回主菜单", ReturnToMenu);
-        friendlyWarningShade = new ColorRect { Color = new Color(0, 0, 0, .72f), Visible = false, ZIndex = 50 };
+        friendlyWarningShade = new ColorRect { Color = new Color(0, 0, 0, .72f), Visible = false, ZIndex = 50, MouseFilter = MouseFilterEnum.Stop };
         friendlyWarningShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(friendlyWarningShade);
         var warningCenter = new CenterContainer(); warningCenter.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); friendlyWarningShade.AddChild(warningCenter);
         var warningPanel = MakePanel(); warningPanel.CustomMinimumSize = new Vector2(420, 210); warningCenter.AddChild(warningPanel);
@@ -530,6 +541,14 @@ public partial class HexBattleScene : Control
             ContentMarginLeft = 3, ContentMarginTop = 3, ContentMarginRight = 3, ContentMarginBottom = 3,
         };
     }
+    private static StyleBoxFlat EnergyDisplayBox(bool active) => new()
+    {
+        BgColor = active ? new Color(0.10f, 0.28f, 0.38f, 0.96f) : new Color(0.075f, 0.085f, 0.10f, 0.92f),
+        BorderColor = active ? new Color(0.36f, 0.82f, 0.96f, 0.95f) : new Color(0.23f, 0.28f, 0.34f, 0.9f),
+        BorderWidthLeft = 1, BorderWidthTop = 1, BorderWidthRight = 1, BorderWidthBottom = 1,
+        CornerRadiusTopLeft = 5, CornerRadiusTopRight = 5, CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5,
+        ContentMarginLeft = 8, ContentMarginTop = 4, ContentMarginRight = 8, ContentMarginBottom = 4,
+    };
     private static void Place(Control c, float l, float t, float r, float b)
     {
         c.AnchorLeft = l; c.AnchorTop = t; c.AnchorRight = r; c.AnchorBottom = b;
@@ -640,10 +659,10 @@ public partial class HexBattleScene : Control
         var p = Session.Selected;
         title.Text = $"{FormatPhase(Session.Phase)} · 回合 {Session.Round}";
         int maxEnergy = Math.Max(p.Unit.Energy, p.Unit is CharacterInstance c ? c.Max_costs : GameVariables.Load().DefaultEnergyPerTurn);
-        resources.Text = $"{p.Name}\n能量 {p.Unit.Energy}/{maxEnergy}";
+        resources.Text = p.Name;
+        energyLabel.Text = $"能量 {p.Unit.Energy}/{maxEnergy}";
+        energyDisplay.AddThemeStyleboxOverride("panel", EnergyDisplayBox(p.Unit.Energy > 0));
         moveInfo.Text = $"移动 {p.RemainingMoves}/{p.EffectiveMovesPerTurn} · 每次 {p.EffectiveMoveDistancePerAction} 格";
-        for (int i = 0; i < 3; i++)
-            energyPips[i].Modulate = i < Math.Min(p.Unit.Energy, 3) ? new Color(0.35f, 0.75f, 0.95f) : new Color(0.25f, 0.3f, 0.4f);
         if (drawPileButton != null) drawPileButton.Text = $"抽牌堆\n{Session.DrawPileCount(p.UnitId)}";
         if (discardPileButton != null) discardPileButton.Text = $"弃牌堆\n{Session.DiscardPileCount(p.UnitId)}";
         if (exhaustPileButton != null) exhaustPileButton.Text = $"消耗牌\n{p.Unit.ExhaustPile.Count}";
@@ -999,6 +1018,12 @@ public partial class HexBattleScene : Control
     // ── 出牌拖拽（对齐旧版战斗系统）：按住卡牌→跟手，拖出手牌区/指向目标格后松开施放 ──
     public override void _Input(InputEvent e)
     {
+        // Modal warning owns pointer routing. Card/item drag state has already been suspended before it opens.
+        if (friendlyWarningShade?.Visible == true)
+        {
+            if (e is InputEventMouseMotion) GetViewport().SetInputAsHandled();
+            return;
+        }
         if (e is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
         {
             if (draggedCard == null && draggedItem == null)
@@ -1140,12 +1165,27 @@ public partial class HexBattleScene : Control
         if (allies.Count == 0) return false;
         int cardId = draggedCard.CardId;
         string names = string.Join("、", allies.Select(x => x.Name));
-        ShowFriendlyHitWarning($"{draggedCard.CardName} 将对友方单位 {names} 造成伤害或负面效果。\n确认继续吗？", () =>
+        string cardName = draggedCard.CardName;
+        SuspendCardDragForFriendlyWarning();
+        ShowFriendlyHitWarning($"{cardName} 将对友方单位 {names} 造成伤害或负面效果。\n确认继续吗？", () =>
         {
             if (Session.TryCastCard(cardId, target, out string error)) CleanupAfterDrag();
             else { CancelCardDrag(); ShowMessage("出牌失败：" + error); }
         }, CancelCardDrag);
         return true;
+    }
+
+    /// <summary>Removes only the active drag presentation. The card remains in the hand model until confirmation casts it.</summary>
+    private void SuspendCardDragForFriendlyWarning()
+    {
+        if (draggedCardNode != null) { draggedCardNode.QueueFree(); draggedCardNode = null; }
+        draggedCard = null;
+        dragExitedHandArea = false;
+        pendingCardId = 0;
+        lastCastHover = null;
+        HideDragLine();
+        MapView.ClearCastPreview();
+        RefreshHand();
     }
 
     private void CleanupAfterDrag()

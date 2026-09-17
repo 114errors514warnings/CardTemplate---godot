@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b6mo3uy6xcl2t"
+
+[deps]
+
+files=["res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.DropTableId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.LevelType.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.Difficulty.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.InstanceId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.ObjectType.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.DefinitionId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.Q.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.R.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation"]
+
+source_file="res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.csv"
+dest_files=["res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.DropTableId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.LevelType.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.Difficulty.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.InstanceId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.ObjectType.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.DefinitionId.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.Q.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.R.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation", "res://MYMy Game卡牌模拟器DataBaseLevelConfigF1-004.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

@@ -275,6 +275,7 @@ public partial class RunSession : Node
 		Current.PendingEncounterNodeType = (int)row.NodeType;
 		Current.PendingEncounterName = row.Name ?? string.Empty;
 		Current.PendingDropTableId = row.DropTableId;
+		Current.PendingLevelId = row.LevelId ?? string.Empty;
 		Current.PendingMonsterIds = new List<int>(row.MonsterIds ?? Array.Empty<int>());
 		Save();
 	}
@@ -294,6 +295,7 @@ public partial class RunSession : Node
 			Name = Current.PendingEncounterName ?? string.Empty,
 			Difficulty = StageDifficulty.Any,
 			DropTableId = Current.PendingDropTableId,
+			LevelId = Current.PendingLevelId ?? string.Empty,
 			MonsterIds = Current.PendingMonsterIds?.ToArray() ?? Array.Empty<int>(),
 		};
 	}
@@ -331,6 +333,7 @@ public partial class RunSession : Node
 		Current.PendingEncounterNodeType = 0;
 		Current.PendingEncounterName = string.Empty;
 		Current.PendingDropTableId = 0;
+		Current.PendingLevelId = string.Empty;
 		Current.PendingMonsterIds.Clear();
 		ClearPendingEncounter();
 		Save();

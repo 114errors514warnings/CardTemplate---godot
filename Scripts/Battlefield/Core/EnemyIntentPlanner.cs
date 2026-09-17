@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace CardSimulator.Battlefield;
 
-public enum EnemyTargetPolicy { Nearest, ThrustNearestCollinear, ThrowSingleLowestHealth, ThrowAreaDense }
+public enum EnemyTargetPolicy { Nearest, ThrustNearestCollinear, ThrowSingleLowestHealth, ThrowAreaDense, AllyRange }
 public enum EnemyActionOrder { MoveThenAttack, AttackThenMove }
 public enum EnemyIntentPreviewCertainty { UnknownNumbers, KnownDamageUnknownRange, KnownDamageKnownRange }
 

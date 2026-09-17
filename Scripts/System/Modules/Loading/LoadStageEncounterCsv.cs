@@ -58,6 +58,7 @@ public static class LoadStageEncounterCsv
 				DropTableId = ParseInt(fields[3], 0),
 				Weight = ParseInt(fields[4], 1),
 				Note = fields.Length > 5 ? fields[5].Trim() : string.Empty,
+				LevelId = fields.Length > 6 ? fields[6].Trim() : string.Empty,
 			};
 
 			row.MonsterIds = ParseMonsterIds(fields[2], line);

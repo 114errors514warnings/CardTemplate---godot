@@ -1,0 +1,5 @@
+RewardGroup,RewardType,ReferenceId,MinAmount,MaxAmount,Probability
+Gold,Gold,,35,50,1
+Card,Card,Common,1,1,0.70
+Card,Card,Uncommon,1,1,0.25
+Card,Card,Rare,1,1,0.05

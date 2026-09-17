@@ -44,11 +44,20 @@ public static class BattleDeploymentService
             bool hasExit = exits.Length > 0 ? exits.Any(component.Contains) :
                 component.Any(x => AxialHex.Distance(x, new AxialHex(0, 0)) == definition.Radius);
             if (!hasExit || players.Any(x => !component.Contains(x))) { lastError = "玩家出生区被封闭。"; continue; }
-            var candidates = Sorted(component.Where(x => !players.Contains(x) &&
-                players.All(p => AxialHex.Distance(p, x) >= definition.MinEnemyDistance)));
-            if (candidates.Count < definition.MonsterIds.Count) { lastError = "开放区域的怪物出生格不足。"; continue; }
-            Shuffle(candidates, new Random(unchecked(actualSeed * 397 + attempt * 7919 + 29)));
-            var enemies = candidates.Take(definition.MonsterIds.Count).ToArray();
+            AxialHex[] enemies;
+            if (definition.FixedEnemySpawnCoords.Count > 0)
+            {
+                enemies = definition.FixedEnemySpawnCoords.Select(x => x.ToHex()).ToArray();
+                if (enemies.Distinct().Count() != enemies.Length || enemies.Any(x => !component.Contains(x) || players.Contains(x)))
+                { lastError = "关卡固定怪物出生格不可用。"; continue; }
+            }
+            else
+            {
+                var candidates = Sorted(component.Where(x => !players.Contains(x) && players.All(p => AxialHex.Distance(p, x) >= definition.MinEnemyDistance)));
+                if (candidates.Count < definition.MonsterIds.Count) { lastError = "开放区域的怪物出生格不足。"; continue; }
+                Shuffle(candidates, new Random(unchecked(actualSeed * 397 + attempt * 7919 + 29)));
+                enemies = candidates.Take(definition.MonsterIds.Count).ToArray();
+            }
             int serial = 0;
             foreach (var entry in definition.ObjectPlacements)
             {

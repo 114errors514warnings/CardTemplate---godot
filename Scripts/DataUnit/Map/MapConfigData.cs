@@ -31,6 +31,7 @@ public sealed class StageEncounterRow
 	public int DropTableId = 0;
 	public int Weight = 1;
 	public string Note = string.Empty;
+	public string LevelId = string.Empty;
 
 	/// <summary>是否可作为「有配置」触发战斗（须解析出至少一个怪物 / 或后续事件类自定语义）。</summary>
 	public bool IsUsable => MonsterIds != null && MonsterIds.Length > 0;

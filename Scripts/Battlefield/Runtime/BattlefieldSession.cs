@@ -132,8 +132,11 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             return cells;
         }
+        // 投掷型武器的单点/爆发卡使用抛物线定点命中：只受距离和地图边界限制，不检查单位或障碍遮挡。
+        bool thrownTargeting = CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle
+            && spec.Shape is CardSpatialShape.Single or CardSpatialShape.Burst;
         return BattleRangeResolver.CellsWithinRange(origin, effectiveRange)
-            .Where(x => x != origin && Board.Cells.ContainsKey(x) && HasClearTrace(origin, x, spec.Penetrates)).ToArray();
+            .Where(x => x != origin && Board.Cells.ContainsKey(x) && (thrownTargeting || HasClearTrace(origin, x, spec.Penetrates))).ToArray();
     }
 
     public IReadOnlyCollection<AxialHex> GetAffectedCells(int cardId, AxialHex target)
@@ -259,7 +262,7 @@ public sealed partial class BattlefieldSession : IDisposable
         {
             if (!Board.Cells.TryGetValue(cell, out var data)) break;
             var victim = Occupancy.At(cell);
-            if (data.Kind == BattleCellKind.Obstacle || data.BlocksSight) break;
+            if (spec.Mode != WeaponAttackMode.ThrowSingle && (data.Kind == BattleCellKind.Obstacle || data.BlocksSight)) break;
             if (victim == null) continue;
             int beforeShield = victim.Unit.Shield;
             int beforeHp = victim.Unit.HP;
@@ -914,7 +917,9 @@ public sealed partial class BattlefieldSession : IDisposable
         int hitCount = monster.SelectedIntention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
         int bonus = monster.SelectedIntention.Where(effect => effect != null && effect.Length > 2 && (EffectType)effect[0] == EffectType.Damage).Select(effect => effect[2]).DefaultIfEmpty(0).Max();
         if (spec.PreviewCertainty == EnemyIntentPreviewCertainty.UnknownNumbers) return "移动 / 攻击";
-        return $"{placement.Unit.Attack + bonus}×{Math.Max(1, hitCount)}";
+        int hits = Math.Max(1, hitCount);
+        int damage = placement.Unit.Attack + bonus;
+        return hits == 1 ? damage.ToString() : $"{damage}×{hits}";
     }
 
     public EnemyIntentDisplay GetEnemyIntentDisplay(int unitId)
@@ -1004,7 +1009,13 @@ public sealed partial class BattlefieldSession : IDisposable
         }
         else if (type == EffectType.Shield)
         {
-            EffectSystem.ApplyShield(enemy.Unit, effect.Skip(1).ToArray());
+            if (spec.TargetPolicy == EnemyTargetPolicy.AllyRange)
+            {
+                foreach (BattleUnitPlacement ally in Occupancy.Placements.Values.Where(p => p.Role == BattlefieldRole.Enemy &&
+                    p.Presence == BattlefieldPresence.Active && BattleRangeResolver.Distance(enemy.Coord, p.Coord) <= spec.AreaRadius))
+                    EffectSystem.ApplyShield(ally.Unit, effect.Skip(1).ToArray());
+            }
+            else EffectSystem.ApplyShield(enemy.Unit, effect.Skip(1).ToArray());
         }
         else if (type == EffectType.AddState && effect.Length > 2 && Enum.IsDefined(typeof(StateType), effect[2]))
         {

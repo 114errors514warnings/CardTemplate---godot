@@ -39,6 +39,7 @@ public sealed class RunSaveData
 	public string PendingEncounterName = string.Empty;
 	public List<int> PendingMonsterIds { get; set; } = new List<int>();
 	public int PendingDropTableId;
+	public string PendingLevelId = string.Empty;
 
 	// ── 结算未领取（InSettlement）──
 	public string SettlementEncounterName = string.Empty;
