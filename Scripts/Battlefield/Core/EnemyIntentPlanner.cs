@@ -40,6 +40,7 @@ public static class BattleEnemyIntentCatalog
 			if (f.Length < 11 || !int.TryParse(f[0], out int monsterId) || !int.TryParse(f[1], out int index) ||
 				!Enum.TryParse(f[2], true, out EnemyIntentPreviewCertainty certainty) || !Enum.TryParse(f[3], true, out WeaponAttackMode mode) ||
 				!int.TryParse(f[4], out int range) || !int.TryParse(f[5], out int move) || !int.TryParse(f[6], out int budget) ||
+
 				!Enum.TryParse(f[7], true, out EnemyActionOrder order) || !Enum.TryParse(f[8], true, out EnemyTargetPolicy policy) || !int.TryParse(f[9], out int radius))
 				throw new ArgumentException($"怪物意图 CSV 行无效：{line}");
 			AxialHex? dir = null;

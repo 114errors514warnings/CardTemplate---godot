@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-F1-012",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "断裂的吊桥",
+  "summary": "通往村庄方向的吊桥断了一半，对岸的废弃哨站里还留着补给。队伍可以强渡、沿下游浅滩绕行，或用绳索把补给拖过来。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_broken_bridge", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "elf_scout", "displayName": "精灵斥候", "portraitId": "portrait_elf_scout", "defaultSide": "Left", "variants": { "normal": "portrait_elf_scout_normal", "worried": "portrait_elf_scout_worried" } },
+    { "actorId": "swordmaster", "displayName": "重剑手", "portraitId": "portrait_swordmaster", "defaultSide": "Right", "variants": { "normal": "portrait_swordmaster_normal" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "elf_scout", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "桥板断了三块，剩下的在渗水。对岸哨站的补给还在。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "swordmaster", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "硬走过去就是拿命换。你要怎么选？", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-F1-012-C01", "order": 1, "text": "踩着断口强渡", "effectPreview": "获得 70 金币，渡河时受伤 4 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 70 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -4 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-012-C02", "order": 2, "text": "沿下游浅滩绕行", "effectPreview": "获得 40 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 40 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-012-C03", "order": 3, "text": "用绳索把补给拖过来", "effectPreview": "获得 50 金币，绳索脱手时受轻伤 1 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 50 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -1 } ], "next": { "type": "Close" } }
+  ]
+}

@@ -277,6 +277,27 @@ public partial class RunSession : Node
 		Current.PendingDropTableId = row.DropTableId;
 		Current.PendingLevelId = row.LevelId ?? string.Empty;
 		Current.PendingMonsterIds = new List<int>(row.MonsterIds ?? Array.Empty<int>());
+		Current.PendingContentType = "Level";
+		Current.PendingContentId = Current.PendingLevelId;
+		Save();
+	}
+
+	public void BeginRunEvent(string eventId, int sourceNodeId)
+	{
+		if (Current == null || string.IsNullOrWhiteSpace(eventId)) return;
+		Current.GameMode = RunGameModes.InBattleStart;
+		Current.PendingContentType = "Event";
+		Current.PendingContentId = eventId;
+		Current.PendingSourceNodeId = sourceNodeId;
+		Save();
+	}
+
+	public void CompletePendingEventToMap()
+	{
+		if (Current == null) return;
+		MarkCurrentNodeVisitedAndAdvanceEncounter();
+		Current.GameMode = RunGameModes.OnMap;
+		Current.PendingContentType = string.Empty; Current.PendingContentId = string.Empty; Current.PendingSourceNodeId = -1;
 		Save();
 	}
 

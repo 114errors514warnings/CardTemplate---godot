@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://s4enj4ay8be8"
+
+[deps]
+
+files=["res://DataBase/WorldMap/LevelPool.Act.translation", "res://DataBase/WorldMap/LevelPool.NodeType.translation", "res://DataBase/WorldMap/LevelPool.Difficulty.translation", "res://DataBase/WorldMap/LevelPool.LevelId.translation", "res://DataBase/WorldMap/LevelPool.Weight.translation"]
+
+source_file="res://DataBase/WorldMap/LevelPool.csv"
+dest_files=["res://DataBase/WorldMap/LevelPool.Act.translation", "res://DataBase/WorldMap/LevelPool.NodeType.translation", "res://DataBase/WorldMap/LevelPool.Difficulty.translation", "res://DataBase/WorldMap/LevelPool.LevelId.translation", "res://DataBase/WorldMap/LevelPool.Weight.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

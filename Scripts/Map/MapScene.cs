@@ -4,11 +4,14 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 public partial class MapScene : Control
 {
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
+	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
+	[Export] public bool EnableDebugControls = true;
 
 	[Export] public float HexSize = 40f;
 	[Export] public Color EdgeColor = new Color(0.5f, 0.5f, 0.5f, 0.6f);
@@ -154,6 +157,26 @@ public partial class MapScene : Control
 		Button backButton = new Button { Text = "返回主菜单" };
 		backButton.Pressed += () => GetTree().ChangeSceneToFile(MainMenuScenePath);
 		bottomRow.AddChild(backButton);
+		if (EnableDebugControls) BuildDebugControls(bottomRow);
+	}
+
+	private void BuildDebugControls(Control parent)
+	{
+		var input = new LineEdit { PlaceholderText = "关卡/事件 ID", CustomMinimumSize = new Vector2(150, 0) }; parent.AddChild(input);
+		var level = new Button { Text = "调试关卡" }; level.Pressed += () => StartDebugContent("Level", input.Text); parent.AddChild(level);
+		var story = new Button { Text = "调试事件" }; story.Pressed += () => StartDebugContent("Event", input.Text); parent.AddChild(story);
+	}
+	private void StartDebugContent(string type, string id)
+	{
+		var session = RunSession.Instance; if (session?.Current == null || string.IsNullOrWhiteSpace(id)) return;
+		if (type == "Event") { try { StoryEventCatalog.Load(id); } catch (System.Exception ex) { SetStatus(ex.Message); return; } session.BeginRunEvent(id, currentNodeId); GetTree().ChangeSceneToFile(RunEventScenePath); return; }
+		try
+		{
+			var level = CardSimulator.Battlefield.BattleLevelCatalog.Load(id);
+			var row = new StageEncounterRow { LevelId = id, NodeType = MapNodeType.NormalCombat, DropTableId = level.DropTableId, MonsterIds = level.Objects.Where(x => x.ObjectType == "Monster").Select(x => int.Parse(x.DefinitionId)).ToArray() };
+			session.BeginRunBattleEncounter("", row); GetTree().ChangeSceneToFile(RunBattleScenePath);
+		}
+		catch (System.Exception ex) { SetStatus(ex.Message); }
 	}
 
 	private Vector2 ToScreenPosition(AxialHex hex)
@@ -447,14 +470,26 @@ public partial class MapScene : Control
 		}
 
 		// 2) 首次到达：按「该类型此时能否解析出配置行」分流（与格点类型无关）
-		StageEncounterRow row = TryResolveEncounter(session, node);
-		if (row != null)
+		ResolvedMapContent content = WorldMapContentResolver.Resolve(session.Current.MapState.Act, node, board, session.Current);
+		if (content?.Type == "Level")
 		{
+			CardSimulator.Battlefield.BattleLevelConfig level;
+			try { level = CardSimulator.Battlefield.BattleLevelCatalog.Load(content.Id); }
+			catch (System.Exception ex) { SetStatus($"关卡配置加载失败：{ex.Message}"); return; }
+			var row = new StageEncounterRow { LevelId = content.Id, NodeType = node.Type, DropTableId = level.DropTableId,
+				MonsterIds = level.Objects.Where(x => x.ObjectType == "Monster").Select(x => int.Parse(x.DefinitionId)).ToArray() };
 			session.BeginRunBattleEncounter(MapNodeTypeUtil.GetLayerNameByAct(session.Current.MapState.Act), row);
-			SetStatus($"进入战斗：{row.Name}。");
+			SetStatus($"进入关卡：{content.Id}。");
 			QueueRedraw();
 			GetTree().ChangeSceneToFile(RunBattleScenePath);
 			return;
+		}
+		if (content?.Type == "Event")
+		{
+			try { StoryEventCatalog.Load(content.Id); }
+			catch (System.Exception ex) { SetStatus($"事件配置加载失败：{ex.Message}"); return; }
+			session.BeginRunEvent(content.Id, node.NodeId);
+			SetStatus($"进入事件：{content.Id}。"); QueueRedraw(); GetTree().ChangeSceneToFile(RunEventScenePath); return;
 		}
 
 		// 3) 无配置：标记完成并停留地图

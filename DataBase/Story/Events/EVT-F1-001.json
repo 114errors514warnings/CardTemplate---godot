@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-F1-001",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "夜路抉择",
+  "summary": "旅行者发现夜色吞没前路。队伍可以就地休息，或冒险前进以换取金币。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_night_road", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "isera", "displayName": "伊瑟拉", "portraitId": "portrait_isera", "defaultSide": "Left", "variants": { "normal": "portrait_isera_normal", "worried": "portrait_isera_worried" } },
+    { "actorId": "renard", "displayName": "雷纳德", "portraitId": "portrait_renard", "defaultSide": "Right", "variants": { "normal": "portrait_renard_normal" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "isera", "side": "Left", "portraitVariant": "worried", "bubbleStyle": "LeftSpeaker", "text": "前方的道路被夜色吞没了。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "isera", "side": "Left", "portraitVariant": "worried", "bubbleStyle": "LeftSpeaker", "text": "我们该怎么办？", "autoDelay": 1.0 },
+    { "order": 3, "type": "Dialogue", "actorId": "renard", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "你说了算。", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-F1-001-C01", "order": 1, "text": "就地休息", "effectPreview": "恢复当前角色 4 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 4 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-001-C02", "order": 2, "text": "继续前进", "effectPreview": "当前角色受到 3 点伤害，获得 10 金币", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -3 }, { "type": "GoldDelta", "target": "Run", "value": 10 } ], "next": { "type": "Close" } }
+  ]
+}

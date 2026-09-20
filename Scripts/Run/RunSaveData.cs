@@ -40,6 +40,9 @@ public sealed class RunSaveData
 	public List<int> PendingMonsterIds { get; set; } = new List<int>();
 	public int PendingDropTableId;
 	public string PendingLevelId = string.Empty;
+	public string PendingContentType = string.Empty;
+	public string PendingContentId = string.Empty;
+	public int PendingSourceNodeId = -1;
 
 	// ── 结算未领取（InSettlement）──
 	public string SettlementEncounterName = string.Empty;

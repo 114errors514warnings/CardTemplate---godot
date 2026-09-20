@@ -1,2 +1,11 @@
 LevelId,ConfigPath
 F1-001,res://DataBase/Level/Config/F1-001.csv
+F1-H-001,res://DataBase/Level/Config/F1-H-001.csv
+F1-E-001,res://DataBase/Level/Config/F1-E-001.csv
+F1-E-002,res://DataBase/Level/Config/F1-E-002.csv
+F1-E-003,res://DataBase/Level/Config/F1-E-003.csv
+F1-B-001,res://DataBase/Level/Config/F1-B-001.csv
+F1-B-002,res://DataBase/Level/Config/F1-B-002.csv
+F1-B-003,res://DataBase/Level/Config/F1-B-003.csv
+F1-002,res://DataBase/Level/Config/F1-002.csv
+F1-003,res://DataBase/Level/Config/F1-003.csv

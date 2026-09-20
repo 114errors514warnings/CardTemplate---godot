@@ -29,6 +29,7 @@ public partial class HexBattleScene : Control
     private Control handRow;
     private Control handPanelNode;
     private EventStoryOverlay storyOverlay;
+    private readonly List<CanvasItem> storyHiddenUi = new();
     private Label moveInfo;
     private Button drawPileButton;
     private Button discardPileButton;
@@ -92,9 +93,12 @@ public partial class HexBattleScene : Control
     [Export] public int CommandApiPort = 17880;
     /// <summary>When hosted by RunBattleScene, roster and monsters are read from the pending run encounter.</summary>
     [Export] public bool UseRunSession;
+    [Export] public string StoryEventId = "";
+    [Export] public string StoryMapId = "";
     [Export] public bool ShowBuiltInResult = true;
     public event Action<BattlefieldSession> BattleReady;
     public event Action<BattlefieldSession.BattlePhase> BattleFinished;
+    public event Action StoryCompleted;
     private BattleApiHost commandApi;
 
     public override void _Ready()
@@ -104,8 +108,10 @@ public partial class HexBattleScene : Control
         {
             LoadingSystem.EnsureAllDataLoaded();
             BattleLevelConfig level = null;
-            string path = LoadingSystem.GetFilePathByKey("Data.Battlefield.Foundation");
-            if (UseRunSession && !string.IsNullOrWhiteSpace(RunSession.Instance?.Current?.PendingLevelId))
+            // There is no standalone test battlefield in the shipped menu; use the first formal map as the safe fallback.
+            string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+            if (!string.IsNullOrWhiteSpace(StoryMapId)) path = BattleLevelCatalog.ResolveMapPath(StoryMapId);
+            else if (UseRunSession && !string.IsNullOrWhiteSpace(RunSession.Instance?.Current?.PendingLevelId))
             {
                 level = BattleLevelCatalog.Load(RunSession.Instance.Current.PendingLevelId);
                 path = BattleLevelCatalog.ResolveMapPath(level.MapId);
@@ -113,7 +119,8 @@ public partial class HexBattleScene : Control
             using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
             if (file == null) throw new InvalidOperationException($"无法打开战场 JSON：{path}");
             BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
-            if (UseRunSession) ConfigureRunDefinition(definition, level);
+            if (!string.IsNullOrWhiteSpace(StoryEventId)) ConfigureEventDefinition(definition);
+            else if (UseRunSession) ConfigureRunDefinition(definition, level);
             Session = new BattlefieldSession(definition);
             if (UseRunSession) Session.RestoreRunState(RunSession.Instance.Current.CharacterSlots, RunSession.Instance.Current.DeckSlots);
             Session.Changed += RefreshHud;
@@ -143,6 +150,7 @@ public partial class HexBattleScene : Control
             }
             RefreshHud();
             BattleReady?.Invoke(Session);
+            if (!string.IsNullOrWhiteSpace(StoryEventId)) CallDeferred(nameof(OpenStoryEvent), StoryEventId);
             SetupDebugPanel();
             ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后悬停预览路线，拖拽绘制路线。Esc 取消/暂停。");
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke"))
@@ -158,6 +166,15 @@ public partial class HexBattleScene : Control
             GD.PrintErr(ex);
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke")) GetTree().Quit(1);
         }
+    }
+
+    private static void ConfigureEventDefinition(BattleMapDefinition definition)
+    {
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null) throw new InvalidOperationException("运行局存档不存在。");
+        definition.PlayerCharacterIds = run.Current.CharacterSlots.Select(x => x.CharacterId).ToList();
+        definition.MonsterIds.Clear(); definition.FixedEnemySpawnCoords.Clear(); definition.ObjectPlacements.Clear();
+        definition.RandomItemCount = 0; definition.RandomItemDefinitions.Clear();
     }
 
     private static void ConfigureRunDefinition(BattleMapDefinition definition, BattleLevelConfig level)
@@ -190,28 +207,76 @@ public partial class HexBattleScene : Control
         debugPanel.Visible = false;
     }
 
-    private void OpenStoryTest()
+    private void OpenStoryTest() => OpenStoryEvent("EVT-F1-001");
+    public void OpenStoryEvent(string eventId)
     {
         if (storyOverlay != null || Session == null) return;
         CancelPendingCast(); EndMovePlanning(false);
-        handPanelNode.Visible = false;
-        var lines = new List<StoryLine>
+        HideBattleHudForStory();
+        StoryEventConfig config;
+        try { config = StoryEventCatalog.Load(eventId); }
+        catch (Exception ex) { RestoreBattleHudAfterStory(); ShowMessage("剧情事件加载失败：" + ex.Message); return; }
+        StoryEventDefinition definition = StoryEventCatalog.ToDefinition(config, ApplyStoryChoiceEffects);
+        storyOverlay = new EventStoryOverlay(definition, () =>
         {
-            new("scout", "旅行者", "前方的道路被夜色吞没了。", StorySide.Left),
-            new("warrior", "勇士", "我们可以继续前进，也可以在这里停下。", StorySide.Right),
-            new("scout", "旅行者", "先听听四周的动静，再做决定。", StorySide.Left),
-        };
-        var choices = new List<StoryChoice>
-        {
-            new("就地休息", "恢复当前角色 4 点生命", ApplyStoryRest),
-            new("继续前进", "当前角色受到 3 点伤害，获得 10 金币", ApplyStoryPushForward),
-        };
-        storyOverlay = new EventStoryOverlay(new StoryEventDefinition("测试事件", "旅行者提醒队伍：夜色将至，需要决定继续前进还是就地休息。", lines, choices), () =>
-        {
-            handPanelNode.Visible = true;
+            RestoreBattleHudAfterStory();
             storyOverlay = null;
-        });
+            StoryCompleted?.Invoke();
+        }, ShowStoryDebug, () => SetPaused(true));
         AddChild(storyOverlay);
+    }
+
+    private void HideBattleHudForStory()
+    {
+        storyHiddenUi.Clear();
+        foreach (Node child in GetChildren())
+        {
+            if (child == MapView || child == debugPanel || child is not CanvasItem item || !item.Visible) continue;
+            storyHiddenUi.Add(item); item.Visible = false;
+        }
+    }
+    private void RestoreBattleHudAfterStory()
+    {
+        foreach (CanvasItem item in storyHiddenUi) if (GodotObject.IsInstanceValid(item)) item.Visible = true;
+        storyHiddenUi.Clear();
+    }
+    private void ShowStoryDebug()
+    {
+        if (debugPanel == null) return;
+        debugPanel.ZIndex = 200;
+        debugPanel.ToggleVisible();
+    }
+
+    private Action ApplyStoryChoiceEffects(StoryChoiceConfig choice)
+    {
+        return () =>
+        {
+            if (Session == null) return;
+            foreach (StoryEffectConfig effect in choice.Effects)
+            {
+                if (effect.Type == "HpDelta" && effect.Target == "SelectedPlayer") ApplyStoryHpDelta(effect.Value);
+                else if (effect.Type == "GoldDelta" && effect.Target == "Run") ApplyStoryGoldDelta(effect.Value);
+                else ShowMessage($"剧情效果暂未支持：{effect.Type} / {effect.Target}");
+            }
+        };
+    }
+
+    private void ApplyStoryHpDelta(int delta)
+    {
+        IUnitInstance player = Session.Selected.Unit;
+        int before = player.HP;
+        player.HP = Math.Clamp(player.HP + delta, 0, player.Max_HP);
+        RefreshHud();
+        ShowMessage($"剧情结果：{Session.Selected.Name} 生命 {before}→{player.HP}。");
+    }
+
+    private void ApplyStoryGoldDelta(int delta)
+    {
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null) { ShowMessage($"剧情结果：金币 {delta:+#;-#;0}（测试战场未加载局内存档）。"); return; }
+        run.Current.Gold = Math.Max(0, run.Current.Gold + delta);
+        run.Save();
+        ShowMessage($"剧情结果：金币 {delta:+#;-#;0}。");
     }
 
     private void ApplyStoryRest()
@@ -317,7 +382,6 @@ public partial class HexBattleScene : Control
         Place(topRight, 0.78f, 0.02f, 0.985f, 0.075f);
         AddChild(topRight);
         AddButton(topRight, "定位当前角色", () => MapView.CenterSelected()).CustomMinimumSize = new Vector2(120, 0);
-        AddButton(topRight, "剧情测试", OpenStoryTest).CustomMinimumSize = new Vector2(88, 0);
         if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.ToggleVisible(); }).CustomMinimumSize = new Vector2(88, 0);
         AddButton(topRight, "暂停", () => SetPaused(true)).CustomMinimumSize = new Vector2(88, 0);
 
@@ -455,7 +519,7 @@ public partial class HexBattleScene : Control
         tooltipText = new Label { MouseFilter = MouseFilterEnum.Ignore, AutowrapMode = TextServer.AutowrapMode.WordSmart,
             CustomMinimumSize = new Vector2(300, 0) };
         tooltip.AddChild(tooltipText); AddChild(tooltip);
-        pauseShade = new ColorRect { Color = new Color(0, 0, 0, .65f), Visible = false, ProcessMode = ProcessModeEnum.Always, ZIndex = 30 };
+        pauseShade = new ColorRect { Color = new Color(0, 0, 0, .65f), Visible = false, ProcessMode = ProcessModeEnum.Always, ZIndex = 200 };
         pauseShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(pauseShade);
         var pauseCenter = new CenterContainer { ProcessMode = ProcessModeEnum.Always };
         pauseCenter.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); pauseShade.AddChild(pauseCenter);

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-F1-011",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "余响的符碑",
+  "summary": "林间立着一块仍在低语的符碑。队伍可以抄录碑文、撬开碑座取走符文核心，或只捡走散落的符石碎片。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_runestone_slab", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "elf_scout", "displayName": "精灵斥候", "portraitId": "portrait_elf_scout", "defaultSide": "Left", "variants": { "normal": "portrait_elf_scout_normal", "worried": "portrait_elf_scout_worried" } },
+    { "actorId": "rune_apprentice", "displayName": "符文学徒", "portraitId": "portrait_rune_apprentice", "defaultSide": "Right", "variants": { "normal": "portrait_rune_apprentice_normal" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "elf_scout", "side": "Left", "portraitVariant": "worried", "bubbleStyle": "LeftSpeaker", "text": "别靠太近。这块碑上的符文还在动。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "rune_apprentice", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "它在重复同一句话……像是有人把声音留在了石头里。", "autoDelay": 1.0 },
+    { "order": 3, "type": "Dialogue", "actorId": "elf_scout", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "那就快点决定。天不会等我们。", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-F1-011-C01", "order": 1, "text": "逐字抄录碑文", "effectPreview": "获得 40 金币，抄录时被符文灼伤 1 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 40 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -1 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-011-C02", "order": 2, "text": "撬开碑座取走符文核心", "effectPreview": "获得 80 金币，撬动时被余响震伤 5 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 80 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -5 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-011-C03", "order": 3, "text": "只取散落在碑座旁的符石碎片", "effectPreview": "获得 30 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 30 } ], "next": { "type": "Close" } }
+  ]
+}

@@ -1,0 +1,8 @@
+Act,NodeKey,NodeType,ContentType,ContentId,Weight
+1,Village,Village,Event,EVT-F1-001,1
+1,EliteMid,Elite,Level,F1-E-001,1
+1,EliteUp,Elite,Level,F1-E-002,1
+1,EliteDown,Elite,Level,F1-E-003,1
+1,Boss,Boss,Level,F1-B-001,1
+1,Boss,Boss,Level,F1-B-002,1
+1,Boss,Boss,Level,F1-B-003,1

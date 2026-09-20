@@ -9,6 +9,7 @@ public partial class MainMenuScene : Control
 	public const string CharacterSelectScenePath = "res://Scenes/CharacterSelect/CharacterSelectScene.tscn";
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
+	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
 
 	private VBoxContainer buttonBox;
 	private Button startButton;
@@ -120,9 +121,6 @@ public partial class MainMenuScene : Control
 			storyButton.Pressed += OnStoryModePressed;
 		}
 
-		Button battlefieldButton = CreateMenuButton("六边形测试关");
-		battlefieldButton.Pressed += () => GetTree().ChangeSceneToFile("res://Scenes/Battle/HexBattleScene.tscn");
-
 		Button exitButton = CreateMenuButton("退出");
 		exitButton.Pressed += () => GetTree().Quit();
 	}
@@ -156,9 +154,14 @@ public partial class MainMenuScene : Control
 		{
 			// 按存档状态机路由：地图 / 战斗中（重新开局）/ 结算未领取（重现弹窗）
 			string scenePath = MapScenePath;
-			if (RunSession.Instance.IsInSettlement || RunSession.Instance.IsInBattleStart)
+			if (RunSession.Instance.IsInSettlement)
 			{
 				scenePath = RunBattleScenePath;
+			}
+			else if (RunSession.Instance.IsInBattleStart)
+			{
+				scenePath = string.Equals(RunSession.Instance.Current.PendingContentType, "Event", StringComparison.Ordinal)
+					? RunEventScenePath : RunBattleScenePath;
 			}
 
 			GetTree().ChangeSceneToFile(scenePath);

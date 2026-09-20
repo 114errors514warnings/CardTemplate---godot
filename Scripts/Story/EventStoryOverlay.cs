@@ -11,7 +11,7 @@ public sealed record StoryChoice(string Text, string EffectDescription, Action A
 {
     public string DisplayText => string.IsNullOrWhiteSpace(EffectDescription) ? Text : $"{Text}（{EffectDescription}）";
 }
-public sealed record StoryEventDefinition(string Title, string Synopsis, IReadOnlyList<StoryLine> Lines, IReadOnlyList<StoryChoice> Choices = null, bool CanSkip = true);
+public sealed record StoryEventDefinition(string Title, string Synopsis, IReadOnlyList<StoryLine> Lines, IReadOnlyList<StoryChoice> Choices = null, bool CanSkip = true, string BackgroundId = "");
 
 /// <summary>Modal story overlay. It owns only presentation and calls supplied callbacks for event results.</summary>
 public partial class EventStoryOverlay : Control
@@ -23,10 +23,12 @@ public partial class EventStoryOverlay : Control
         public StoryLogEntry(string speakerName, string text) { SpeakerName = speakerName; Lines.Add(text); }
     }
     /// <summary>剧情浮层的功能按钮标识：对话记录 / 隐藏界面 / 自动播放 / 跳过对话。新增功能按钮只需加枚举项并在 Build 里 AddFunctionButton。</summary>
-    private enum OverlayFunction { Log, Hide, Auto, Skip }
+    private enum OverlayFunction { Log, Hide, Auto, Skip, Debug, Pause }
 
     private readonly StoryEventDefinition definition;
     private readonly Action onClosed;
+    private readonly Action onDebug;
+    private readonly Action onPause;
     private readonly List<StoryLogEntry> history = new();
     private PanelContainer leftPortrait, rightPortrait, bubble, logPanel, skipPanel, autoMenu;
     private Polygon2D bubbleTail;
@@ -42,8 +44,8 @@ public partial class EventStoryOverlay : Control
     private StorySide previousSide = StorySide.Left;
     private string leftSpeakerId = "", rightSpeakerId = "";
 
-    public EventStoryOverlay(StoryEventDefinition definition, Action onClosed)
-    { this.definition = definition; this.onClosed = onClosed; }
+    public EventStoryOverlay(StoryEventDefinition definition, Action onClosed, Action onDebug = null, Action onPause = null)
+    { this.definition = definition; this.onClosed = onClosed; this.onDebug = onDebug; this.onPause = onPause; }
 
     public override void _Ready()
     {
@@ -66,8 +68,24 @@ public partial class EventStoryOverlay : Control
 
     private void Build()
     {
-        var shade = new ColorRect { Color = new Color(0.02f, 0.03f, 0.05f, .72f), MouseFilter = MouseFilterEnum.Ignore };
-        shade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(shade);
+        bool hasBackground = false;
+        if (!string.IsNullOrWhiteSpace(definition.BackgroundId))
+        {
+            string path = $"res://Images/UI/Story/Backgrounds/{definition.BackgroundId}.png";
+            var texture = ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+            if (texture != null)
+            {
+                var eventBackground = new TextureRect { Texture = texture, ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered, MouseFilter = MouseFilterEnum.Ignore };
+                eventBackground.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(eventBackground);
+                hasBackground = true;
+            }
+        }
+        // A configured background is displayed unmasked. The dark layer is only the no-background fallback.
+        if (!hasBackground)
+        {
+            var shade = new ColorRect { Color = new Color(0.02f, 0.03f, 0.05f, .72f), MouseFilter = MouseFilterEnum.Ignore };
+            shade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(shade);
+        }
         // Portrait placeholders reserve the lower corners for future upper-body art.
         // Portraits reserve only the lower corners; future upper-body art stays close to the edges and preserves the background.
         leftPortrait = Portrait("左侧人物", out leftName); Place(leftPortrait, .01f, .64f, .17f, .98f); AddChild(leftPortrait);
@@ -84,7 +102,10 @@ public partial class EventStoryOverlay : Control
         AddFunctionButton(OverlayFunction.Log, "Log", controls, ToggleLog).CustomMinimumSize = new Vector2(90, 38);
         AddFunctionButton(OverlayFunction.Hide, "隐藏", controls, ToggleHidden).CustomMinimumSize = new Vector2(90, 38);
         AddFunctionButton(OverlayFunction.Auto, "Auto: 关闭", controls, ToggleAutoMenu).CustomMinimumSize = new Vector2(90, 38);
-        Place(AddFunctionButton(OverlayFunction.Skip, "跳过", this, ToggleSkip), .89f, .025f, .98f, .08f);
+        var rightControls = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End }; rightControls.AddThemeConstantOverride("separation", 8); Place(rightControls, .72f, .025f, .98f, .08f); AddChild(rightControls);
+        if (onDebug != null) AddFunctionButton(OverlayFunction.Debug, "调试", rightControls, onDebug).CustomMinimumSize = new Vector2(88, 38);
+        if (onPause != null) AddFunctionButton(OverlayFunction.Pause, "暂停", rightControls, onPause).CustomMinimumSize = new Vector2(88, 38);
+        AddFunctionButton(OverlayFunction.Skip, "跳过", rightControls, ToggleSkip).CustomMinimumSize = new Vector2(88, 38);
 
         choices = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, Visible = false }; choices.AddThemeConstantOverride("separation", 14); Place(choices, .30f, .30f, .70f, .66f); AddChild(choices);
         BuildLog(); BuildSkip(); BuildAutoMenu();

@@ -1,0 +1,8 @@
+Act,NodeType,ConditionId,EventId,Weight
+1,NormalEvent,,EVT-F1-001,1
+1,DangerousEvent,,EVT-F1-001,1
+1,Merchant,,EVT-F1-001,1
+1,NormalEvent,,EVT-F1-011,1
+1,NormalEvent,,EVT-F1-012,1
+1,NormalEvent,,EVT-F1-013,1
+1,DangerousEvent,,EVT-F1-016,1

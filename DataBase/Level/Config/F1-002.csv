@@ -1,0 +1,4 @@
+MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra
+M-F1-001,2001,NormalCombat,Low,F1-002-M01,Monster,3106,-3,-1,1;0,,
+M-F1-001,2001,NormalCombat,Low,F1-002-M02,Monster,3107,-1,-4,1;0,,
+M-F1-001,2001,NormalCombat,Low,F1-002-M03,Monster,3107,2,-3,-1;0,,

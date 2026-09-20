@@ -48,8 +48,8 @@ public partial class BattlefieldView : Control
     {
         if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
         visualUnitPositions.Clear(); presentationQueue.Clear();
-        moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_move.png");
-        attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/UI/IntentIcons/intent_attack.png");
+        moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Images/UI/IntentIcons/intent_move.png");
+        attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Images/UI/IntentIcons/intent_attack.png");
         Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
         CenterSelected();
     }

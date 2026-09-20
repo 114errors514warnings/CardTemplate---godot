@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://gq5srvys44ty"
+
+[deps]
+
+files=["res://DataBase/WorldMap/FixedNode.NodeKey.translation", "res://DataBase/WorldMap/FixedNode.NodeType.translation", "res://DataBase/WorldMap/FixedNode.ContentType.translation", "res://DataBase/WorldMap/FixedNode.ContentId.translation", "res://DataBase/WorldMap/FixedNode.Weight.translation"]
+
+source_file="res://DataBase/WorldMap/FixedNode.csv"
+dest_files=["res://DataBase/WorldMap/FixedNode.NodeKey.translation", "res://DataBase/WorldMap/FixedNode.NodeType.translation", "res://DataBase/WorldMap/FixedNode.ContentType.translation", "res://DataBase/WorldMap/FixedNode.ContentId.translation", "res://DataBase/WorldMap/FixedNode.Weight.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

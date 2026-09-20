@@ -145,7 +145,7 @@ public static class BattlefieldSceneSmoke
 
     private static void VerifyRunBattleInjection()
     {
-        string path = LoadingSystem.GetFilePathByKey("Data.Battlefield.Foundation");
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
         using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
         var definition = BattleMapDefinition.Parse(file.GetAsText());
         definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };

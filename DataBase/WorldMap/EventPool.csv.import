@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://5pkvll7w73f3"
+
+[deps]
+
+files=["res://DataBase/WorldMap/EventPool.NodeType.translation", "res://DataBase/WorldMap/EventPool.en.translation", "res://DataBase/WorldMap/EventPool.EventId.translation", "res://DataBase/WorldMap/EventPool.Weight.translation"]
+
+source_file="res://DataBase/WorldMap/EventPool.csv"
+dest_files=["res://DataBase/WorldMap/EventPool.NodeType.translation", "res://DataBase/WorldMap/EventPool.en.translation", "res://DataBase/WorldMap/EventPool.EventId.translation", "res://DataBase/WorldMap/EventPool.Weight.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

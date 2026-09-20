@@ -1,0 +1,4 @@
+Act,MinCombatCount,MaxCombatCount,Difficulty
+1,1,3,Low
+1,4,5,Mid
+1,6,999,High

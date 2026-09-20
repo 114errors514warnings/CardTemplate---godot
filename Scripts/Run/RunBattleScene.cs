@@ -67,7 +67,7 @@ public partial class RunBattleScene : Control
 		battleView.UseRunSession = true;
 		battleView.ShowBuiltInResult = false;
 		battleView.EnableCommandApi = false;
-		battleView.EnableDebugPanel = false;
+		battleView.EnableDebugPanel = true;
 		battleView.BattleReady += session => battlefield = session;
 		battleView.BattleFinished += OnHexBattleFinished;
 		AddChild(battleView);

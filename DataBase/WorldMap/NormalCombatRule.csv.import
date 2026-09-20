@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://wha2k4ij2gp3"
+
+[deps]
+
+files=["res://DataBase/WorldMap/NormalCombatRule.MinCombatCount.translation", "res://DataBase/WorldMap/NormalCombatRule.MaxCombatCount.translation", "res://DataBase/WorldMap/NormalCombatRule.Difficulty.translation"]
+
+source_file="res://DataBase/WorldMap/NormalCombatRule.csv"
+dest_files=["res://DataBase/WorldMap/NormalCombatRule.MinCombatCount.translation", "res://DataBase/WorldMap/NormalCombatRule.MaxCombatCount.translation", "res://DataBase/WorldMap/NormalCombatRule.Difficulty.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

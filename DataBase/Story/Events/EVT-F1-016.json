@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-F1-016",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "流寇的过路费",
+  "summary": "流寇在路口设了卡，过路要留下买路钱。队伍可以付钱了事、在路旁露宿等他们散去，或把随身口粮抵给他们。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_bandit_checkpoint", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "bandit_leader", "displayName": "流寇头目", "portraitId": "portrait_bandit_leader", "defaultSide": "Left", "variants": { "normal": "portrait_bandit_leader_normal" } },
+    { "actorId": "elf_scout", "displayName": "精灵斥候", "portraitId": "portrait_elf_scout", "defaultSide": "Right", "variants": { "normal": "portrait_elf_scout_normal", "worried": "portrait_elf_scout_worried" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "bandit_leader", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "这条路是我们修的，过人就得留下点什么。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "elf_scout", "side": "Right", "portraitVariant": "worried", "bubbleStyle": "RightSpeaker", "text": "他们人多，而且背后就是箭位。硬拼不划算。", "autoDelay": 1.0 },
+    { "order": 3, "type": "Dialogue", "actorId": "bandit_leader", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "想好了再开口。", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-F1-016-C01", "order": 1, "text": "交过路费", "effectPreview": "失去 40 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": -40 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-016-C02", "order": 2, "text": "在路旁露宿等他们散去", "effectPreview": "当前角色因受冻失去 4 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -4 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-016-C03", "order": 3, "text": "把随身口粮抵给他们", "effectPreview": "失去 20 金币，当前角色因挨饿失去 2 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": -20 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -2 } ], "next": { "type": "Close" } }
+  ]
+}

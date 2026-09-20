@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-F1-013",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "倾覆货车旁的储粮窖",
+  "summary": "路边翻倒的货车已经空了，但车辕下露出半扇地窖的木门。队伍可以就地饱餐、把存粮全部搬走换钱，或只取走背得动的部分。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_overturned_cart", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "rune_apprentice", "displayName": "符文学徒", "portraitId": "portrait_rune_apprentice", "defaultSide": "Left", "variants": { "normal": "portrait_rune_apprentice_normal", "worried": "portrait_rune_apprentice_worried" } },
+    { "actorId": "swordmaster", "displayName": "重剑手", "portraitId": "portrait_swordmaster", "defaultSide": "Right", "variants": { "normal": "portrait_swordmaster_normal" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "rune_apprentice", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "车辕下面有个地窖，里面还堆着粮食。潮味很重，但没坏。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "swordmaster", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "能带走的有限。想吃完再走，还是搬去换钱？", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-F1-013-C01", "order": 1, "text": "就地饱餐一顿", "effectPreview": "当前角色恢复 5 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 5 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-013-C02", "order": 2, "text": "把存粮全部搬走换钱", "effectPreview": "获得 80 金币，搬运时被坍塌的窖顶砸伤 3 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 80 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -3 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-013-C03", "order": 3, "text": "只取走背得动的部分", "effectPreview": "获得 50 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 50 } ], "next": { "type": "Close" } }
+  ]
+}

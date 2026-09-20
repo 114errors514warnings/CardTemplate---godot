@@ -1,0 +1,2 @@
+MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra
+M-F1-001,2001,Elite,High,F1-E-001-M01,Monster,3104,0,-5,None,None,None
