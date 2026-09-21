@@ -3,7 +3,7 @@
   "eventId": "EVT-F1-016",
   "battleMapId": "M-EVENT-EMPTY",
   "title": "流寇的过路费",
-  "summary": "流寇在路口设了卡，过路要留下买路钱。队伍可以付钱了事、在路旁露宿等他们散去，或把随身口粮抵给他们。",
+  "summary": "流寇在路口设了卡，过路要留下买路钱。队伍可以付钱了事、在路旁露宿等他们散去，也可以直接动手把被劫的货物夺回来。",
   "canSkip": true,
   "background": { "backgroundId": "bg_bandit_checkpoint", "initialEffect": "FadeIn" },
   "actors": [
@@ -12,12 +12,12 @@
   ],
   "timeline": [
     { "order": 1, "type": "Dialogue", "actorId": "bandit_leader", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "这条路是我们修的，过人就得留下点什么。", "autoDelay": 1.0 },
-    { "order": 2, "type": "Dialogue", "actorId": "elf_scout", "side": "Right", "portraitVariant": "worried", "bubbleStyle": "RightSpeaker", "text": "他们人多，而且背后就是箭位。硬拼不划算。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "elf_scout", "side": "Right", "portraitVariant": "worried", "bubbleStyle": "RightSpeaker", "text": "他们人多，背后还有箭位。硬拼不是好主意——但也不是打不了。", "autoDelay": 1.0 },
     { "order": 3, "type": "Dialogue", "actorId": "bandit_leader", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "想好了再开口。", "autoDelay": 1.0 }
   ],
   "choices": [
-    { "choiceId": "EVT-F1-016-C01", "order": 1, "text": "交过路费", "effectPreview": "失去 40 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": -40 } ], "next": { "type": "Close" } },
-    { "choiceId": "EVT-F1-016-C02", "order": 2, "text": "在路旁露宿等他们散去", "effectPreview": "当前角色因受冻失去 4 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -4 } ], "next": { "type": "Close" } },
-    { "choiceId": "EVT-F1-016-C03", "order": 3, "text": "把随身口粮抵给他们", "effectPreview": "失去 20 金币，当前角色因挨饿失去 2 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": -20 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -2 } ], "next": { "type": "Close" } }
+    { "choiceId": "EVT-F1-016-C01", "order": 1, "text": "交过路费", "effectPreview": "失去 30 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": -30 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-016-C02", "order": 2, "text": "在路旁露宿等他们散去", "effectPreview": "当前角色因受冻失去最大生命的 20%（6 点生命）", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -6 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-016-C03", "order": 3, "text": "动手夺回被劫的货物", "effectPreview": "进入战斗；胜利后结算本次战利品", "effects": [], "next": { "type": "Battle", "referenceId": "F1-D-001" } }
   ]
 }

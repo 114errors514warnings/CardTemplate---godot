@@ -5,6 +5,11 @@
 > 2. 衰减层数从 `int` 改为 `StateDecayMode` 枚举（None / Flat / Half / ClearAll）
 > 3. 清除条件做成枚举添加到"衰减时机"段（`OnAttackPlayed` 打出攻击牌后 / `OnDamaged` 受到伤害后）
 
+## 完成情况（2026-09-21 整理）
+
+- 状态：**已完成**（2026-08-30 落地）。三项重构（`IsPermanent` → `DecayTiming=Never`、衰减层数改 `StateDecayMode`、衰减时机扩到 `OnAttackPlayed` / `OnDamaged`）均已进入运行时与 CSV。
+- 记录：见[战斗系统打磨说明](战斗系统打磨说明.md) §P0 #8 与[待做事项](../待做事项.md)「P0 #8 状态系统重构已完成」。
+
 ## 一、枚举扩展
 
 ### 1.1 `StateDecayTiming` 加 `Never` + 事件触发
@@ -187,7 +192,7 @@ StateType,Name,IsStackable,IsDebuff,IsElite,DecayTiming,DecayMode,StacksToRemove
 
 - `README/系统规则/战斗系统/状态系统.md` §1.1 重写：双维度（`DecayTiming` + `DecayMode`）+ `StacksToRemove` 三字段
 - `README/系统规则/战斗系统/战斗循环.md` §八 同步
-- `README/施工文档/2026/2026.08/战斗系统打磨说明.md` 加 P0 #8 实现记录
+- `README/施工文档/2026/2026.08/战斗/战斗系统打磨说明.md` 加 P0 #8 实现记录
 
 ## 十、不做的事
 

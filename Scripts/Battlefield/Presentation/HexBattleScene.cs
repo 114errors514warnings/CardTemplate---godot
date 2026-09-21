@@ -10,6 +10,8 @@ public partial class HexBattleScene : Control
 {
     public BattlefieldSession Session { get; private set; }
     public BattlefieldView MapView { get; private set; }
+    private ColorRect battlefieldBackground;
+    private HBoxContainer topRightActions;
     private Label resources;
     private Label title;
     private Button moveButton;
@@ -19,6 +21,8 @@ public partial class HexBattleScene : Control
     private Label tooltipText;
     private PanelContainer pausePanel;
     private Control pauseShade;
+    // 暂停界面独立的最高层 CanvasLayer：必须压过世界地图、模态窗与运行局常驻按钮栏。
+    private CanvasLayer pauseLayer;
     private int pendingCardId;
     private AxialHex? lastCastHover;
     private bool movePlanning;
@@ -96,9 +100,14 @@ public partial class HexBattleScene : Control
     [Export] public string StoryEventId = "";
     [Export] public string StoryMapId = "";
     [Export] public bool ShowBuiltInResult = true;
+    /// <summary>事件选项请求进入战斗时的关卡 Id；为空表示事件结束后直接返回地图。</summary>
+    public string PendingStoryBattleLevelId { get; private set; } = string.Empty;
     public event Action<BattlefieldSession> BattleReady;
     public event Action<BattlefieldSession.BattlePhase> BattleFinished;
     public event Action StoryCompleted;
+    public event Action<HexBattleScene> StoryOverlayOpened;
+    public event Action<HexBattleScene> DebugRequested;
+    public EventStoryOverlay ActiveStoryOverlay => storyOverlay;
     private BattleApiHost commandApi;
 
     public override void _Ready()
@@ -151,7 +160,6 @@ public partial class HexBattleScene : Control
             RefreshHud();
             BattleReady?.Invoke(Session);
             if (!string.IsNullOrWhiteSpace(StoryEventId)) CallDeferred(nameof(OpenStoryEvent), StoryEventId);
-            SetupDebugPanel();
             ShowMessage("右键拖动地图；点击角色或角色 Tab 切换；点击移动后悬停预览路线，拖拽绘制路线。Esc 取消/暂停。");
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke"))
                 CallDeferred(nameof(RunSmoke));
@@ -196,21 +204,41 @@ public partial class HexBattleScene : Control
         definition.Validate();
     }
 
-    private void SetupDebugPanel()
+    public void SetWorldMapVisible(bool visible)
     {
-        if (!EnableDebugPanel) return;
+        if (MapView != null) MapView.Visible = !visible;
+        if (battlefieldBackground != null) battlefieldBackground.Visible = !visible;
+    }
+
+    public void SetBuiltInTopActionsVisible(bool visible)
+    {
+        if (topRightActions != null) topRightActions.Visible = visible;
+    }
+
+    public void CenterSelectedUnitFromGlobalTopBar() => MapView?.CenterSelected();
+    public void ToggleDebugFromGlobalTopBar() => DebugRequested?.Invoke(this);
+    public void TogglePauseFromGlobalTopBar() => SetPaused(true);
+
+    public HexBattleDebugPanel CreateDebugPanel()
+    {
         var packed = (PackedScene)ResourceLoader.Load("res://Scenes/UI/HexBattleDebugPanel.tscn");
-        if (packed == null) { GD.PrintErr("HexBattleDebugPanel.tscn 加载失败。"); return; }
-        debugPanel = (HexBattleDebugPanel)packed.Instantiate();
-        debugPanel.Setup(Session, MapView, ShowMessage);
-        AddChild(debugPanel);
-        debugPanel.Visible = false;
+        if (packed == null) throw new InvalidOperationException("HexBattleDebugPanel.tscn 加载失败。");
+        var panel = (HexBattleDebugPanel)packed.Instantiate();
+        panel.Setup(Session, MapView, ShowMessage, DebugJumpLevel, DebugJumpEvent);
+        return panel;
     }
 
     private void OpenStoryTest() => OpenStoryEvent("EVT-F1-001");
     public void OpenStoryEvent(string eventId)
     {
-        if (storyOverlay != null || Session == null) return;
+        if (Session == null) return;
+        // 已完成的剧情浮层不再自毁：正推进时忽略重复打开，已完成/已让位给地图时先回收再开新剧情。
+        if (storyOverlay != null && GodotObject.IsInstanceValid(storyOverlay))
+        {
+            if (storyOverlay.Visible) return;
+            storyOverlay.QueueFree();
+            storyOverlay = null;
+        }
         CancelPendingCast(); EndMovePlanning(false);
         HideBattleHudForStory();
         StoryEventConfig config;
@@ -219,11 +247,18 @@ public partial class HexBattleScene : Control
         StoryEventDefinition definition = StoryEventCatalog.ToDefinition(config, ApplyStoryChoiceEffects);
         storyOverlay = new EventStoryOverlay(definition, () =>
         {
-            RestoreBattleHudAfterStory();
-            storyOverlay = null;
+            // 事件完成后保留剧情 UI，且不恢复战斗 HUD：
+            // 世界地图是叠加在内容之上的覆盖层，地图之下只应露出战场本身，不能露出战斗界面。
             StoryCompleted?.Invoke();
         }, ShowStoryDebug, () => SetPaused(true));
         AddChild(storyOverlay);
+        StoryOverlayOpened?.Invoke(this);
+    }
+
+    /// <summary>世界地图覆盖层开合：剧情 UI 让位给地图。事件中战斗 HUD 始终隐藏，因此地图之下只露出战场。</summary>
+    public void SetWorldMapOpen(bool open)
+    {
+        if (storyOverlay != null && GodotObject.IsInstanceValid(storyOverlay)) storyOverlay.SetWorldMapOpen(open);
     }
 
     private void HideBattleHudForStory()
@@ -242,15 +277,32 @@ public partial class HexBattleScene : Control
     }
     private void ShowStoryDebug()
     {
-        if (debugPanel == null) return;
-        debugPanel.ZIndex = 200;
-        debugPanel.ToggleVisible();
+        DebugRequested?.Invoke(this);
+    }
+    private void DebugJumpLevel(string levelId)
+    {
+        var run = RunSession.Instance; if (run?.Current == null) { ShowMessage("当前没有运行局。"); return; }
+        try
+        {
+            var level = BattleLevelCatalog.Load(levelId);
+            var row = new StageEncounterRow { LevelId = levelId, NodeType = MapNodeType.NormalCombat, DropTableId = level.DropTableId, MonsterIds = level.Objects.Where(x => x.ObjectType == "Monster").Select(x => int.Parse(x.DefinitionId)).ToArray() };
+            run.BeginRunBattleEncounter("", row); GetTree().ChangeSceneToFile("res://Scenes/Run/RunBattleScene.tscn");
+        }
+        catch (Exception ex) { ShowMessage(ex.Message); }
+    }
+    private void DebugJumpEvent(string eventId)
+    {
+        var run = RunSession.Instance; if (run?.Current == null) { ShowMessage("当前没有运行局。"); return; }
+        try { StoryEventCatalog.Load(eventId); run.BeginRunEvent(eventId, run.Current.MapState.CurrentNodeId); GetTree().ChangeSceneToFile("res://Scenes/Run/RunEventScene.tscn"); }
+        catch (Exception ex) { ShowMessage(ex.Message); }
     }
 
     private Action ApplyStoryChoiceEffects(StoryChoiceConfig choice)
     {
         return () =>
         {
+            // 先记录跳转意图再应用效果：即使当前角色数据不可用，进入战斗的请求也不丢失。
+            PendingStoryBattleLevelId = StoryEventCatalog.ResolveBattleLevelId(choice.Next);
             if (Session == null) return;
             foreach (StoryEffectConfig effect in choice.Effects)
             {
@@ -349,8 +401,8 @@ public partial class HexBattleScene : Control
 
     private void BuildUi()
     {
-        var background = new ColorRect { Color = new Color("101820"), MouseFilter = MouseFilterEnum.Ignore };
-        background.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(background);
+        battlefieldBackground = new ColorRect { Color = new Color("101820"), MouseFilter = MouseFilterEnum.Ignore };
+        battlefieldBackground.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(battlefieldBackground);
 
         // 全屏地图层（置于所有 UI 面板之下，中间区域可交互）。
         MapView = new BattlefieldView();
@@ -377,13 +429,14 @@ public partial class HexBattleScene : Control
         title = Label("", 14, new Color("bfc8d0")); goalBox.AddChild(title);
 
         // ── 右上：定位当前角色 + 暂停 ──
-        var topRight = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End, MouseFilter = MouseFilterEnum.Ignore };
-        topRight.AddThemeConstantOverride("separation", 8);
-        Place(topRight, 0.78f, 0.02f, 0.985f, 0.075f);
-        AddChild(topRight);
-        AddButton(topRight, "定位当前角色", () => MapView.CenterSelected()).CustomMinimumSize = new Vector2(120, 0);
-        if (EnableDebugPanel) AddButton(topRight, "调试", () => { if (debugPanel != null) debugPanel.ToggleVisible(); }).CustomMinimumSize = new Vector2(88, 0);
-        AddButton(topRight, "暂停", () => SetPaused(true)).CustomMinimumSize = new Vector2(88, 0);
+        // 世界地图以明确的覆盖层级显示时，右上操作按钮必须保持可见、可点击。
+        topRightActions = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End, MouseFilter = MouseFilterEnum.Ignore, ZIndex = 200 };
+        topRightActions.AddThemeConstantOverride("separation", 8);
+        Place(topRightActions, 0.78f, 0.02f, 0.985f, 0.075f);
+        AddChild(topRightActions);
+        AddButton(topRightActions, "定位当前角色", CenterSelectedUnitFromGlobalTopBar).CustomMinimumSize = new Vector2(120, 0);
+        if (EnableDebugPanel) AddButton(topRightActions, "调试", ToggleDebugFromGlobalTopBar).CustomMinimumSize = new Vector2(88, 0);
+        AddButton(topRightActions, "暂停", TogglePauseFromGlobalTopBar).CustomMinimumSize = new Vector2(88, 0);
 
         // ── 右侧：当前格道具（可拖拽 prefab）──
         curItemPanel = MakePanel();
@@ -519,8 +572,10 @@ public partial class HexBattleScene : Control
         tooltipText = new Label { MouseFilter = MouseFilterEnum.Ignore, AutowrapMode = TextServer.AutowrapMode.WordSmart,
             CustomMinimumSize = new Vector2(300, 0) };
         tooltip.AddChild(tooltipText); AddChild(tooltip);
+        pauseLayer = new CanvasLayer { Name = "PauseLayer", Layer = RunUiLayers.Pause };
+        AddChild(pauseLayer);
         pauseShade = new ColorRect { Color = new Color(0, 0, 0, .65f), Visible = false, ProcessMode = ProcessModeEnum.Always, ZIndex = 200 };
-        pauseShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(pauseShade);
+        pauseShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); pauseLayer.AddChild(pauseShade);
         var pauseCenter = new CenterContainer { ProcessMode = ProcessModeEnum.Always };
         pauseCenter.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); pauseShade.AddChild(pauseCenter);
         pausePanel = MakePanel(); pausePanel.CustomMinimumSize = new Vector2(320, 230); pauseCenter.AddChild(pausePanel);

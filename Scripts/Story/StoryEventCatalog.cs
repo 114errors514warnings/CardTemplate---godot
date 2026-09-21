@@ -12,6 +12,7 @@ public sealed class StoryEventConfig
     public string Summary { get; set; } = "";
     public string BattleMapId { get; set; } = "M-EVENT-EMPTY";
     public bool CanSkip { get; set; } = true;
+    public bool AutoComplete { get; set; }
     public StoryBackgroundConfig Background { get; set; } = new();
     public List<StoryActorConfig> Actors { get; set; } = new();
     public List<StoryTimelineConfig> Timeline { get; set; } = new();
@@ -23,6 +24,13 @@ public sealed class StoryTimelineConfig { public int Order { get; set; } public 
 public sealed class StoryChoiceConfig { public string ChoiceId { get; set; } = ""; public int Order { get; set; } public string Text { get; set; } = ""; public string EffectPreview { get; set; } = ""; public List<StoryEffectConfig> Effects { get; set; } = new(); public StoryNextConfig Next { get; set; } = new(); }
 public sealed class StoryEffectConfig { public string Type { get; set; } = ""; public string Target { get; set; } = ""; public int Value { get; set; } public string ReferenceId { get; set; } = ""; }
 public sealed class StoryNextConfig { public string Type { get; set; } = "Close"; public string ReferenceId { get; set; } = ""; }
+
+/// <summary>事件选项的后续跳转类型：Close = 结束事件回到地图；Battle = 进入 ReferenceId 指定的关卡战斗。</summary>
+public static class StoryNextTypes
+{
+    public const string Close = "Close";
+    public const string Battle = "Battle";
+}
 
 public static class StoryEventCatalog
 {
@@ -55,7 +63,13 @@ public static class StoryEventCatalog
             return new StoryLine(x.ActorId, name, x.Text, side, bubble, Math.Max(0, x.AutoDelay));
         }).ToList();
         var choices = config.Choices.OrderBy(x => x.Order).Select(x => new StoryChoice(x.Text, x.EffectPreview, actionFactory?.Invoke(x))).ToList();
-        return new StoryEventDefinition(config.Title, config.Summary, lines, choices, config.CanSkip, config.Background?.BackgroundId ?? "");
+        return new StoryEventDefinition(config.Title, config.Summary, lines, choices, config.CanSkip, config.Background?.BackgroundId ?? "", config.AutoComplete);
+    }
+    /// <summary>选项请求进入战斗时返回关卡 Id；非战斗跳转返回空字符串。</summary>
+    public static string ResolveBattleLevelId(StoryNextConfig next)
+    {
+        if (next == null || !string.Equals(next.Type, StoryNextTypes.Battle, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        return next.ReferenceId ?? string.Empty;
     }
     private static void Validate(StoryEventConfig config, string requestedId)
     {
@@ -63,5 +77,13 @@ public static class StoryEventCatalog
         if (config.Actors.Any(x => string.IsNullOrWhiteSpace(x.ActorId) || string.IsNullOrWhiteSpace(x.DisplayName)) || config.Actors.Select(x => x.ActorId).Distinct().Count() != config.Actors.Count) throw new ArgumentException("剧情角色配置无效或重复。");
         if (config.Timeline.Count == 0 || config.Timeline.Select(x => x.Order).Distinct().Count() != config.Timeline.Count || config.Timeline.Any(x => string.IsNullOrWhiteSpace(x.Text))) throw new ArgumentException("剧情时间线无效。");
         if (config.Choices.Count == 0 || config.Choices.Any(x => string.IsNullOrWhiteSpace(x.ChoiceId) || string.IsNullOrWhiteSpace(x.Text) || string.IsNullOrWhiteSpace(x.EffectPreview))) throw new ArgumentException("剧情选项配置无效。");
+        if (config.Choices.Any(x => !IsValidNext(x.Next))) throw new ArgumentException("剧情选项跳转配置无效：只允许 Close 或带关卡 Id 的 Battle。");
+    }
+    private static bool IsValidNext(StoryNextConfig next)
+    {
+        if (next == null) return false;
+        if (string.Equals(next.Type, StoryNextTypes.Close, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(next.Type, StoryNextTypes.Battle, StringComparison.OrdinalIgnoreCase)) return !string.IsNullOrWhiteSpace(next.ReferenceId);
+        return false;
     }
 }

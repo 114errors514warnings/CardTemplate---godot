@@ -1,0 +1,6 @@
+MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra
+M-F1-001,2003,Event,Mid,F1-D-001-M01,Monster,3113,-3,-3,1;0,,
+M-F1-001,2003,Event,Mid,F1-D-001-M02,Monster,3111,-4,0,1;0,,
+M-F1-001,2003,Event,Mid,F1-D-001-M03,Monster,3111,-2,-2,1;0,,
+M-F1-001,2003,Event,Mid,F1-D-001-M04,Monster,3112,2,-4,-1;0,,
+M-F1-001,2003,Event,Mid,F1-D-001-M05,Monster,3112,3,-1,-1;0,,

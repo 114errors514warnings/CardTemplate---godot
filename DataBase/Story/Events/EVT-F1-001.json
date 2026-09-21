@@ -16,7 +16,7 @@
     { "order": 3, "type": "Dialogue", "actorId": "renard", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "你说了算。", "autoDelay": 1.0 }
   ],
   "choices": [
-    { "choiceId": "EVT-F1-001-C01", "order": 1, "text": "就地休息", "effectPreview": "恢复当前角色 4 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 4 } ], "next": { "type": "Close" } },
-    { "choiceId": "EVT-F1-001-C02", "order": 2, "text": "继续前进", "effectPreview": "当前角色受到 3 点伤害，获得 10 金币", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -3 }, { "type": "GoldDelta", "target": "Run", "value": 10 } ], "next": { "type": "Close" } }
+    { "choiceId": "EVT-F1-001-C01", "order": 1, "text": "就地休息", "effectPreview": "当前角色回复最大生命的 10%（3 点生命）", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 3 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-001-C02", "order": 2, "text": "继续前进", "effectPreview": "获得 20 金币，失去最大生命的 10%（3 点生命）", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": -3 }, { "type": "GoldDelta", "target": "Run", "value": 20 } ], "next": { "type": "Close" } }
   ]
 }

@@ -55,13 +55,19 @@ public class BattlefieldFoundationTests
         Assert.Throws<ArgumentException>(() => BattleMapDefinition.Parse("{}"));
     }
     [Fact]
-    public void Json_ActualProjectFixtureLoadsAndGenerates()
+    public void Json_OfficialLayerOneMapLoadsAndGenerates()
     {
-        var definition = BattleMapDefinition.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "FoundationMap.json")));
+        // 正式关卡地图（DataBase/BattleMap/Maps）随关卡数据拷贝到测试输出目录；
+        // 旧的六边形测试关（FoundationMap.json）已退役，不再作为夹具。
+        var definition = BattleMapDefinition.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "BattleMap", "M-F1-001.json")));
         var map = BattleDeploymentService.Generate(definition);
-        Assert.Equal(331, map.Board.Cells.Count);
-        Assert.Equal(6, map.EnemyCoords.Count);
-        Assert.Equal(2, map.Board.Cells[new AxialHex(-1, 0)].Items.Count);
+        Assert.Equal(127, map.Board.Cells.Count);
+        Assert.Single(map.EnemyCoords);
+        foreach (var spawn in definition.PlayerSpawnCoords) Assert.True(map.Board.Cells[spawn.ToHex()].Walkable);
+        Assert.Equal(BattleCellKind.Obstacle, map.Board.Cells[new AxialHex(-2, -2)].Kind);
+        Assert.Equal(BattleCellKind.Obstacle, map.Board.Cells[new AxialHex(2, -2)].Kind);
+        Assert.True(map.Board.Cells[new AxialHex(-2, -2)].BlocksSight);
+        Assert.Equal(BattleSurface.Pit, map.Board.Cells[new AxialHex(0, -3)].Surface);
     }
     [Fact]
     public void Deployment_RepeatsWithoutMutatingDefinition()

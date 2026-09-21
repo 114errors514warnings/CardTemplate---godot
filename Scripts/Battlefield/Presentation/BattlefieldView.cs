@@ -77,6 +77,7 @@ public partial class BattlefieldView : Control
             }};
         }
         else presentationQueue.AddLast(new PresentationStep(null, attack));
+        if (!hasActiveMove && !hasActiveAttack && presentationQueue.Count == 0) visualUnitPositions.Clear();
         QueueRedraw();
     }
 
@@ -132,6 +133,7 @@ public partial class BattlefieldView : Control
                 hasActiveAttack = false;
             }
         }
+        if (!hasActiveMove && !hasActiveAttack && presentationQueue.Count == 0) visualUnitPositions.Clear();
         QueueRedraw();
     }
 
@@ -183,7 +185,14 @@ public partial class BattlefieldView : Control
         QueueRedraw();
     }
     public void ClearMovePath() { movePath.Clear(); QueueRedraw(); }
-    private void Refresh() => QueueRedraw();
+    private void Refresh()
+    {
+        foreach (int id in visualUnitPositions.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
+            visualUnitPositions.Remove(id);
+        foreach (int id in presentationStats.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
+            presentationStats.Remove(id);
+        QueueRedraw();
+    }
 
     private void ClampPan()
     {

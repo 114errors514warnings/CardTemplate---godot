@@ -26,7 +26,9 @@
 
   <ItemGroup>
     <Compile Remove="Scripts\**\*.cs" />
-    <None Include="..\DataBase\Battlefield\FoundationMap.json" Link="FoundationMap.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 正式地图随关卡数据拷贝到测试输出目录；旧的六边形测试关（FoundationMap.json）已退役。 -->
+
+    <None Include="..\DataBase\BattleMap\Maps\*.json" Link="BattleMap\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\DataBase\Equipment\Weapon.csv" Link="Weapon.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

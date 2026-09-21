@@ -15,8 +15,8 @@
     { "order": 2, "type": "Dialogue", "actorId": "swordmaster", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "能带走的有限。想吃完再走，还是搬去换钱？", "autoDelay": 1.0 }
   ],
   "choices": [
-    { "choiceId": "EVT-F1-013-C01", "order": 1, "text": "就地饱餐一顿", "effectPreview": "当前角色恢复 5 点生命", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 5 } ], "next": { "type": "Close" } },
-    { "choiceId": "EVT-F1-013-C02", "order": 2, "text": "把存粮全部搬走换钱", "effectPreview": "获得 80 金币，搬运时被坍塌的窖顶砸伤 3 点生命", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 80 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -3 } ], "next": { "type": "Close" } },
-    { "choiceId": "EVT-F1-013-C03", "order": 3, "text": "只取走背得动的部分", "effectPreview": "获得 50 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 50 } ], "next": { "type": "Close" } }
+    { "choiceId": "EVT-F1-013-C01", "order": 1, "text": "就地饱餐并休整", "effectPreview": "当前角色回复最大生命的 15%（5 点生命）", "effects": [ { "type": "HpDelta", "target": "SelectedPlayer", "value": 5 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-013-C02", "order": 2, "text": "把存粮全部搬走换钱", "effectPreview": "获得 60 金币，失去最大生命的 15%（5 点生命）", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 60 }, { "type": "HpDelta", "target": "SelectedPlayer", "value": -5 } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-F1-013-C03", "order": 3, "text": "只取走背得动的部分", "effectPreview": "获得 40 金币", "effects": [ { "type": "GoldDelta", "target": "Run", "value": 40 } ], "next": { "type": "Close" } }
   ]
 }

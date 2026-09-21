@@ -1,4 +1,5 @@
 EventId,ConfigPath
+EVT-START-001,res://DataBase/Story/Events/EVT-START-001.json
 EVT-F1-001,res://DataBase/Story/Events/EVT-F1-001.json
 EVT-F1-011,res://DataBase/Story/Events/EVT-F1-011.json
 EVT-F1-012,res://DataBase/Story/Events/EVT-F1-012.json

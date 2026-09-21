@@ -8,6 +8,7 @@ public partial class MainMenuScene : Control
 {
 	public const string CharacterSelectScenePath = "res://Scenes/CharacterSelect/CharacterSelectScene.tscn";
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
+	public const string RunFlowScenePath = "res://Scenes/Run/RunFlowScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
 
@@ -139,7 +140,7 @@ public partial class MainMenuScene : Control
 		}
 		// 剧情模式跳过组队；固定的三人队仍使用与纯净模式相同的地图/遭遇流程。
 		RunSession.Instance.StartNewRun(new List<int> { 1002, 1003, 1004 });
-		GetTree().ChangeSceneToFile(MapScenePath);
+		GetTree().ChangeSceneToFile(RunFlowScenePath);
 	}
 
 	private void OnContinuePressed()
@@ -153,17 +154,7 @@ public partial class MainMenuScene : Control
 		if (RunSession.Instance.LoadSave())
 		{
 			// 按存档状态机路由：地图 / 战斗中（重新开局）/ 结算未领取（重现弹窗）
-			string scenePath = MapScenePath;
-			if (RunSession.Instance.IsInSettlement)
-			{
-				scenePath = RunBattleScenePath;
-			}
-			else if (RunSession.Instance.IsInBattleStart)
-			{
-				scenePath = string.Equals(RunSession.Instance.Current.PendingContentType, "Event", StringComparison.Ordinal)
-					? RunEventScenePath : RunBattleScenePath;
-			}
-
+			string scenePath = RunFlowScenePath;
 			GetTree().ChangeSceneToFile(scenePath);
 		}
 		else

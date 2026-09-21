@@ -7,6 +7,7 @@ using CardSimulator.Battlefield;
 
 public partial class RunBattleScene : Control
 {
+	public event Action ContentFinished;
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 
@@ -22,8 +23,8 @@ public partial class RunBattleScene : Control
 
 	public override void _Ready()
 	{
-		// 结算浮层（CanvasLayer，避免被战斗 UI 内部层级遮挡）
-		resultLayer = new CanvasLayer { Layer = 20 };
+		// 结算属于 ModalLayer：高于世界地图（30），低于全局按钮（50）。
+		resultLayer = new CanvasLayer { Layer = 40 };
 		AddChild(resultLayer);
 
 		RunSession session = RunSession.Instance;
@@ -381,6 +382,13 @@ public partial class RunBattleScene : Control
 			return;
 		}
 
+		// 结算界面已被本次“返回地图”消费：隐藏它，让世界地图覆盖层能盖住已完成的战斗。
+		// 结算层（40）高于世界地图层（30），不隐藏会压在地图上并吃掉地图输入。
+		if (resultLayer != null)
+		{
+			resultLayer.Visible = false;
+		}
+
 		StageEncounterRow row = session.PendingEncounter ?? session.BuildPendingEncounterRowFromSave();
 		int dropTableId = row != null ? row.DropTableId : session.Current.SettlementDropTableId;
 
@@ -402,6 +410,7 @@ public partial class RunBattleScene : Control
 
 		session.MarkCurrentNodeVisitedAndAdvanceEncounter();
 		session.CompleteSettlementToMap();
+		if (ContentFinished != null) { ContentFinished.Invoke(); return; }
 		GetTree().ChangeSceneToFile(MapScenePath);
 	}
 

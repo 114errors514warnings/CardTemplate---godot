@@ -8,6 +8,18 @@ using System.Linq;
 
 public partial class MapScene : Control
 {
+	[Export] public bool EmbeddedMode;
+	private bool readOnlyMode;
+	public event Action<string> LevelRequested;
+	public event Action<string> EventRequested;
+	public void SetReadOnly(bool value)
+	{
+		readOnlyMode = value;
+		// 只读地图仍需截获内容输入；只有 RunFlowScene 的全局按钮层可以在其上接收点击。
+		MouseFilter = MouseFilterEnum.Stop;
+	}
+	/// <summary>只读地图（内容进行中）为 true；可选地图（等待选点）为 false。烟测与外部逻辑据此断言输入模式。</summary>
+	public bool IsReadOnly => readOnlyMode;
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
@@ -21,6 +33,7 @@ public partial class MapScene : Control
 	private Label statusLabel;
 	private Label infoLabel;
 	private int currentNodeId = -1;
+	private CardSimulator.Battlefield.HexBattleDebugPanel debugPanel;
 
 	private static readonly Dictionary<MapNodeType, Color> NodeColors = new Dictionary<MapNodeType, Color>
 	{
@@ -110,6 +123,7 @@ public partial class MapScene : Control
 
 	private void BuildHud()
 	{
+		if (EmbeddedMode) return;
 		// 顶部信息条
 		PanelContainer topPanel = new PanelContainer();
 		topPanel.SetAnchorsPreset(LayoutPreset.TopWide);
@@ -162,19 +176,48 @@ public partial class MapScene : Control
 
 	private void BuildDebugControls(Control parent)
 	{
-		var input = new LineEdit { PlaceholderText = "关卡/事件 ID", CustomMinimumSize = new Vector2(150, 0) }; parent.AddChild(input);
-		var level = new Button { Text = "调试关卡" }; level.Pressed += () => StartDebugContent("Level", input.Text); parent.AddChild(level);
-		var story = new Button { Text = "调试事件" }; story.Pressed += () => StartDebugContent("Event", input.Text); parent.AddChild(story);
+		var button = new Button { Text = "调试" }; button.Pressed += ToggleDebugPanel; parent.AddChild(button);
+	}
+	public void ToggleDebugPanel()
+	{
+		if (EmbeddedMode)
+		{
+			DebugRequested?.Invoke();
+			return;
+		}
+		if (debugPanel == null)
+		{
+			debugPanel = CreateDebugPanel();
+			AddChild(debugPanel); debugPanel.Visible = false;
+		}
+		debugPanel.ZAsRelative = false; debugPanel.ZIndex = 1000; debugPanel.MouseFilter = MouseFilterEnum.Stop; debugPanel.ToggleVisible();
+	}
+
+	public event Action DebugRequested;
+	public CardSimulator.Battlefield.HexBattleDebugPanel CreateDebugPanel()
+	{
+		var packed = GD.Load<PackedScene>("res://Scenes/UI/HexBattleDebugPanel.tscn");
+		var panel = packed.Instantiate<CardSimulator.Battlefield.HexBattleDebugPanel>();
+		panel.Setup(null, null, SetStatus, id => StartDebugContent("Level", id), id => StartDebugContent("Event", id));
+		return panel;
 	}
 	private void StartDebugContent(string type, string id)
 	{
 		var session = RunSession.Instance; if (session?.Current == null || string.IsNullOrWhiteSpace(id)) return;
-		if (type == "Event") { try { StoryEventCatalog.Load(id); } catch (System.Exception ex) { SetStatus(ex.Message); return; } session.BeginRunEvent(id, currentNodeId); GetTree().ChangeSceneToFile(RunEventScenePath); return; }
+		if (type == "Event")
+		{
+			try { StoryEventCatalog.Load(id); } catch (System.Exception ex) { SetStatus(ex.Message); return; }
+			session.BeginRunEvent(id, currentNodeId);
+			if (EmbeddedMode && EventRequested != null) { EventRequested.Invoke(id); return; }
+			GetTree().ChangeSceneToFile(RunEventScenePath); return;
+		}
 		try
 		{
 			var level = CardSimulator.Battlefield.BattleLevelCatalog.Load(id);
 			var row = new StageEncounterRow { LevelId = id, NodeType = MapNodeType.NormalCombat, DropTableId = level.DropTableId, MonsterIds = level.Objects.Where(x => x.ObjectType == "Monster").Select(x => int.Parse(x.DefinitionId)).ToArray() };
-			session.BeginRunBattleEncounter("", row); GetTree().ChangeSceneToFile(RunBattleScenePath);
+			session.BeginRunBattleEncounter("", row);
+			if (EmbeddedMode && LevelRequested != null) { LevelRequested.Invoke(id); return; }
+			GetTree().ChangeSceneToFile(RunBattleScenePath);
 		}
 		catch (System.Exception ex) { SetStatus(ex.Message); }
 	}
@@ -189,6 +232,7 @@ public partial class MapScene : Control
 
 	private void UpdateInfoLabel()
 	{
+		if (infoLabel == null) return;
 		RunSession session = RunSession.Instance;
 		if (session == null || session.Current == null || board == null)
 		{
@@ -235,6 +279,15 @@ public partial class MapScene : Control
 		{
 			return;
 		}
+
+		DrawRect(new Rect2(Vector2.Zero, Size), new Color(0.015f, 0.025f, 0.04f, 0.82f));
+		float minX = centers.Values.Min(x => x.X) - HexSize * 1.7f;
+		float maxX = centers.Values.Max(x => x.X) + HexSize * 1.7f;
+		float minY = centers.Values.Min(x => x.Y) - HexSize * 1.7f;
+		float maxY = centers.Values.Max(x => x.Y) + HexSize * 1.7f;
+		Rect2 mapPanel = new Rect2(minX, minY, maxX - minX, maxY - minY).Intersection(new Rect2(Vector2.Zero, Size));
+		DrawRect(mapPanel, new Color(0.075f, 0.11f, 0.15f, 0.96f));
+		DrawRect(mapPanel, new Color(0.30f, 0.40f, 0.48f, 0.85f), false, 2f);
 
 		currentReachable.Clear();
 		currentReachable.UnionWith(ComputeReachable());
@@ -436,6 +489,7 @@ public partial class MapScene : Control
 
 	private void OnNodeClicked(int nodeId)
 	{
+		if (readOnlyMode) { SetStatus("当前内容进行中，地图仅可查看。"); return; }
 		RunSession session = RunSession.Instance;
 		if (session == null || session.Current == null || board == null)
 		{
@@ -481,7 +535,7 @@ public partial class MapScene : Control
 			session.BeginRunBattleEncounter(MapNodeTypeUtil.GetLayerNameByAct(session.Current.MapState.Act), row);
 			SetStatus($"进入关卡：{content.Id}。");
 			QueueRedraw();
-			GetTree().ChangeSceneToFile(RunBattleScenePath);
+			if (EmbeddedMode) LevelRequested?.Invoke(content.Id); else GetTree().ChangeSceneToFile(RunBattleScenePath);
 			return;
 		}
 		if (content?.Type == "Event")
@@ -489,7 +543,7 @@ public partial class MapScene : Control
 			try { StoryEventCatalog.Load(content.Id); }
 			catch (System.Exception ex) { SetStatus($"事件配置加载失败：{ex.Message}"); return; }
 			session.BeginRunEvent(content.Id, node.NodeId);
-			SetStatus($"进入事件：{content.Id}。"); QueueRedraw(); GetTree().ChangeSceneToFile(RunEventScenePath); return;
+			SetStatus($"进入事件：{content.Id}。"); QueueRedraw(); if (EmbeddedMode) EventRequested?.Invoke(content.Id); else GetTree().ChangeSceneToFile(RunEventScenePath); return;
 		}
 
 		// 3) 无配置：标记完成并停留地图
@@ -498,6 +552,21 @@ public partial class MapScene : Control
 		SetStatus($"已到达（无配置遭遇），停留地图。");
 		UpdateInfoLabel();
 		QueueRedraw();
+	}
+
+	/// <summary>剧情模式新局位于起点时，按 Start 节点事件池启动开始事件。</summary>
+	public void TriggerStartEventIfNeeded()
+	{
+		var session = RunSession.Instance;
+		if (!EmbeddedMode || readOnlyMode || session?.Current == null || board == null || session.Current.MapState.VisitedNodeIds.Count > 0) return;
+		MapBoardNode start = board.GetNode(board.StartNodeId);
+		if (start == null || currentNodeId != start.NodeId) return;
+		ResolvedMapContent content = WorldMapContentResolver.Resolve(session.Current.MapState.Act, start, board, session.Current);
+		if (content?.Type != "Event") return;
+		try { StoryEventCatalog.Load(content.Id); }
+		catch (Exception ex) { SetStatus($"开始事件加载失败：{ex.Message}"); return; }
+		session.BeginRunEvent(content.Id, start.NodeId);
+		EventRequested?.Invoke(content.Id);
 	}
 
 	private StageEncounterRow TryResolveEncounter(RunSession session, MapBoardNode node)

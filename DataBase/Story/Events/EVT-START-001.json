@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-START-001",
+  "title": "启程",
+  "summary": "雷纳德、伊瑟拉与维吉尼亚离开营地，踏入第一层的荒野。",
+  "battleMapId": "M-EVENT-EMPTY",
+  "canSkip": true,
+  "autoComplete": true,
+  "background": { "backgroundId": "", "initialEffect": "FadeIn" },
+  "actors": [
+    { "actorId": "renard", "displayName": "雷纳德", "portraitId": "portrait_renard", "defaultSide": "Left", "variants": { "normal": "portrait_renard_normal" } },
+    { "actorId": "isera", "displayName": "伊瑟拉", "portraitId": "portrait_isera", "defaultSide": "Right", "variants": { "normal": "portrait_isera_normal" } },
+    { "actorId": "virginia", "displayName": "维吉尼亚", "portraitId": "portrait_virginia", "defaultSide": "Left", "variants": { "normal": "portrait_virginia_normal" } }
+  ],
+  "timeline": [
+    { "order": 1, "type": "Dialogue", "actorId": "renard", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "补给已经清点完毕。前方就是第一层的荒野。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Dialogue", "actorId": "isera", "side": "Right", "portraitVariant": "normal", "bubbleStyle": "RightSpeaker", "text": "风向不太对，但路还没有被彻底封死。", "autoDelay": 1.0 },
+    { "order": 3, "type": "Dialogue", "actorId": "virginia", "side": "Left", "portraitVariant": "normal", "bubbleStyle": "LeftSpeaker", "text": "那就别浪费时间。我们会在路上找到答案。", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-START-001-C01", "order": 1, "text": "启程", "effectPreview": "开始本次冒险", "effects": [], "next": { "type": "Close" } }
+  ]
+}

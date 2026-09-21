@@ -13,6 +13,8 @@ public partial class HexBattleDebugPanel : Control
     private BattlefieldSession session;
     private BattlefieldView mapView;
     private Action<string> showMessage;
+    private Action<string> jumpLevel;
+    private Action<string> jumpEvent;
 
     private Label preview;
     private Func<AxialHex, bool> savedOverride;
@@ -86,16 +88,20 @@ public partial class HexBattleDebugPanel : Control
         public Category(string name) { Name = name; }
     }
 
-    public void Setup(BattlefieldSession session, BattlefieldView mapView, Action<string> showMessage)
+    public void Setup(BattlefieldSession session, BattlefieldView mapView, Action<string> showMessage, Action<string> jumpLevel = null, Action<string> jumpEvent = null)
     {
         this.session = session;
         this.mapView = mapView;
         this.showMessage = showMessage;
+        this.jumpLevel = jumpLevel;
+        this.jumpEvent = jumpEvent;
     }
 
     public override void _Ready()
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        // 根节点不能 Stop，否则会先于其窗口子节点吃掉“关闭”等按钮点击。
+        // 背景遮罩拦截窗口外输入，窗口自身拦截窗口内输入。
         MouseFilter = MouseFilterEnum.Ignore;
         BuildUi();
         RegisterCommands();
@@ -186,7 +192,7 @@ public partial class HexBattleDebugPanel : Control
         preview.AddThemeColorOverride("font_color", new Color("ffd27a"));
         AddChild(preview);
 
-        backdrop = new ColorRect { Color = new Color(0, 0, 0, .55f), MouseFilter = MouseFilterEnum.Ignore };
+        backdrop = new ColorRect { Color = new Color(0, 0, 0, .55f), MouseFilter = MouseFilterEnum.Stop };
         backdrop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(backdrop);
 
@@ -368,11 +374,7 @@ public partial class HexBattleDebugPanel : Control
         else
         {
             var exec = new Button { Text = "执行", CustomMinimumSize = new Vector2(150, 0) };
-            exec.Pressed += () =>
-            {
-                if (session == null) return;
-                cmd.OnExecute?.Invoke(cmd.Args);
-            };
+            exec.Pressed += () => cmd.OnExecute?.Invoke(cmd.Args);
             detailPanel.AddChild(exec);
         }
     }
@@ -470,88 +472,98 @@ public partial class HexBattleDebugPanel : Control
 
     private void RegisterCommands()
     {
+        // Commands that are valid in every context (map, battle and event).
+        Command("通用", "跳转关卡",
+            args => { string id = args.AsString("关卡ID"); if (string.IsNullOrWhiteSpace(id)) { ShowMsg("请输入关卡 ID。"); return; } if (jumpLevel == null) { ShowMsg("当前上下文不支持关卡跳转。"); return; } jumpLevel(id); },
+            new Param("关卡ID", ParamKind.Text).Def("F1-001"));
+        Command("通用", "跳转事件",
+            args => { string id = args.AsString("事件ID"); if (string.IsNullOrWhiteSpace(id)) { ShowMsg("请输入事件 ID。"); return; } if (jumpEvent == null) { ShowMsg("当前上下文不支持事件跳转。"); return; } jumpEvent(id); },
+            new Param("事件ID", ParamKind.Text).Def("EVT-F1-001"));
+
+        // Map context intentionally exposes no combat-only commands.
+        if (session == null) return;
         // A 牌堆 / 手牌
-        Command("牌堆 / 手牌", "抽牌",
+        Command("局内·牌堆 / 手牌", "抽牌",
             args => { if (session != null) { int n = Math.Max(0, args.AsInt("数量")); session.DebugDraw(session.SelectedId, n); ShowMsg("已抽 " + n + " 张。"); } },
             new Param("数量", ParamKind.Int).Def("1"));
-        Command("牌堆 / 手牌", "添加卡牌",
+        Command("局内·牌堆 / 手牌", "添加卡牌",
             args => { if (session == null) return; bool ok = session.DebugAddCard(session.SelectedId, args.AsInt("卡牌ID"), args.OptionIndex("目标堆"), Math.Max(1, args.AsInt("数量")), out string e); ShowMsg(ok ? "已添加卡牌。" : e); },
             new Param("目标堆", ParamKind.Option).Opt("手牌", "抽牌堆", "弃牌堆", "消耗牌堆"),
             new Param("卡牌ID", ParamKind.Int).Def("1001"),
             new Param("数量", ParamKind.Int).Def("1"));
-        Command("牌堆 / 手牌", "清空手牌",
+        Command("局内·牌堆 / 手牌", "清空手牌",
             args => { if (session == null) return; int n = session.DebugClearHand(session.SelectedId); ShowMsg("已清空手牌（" + n + " 张入弃牌堆）。"); });
 
         // B 资源
-        Command("资源", "加能量",
+        Command("局内·资源", "加能量",
             args => { if (session != null) { session.DebugAddEnergy(session.SelectedId, args.AsInt("能量")); ShowMsg("已加能量。"); } },
             new Param("能量", ParamKind.Int).Def("1"));
-        Command("资源", "加移动",
+        Command("局内·资源", "加移动",
             args => { if (session != null) { session.DebugAddMoves(session.SelectedId, args.AsInt("次数")); ShowMsg("已加移动。"); } },
             new Param("次数", ParamKind.Int).Def("1"));
-        Command("资源", "重置本回合",
+        Command("局内·资源", "重置本回合",
             args => { session?.DebugResetRound(); ShowMsg("已重置本回合。"); });
 
         // C 单位效果（选目标单位）
-        Command("单位效果", "伤害",
+        Command("局内·单位效果", "伤害",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugDamage(p.UnitId, args.AsInt("伤害"), out string e); ShowMsg(ok ? "已造成伤害。" : e); } },
             new Param("伤害", ParamKind.Int).Def("5"),
             new Param("目标", ParamKind.TargetUnit));
-        Command("单位效果", "回复",
+        Command("局内·单位效果", "回复",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugHeal(p.UnitId, args.AsInt("回复"), out string e); ShowMsg(ok ? "已回复生命。" : e); } },
             new Param("回复", ParamKind.Int).Def("5"),
             new Param("目标", ParamKind.TargetUnit));
-        Command("单位效果", "设置生命",
+        Command("局内·单位效果", "设置生命",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugSetHp(p.UnitId, args.AsInt("生命"), out string e); ShowMsg(ok ? "已设置生命。" : e); } },
             new Param("生命", ParamKind.Int).Def("10"),
             new Param("目标", ParamKind.TargetUnit));
-        Command("单位效果", "加护盾",
+        Command("局内·单位效果", "加护盾",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugAddShield(p.UnitId, args.AsInt("护盾"), out string e); ShowMsg(ok ? "已加护盾。" : e); } },
             new Param("护盾", ParamKind.Int).Def("5"),
             new Param("目标", ParamKind.TargetUnit));
-        Command("单位效果", "添加状态",
+        Command("局内·单位效果", "添加状态",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugAddState(p.UnitId, args.AsInt("状态ID"), args.AsInt("层数"), out string e); ShowMsg(ok ? "已添加状态。" : e); } },
             new Param("状态ID", ParamKind.Int).Def("0"),
             new Param("层数", ParamKind.Int).Def("1"),
             new Param("目标", ParamKind.TargetUnit));
-        Command("单位效果", "删除状态",
+        Command("局内·单位效果", "删除状态",
             args => { var p = ResolveTargetUnit(args); if (p != null) { bool ok = session.DebugRemoveState(p.UnitId, args.AsInt("第几个"), args.AsInt("层数"), out string e); ShowMsg(ok ? "已删除状态。" : e); } },
             new Param("第几个", ParamKind.Int).Def("0"),
             new Param("层数", ParamKind.Int).Def("1"),
             new Param("目标", ParamKind.TargetUnit));
         // D 道具 / 装备
-        Command("道具 / 装备", "道具到当前格(普通)",
+        Command("局内·道具 / 装备", "道具到当前格(普通)",
             args => { if (session == null) return; bool ok = session.DebugSpawnItemAtCell(session.Selected.Coord.Q, session.Selected.Coord.R, args.AsString("道具ID"), false, out string e); ShowMsg(ok ? "已放置道具。" : e); },
             new Param("道具ID", ParamKind.Text).Def("potion"));
-        Command("道具 / 装备", "道具到当前格(装备)",
+        Command("局内·道具 / 装备", "道具到当前格(装备)",
             args => { if (session == null) return; bool ok = session.DebugSpawnItemAtCell(session.Selected.Coord.Q, session.Selected.Coord.R, args.AsString("道具ID"), true, out string e); ShowMsg(ok ? "已装备到当前格。" : e); },
             new Param("道具ID", ParamKind.Text).Def("sword"));
-        Command("道具 / 装备", "道具到随身槽",
+        Command("局内·道具 / 装备", "道具到随身槽",
             args => { if (session == null) return; bool ok = session.DebugSpawnItemToSlot(Math.Clamp(args.AsInt("槽位"), 0, 2), args.AsString("道具ID"), out string e); ShowMsg(ok ? "已放入随身槽。" : e); },
             new Param("道具ID", ParamKind.Text).Def("potion"),
             new Param("槽位", ParamKind.Int).Def("0"));
-        Command("道具 / 装备", "清空随身槽",
+        Command("局内·道具 / 装备", "清空随身槽",
             args => { if (session == null) return; bool ok = session.DebugClearSlot(Math.Clamp(args.AsInt("槽位"), 0, 2), out string e); ShowMsg(ok ? "已清空。" : e); },
             new Param("槽位", ParamKind.Int).Def("0"));
-        Command("道具 / 装备", "装备到手",
+        Command("局内·道具 / 装备", "装备到手",
             args => { if (session == null) return; bool ok = session.DebugEquipToHand(args.AsString("道具ID"), args.OptionIndex("手"), out string e); ShowMsg(ok ? "已装备。" : e); },
             new Param("道具ID", ParamKind.Text).Def("sword"),
             new Param("手", ParamKind.Option).Opt("左手", "右手"));
-        Command("道具 / 装备", "放置陷阱",
+        Command("局内·道具 / 装备", "放置陷阱",
             args => { if (session == null || !args.Target.HasValue) return; bool ok = session.DebugPlaceTrap(args.Target.Value.Q, args.Target.Value.R, args.AsString("陷阱ID"), out string e); ShowMsg(ok ? "已放置陷阱。" : e); },
             new Param("陷阱ID", ParamKind.Text).Def("test_trap"),
             new Param("目标格", ParamKind.TargetCell));
 
         // E 敌方
-        Command("敌方", "生成敌人",
+        Command("局内·敌方", "生成敌人",
             args => { if (session == null || !args.Target.HasValue) return; bool ok = session.DebugSpawnEnemy(args.Target.Value.Q, args.Target.Value.R, args.AsInt("怪物ID"), out string e); ShowMsg(ok ? "已生成敌人。" : e); },
             new Param("怪物ID", ParamKind.Int).Def("0"),
             new Param("目标格", ParamKind.TargetCell));
-        Command("敌方", "清空敌人",
+        Command("局内·敌方", "清空敌人",
             args => { session?.DebugClearEnemies(); ShowMsg("已清空敌人。"); });
 
         // F 阶段
-        Command("阶段", "结束回合",
+        Command("局内·阶段", "结束回合",
             args => { session?.DebugEndTurn(); ShowMsg("已结束回合。"); });
     }
 }

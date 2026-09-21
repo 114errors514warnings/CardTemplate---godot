@@ -11,11 +11,13 @@ public sealed record StoryChoice(string Text, string EffectDescription, Action A
 {
     public string DisplayText => string.IsNullOrWhiteSpace(EffectDescription) ? Text : $"{Text}（{EffectDescription}）";
 }
-public sealed record StoryEventDefinition(string Title, string Synopsis, IReadOnlyList<StoryLine> Lines, IReadOnlyList<StoryChoice> Choices = null, bool CanSkip = true, string BackgroundId = "");
+public sealed record StoryEventDefinition(string Title, string Synopsis, IReadOnlyList<StoryLine> Lines, IReadOnlyList<StoryChoice> Choices = null, bool CanSkip = true, string BackgroundId = "", bool AutoComplete = false);
 
 /// <summary>Modal story overlay. It owns only presentation and calls supplied callbacks for event results.</summary>
 public partial class EventStoryOverlay : Control
 {
+    // 运行局固定层级中的剧情层：高于战斗 UI，低于 RunFlowScene 的世界地图与全局按钮。
+    private const int StoryOverlayZIndex = 300;
     private sealed class StoryLogEntry
     {
         public string SpeakerName;
@@ -34,7 +36,7 @@ public partial class EventStoryOverlay : Control
     private Polygon2D bubbleTail;
     private Label leftName, rightName, speakerLabel, textLabel;
     private VBoxContainer choices;
-    private HBoxContainer controls;
+    private HBoxContainer controls, rightControls;
     private RichTextLabel logBody;
     private readonly Dictionary<OverlayFunction, Button> functionButtons = new();
     private int lineIndex, visibleChars;
@@ -51,9 +53,10 @@ public partial class EventStoryOverlay : Control
     {
         MouseFilter = MouseFilterEnum.Stop;
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        ZIndex = 100;
+        ZAsRelative = false;
+        ZIndex = StoryOverlayZIndex;
         Build();
-        ShowLine(0);
+        if (definition.AutoComplete) ShowReturnToMap(); else ShowLine(0);
     }
 
     private static StyleBoxFlat Box(Color color, int radius = 16) => new()
@@ -102,7 +105,7 @@ public partial class EventStoryOverlay : Control
         AddFunctionButton(OverlayFunction.Log, "Log", controls, ToggleLog).CustomMinimumSize = new Vector2(90, 38);
         AddFunctionButton(OverlayFunction.Hide, "隐藏", controls, ToggleHidden).CustomMinimumSize = new Vector2(90, 38);
         AddFunctionButton(OverlayFunction.Auto, "Auto: 关闭", controls, ToggleAutoMenu).CustomMinimumSize = new Vector2(90, 38);
-        var rightControls = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End }; rightControls.AddThemeConstantOverride("separation", 8); Place(rightControls, .72f, .025f, .98f, .08f); AddChild(rightControls);
+        rightControls = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End, ZIndex = 20 }; rightControls.AddThemeConstantOverride("separation", 8); Place(rightControls, .64f, .025f, .98f, .08f); AddChild(rightControls);
         if (onDebug != null) AddFunctionButton(OverlayFunction.Debug, "调试", rightControls, onDebug).CustomMinimumSize = new Vector2(88, 38);
         if (onPause != null) AddFunctionButton(OverlayFunction.Pause, "暂停", rightControls, onPause).CustomMinimumSize = new Vector2(88, 38);
         AddFunctionButton(OverlayFunction.Skip, "跳过", rightControls, ToggleSkip).CustomMinimumSize = new Vector2(88, 38);
@@ -128,6 +131,24 @@ public partial class EventStoryOverlay : Control
         parent.AddChild(button);
         return button;
     }
+
+    /// <summary>运行局常驻顶部栏启用时，隐藏剧情自身的重复按钮，但仍由此对象执行按钮行为。</summary>
+    public void SetBuiltInTopControlsVisible(bool visible)
+    {
+        if (controls != null) controls.Visible = visible;
+        if (rightControls != null) rightControls.Visible = visible;
+    }
+
+    /// <summary>世界地图覆盖层开合：地图打开时剧情 UI 整体让位，否则会透在地图下方。</summary>
+    public void SetWorldMapOpen(bool open) => Visible = !open;
+
+    /// <summary>当前是否还允许跳过剧情：进入结束面板（等待“前往地图”）后不再提供跳过。</summary>
+    public bool CanSkipNow => definition.CanSkip && !waitingChoice;
+
+    public void ToggleLogFromGlobalTopBar() => ToggleLog();
+    public void ToggleHiddenFromGlobalTopBar() => ToggleHidden();
+    public void ToggleAutoFromGlobalTopBar() => ToggleAutoMenu();
+    public void ToggleSkipFromGlobalTopBar() => ToggleSkip();
 
     private void BuildLog()
     {
@@ -212,7 +233,8 @@ public partial class EventStoryOverlay : Control
 
     public override void _Process(double delta)
     {
-        if (hidden || logPanel.Visible || skipPanel.Visible || autoMenu.Visible || waitingChoice || lineIndex >= definition.Lines.Count) return;
+        // 地图覆盖层打开时浮层整体隐藏（Visible=false）：此时不应在幕后继续推进台词/自动播放。
+        if (!Visible || hidden || logPanel.Visible || skipPanel.Visible || autoMenu.Visible || waitingChoice || lineIndex >= definition.Lines.Count) return;
         var line = definition.Lines[lineIndex]; float speed = autoSpeedIndex switch { 1 => 45f, 2 => 90f, 3 => 180f, _ => 45f };
         if (visibleChars < line.Text.Length)
         {
@@ -261,9 +283,19 @@ public partial class EventStoryOverlay : Control
         {
             var button = new Button { Text = choice.DisplayText, CustomMinimumSize = new Vector2(420, 52) };
             button.TooltipText = choice.EffectDescription;
-            button.Pressed += () => { choice.Apply?.Invoke(); Close(); };
+            button.Pressed += () => { choice.Apply?.Invoke(); ShowReturnToMap(); };
             choices.AddChild(button);
         }
+    }
+    private void ShowReturnToMap()
+    {
+        waitingChoice = true;
+        choices.Visible = true;
+        if (functionButtons.TryGetValue(OverlayFunction.Skip, out var skipButton)) skipButton.Visible = false;
+        foreach (Node child in choices.GetChildren()) { choices.RemoveChild(child); child.QueueFree(); }
+        var button = new Button { Text = "前往地图", CustomMinimumSize = new Vector2(420, 52) };
+        button.Pressed += Close;
+        choices.AddChild(button);
     }
     private void ToggleLog()
     {
@@ -300,5 +332,7 @@ public partial class EventStoryOverlay : Control
         // Skipping condenses the presentation only; it never selects an outcome for the player.
         ShowChoicesOrClose(showSkipSynopsis: true);
     }
-    private void Close() { onClosed?.Invoke(); QueueFree(); }
+    /// <summary>事件结束后浮层不再自毁：完成后的剧情 UI 继续存在（世界地图作为覆盖层叠加其上），
+    /// 由持有者在换剧情或销毁内容时回收。</summary>
+    private void Close() { onClosed?.Invoke(); Visible = false; }
 }
