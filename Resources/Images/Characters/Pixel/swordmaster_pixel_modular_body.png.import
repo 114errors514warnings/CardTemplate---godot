@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://csry3yc4xqe71"
-path="res://.godot/imported/intent_attack.png-62f64c95557a57a302dca9a7f9cf25b7.ctex"
+uid="uid://ce35ec65w8jk3"
+path="res://.godot/imported/swordmaster_pixel_modular_body.png-a5be735ccdde5e284c33542281426ff1.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Images/UI/IntentIcons/intent_attack.png"
-dest_files=["res://.godot/imported/intent_attack.png-62f64c95557a57a302dca9a7f9cf25b7.ctex"]
+source_file="res://Resources/Images/Characters/Pixel/swordmaster_pixel_modular_body.png"
+dest_files=["res://.godot/imported/swordmaster_pixel_modular_body.png-a5be735ccdde5e284c33542281426ff1.ctex"]
 
 [params]
 

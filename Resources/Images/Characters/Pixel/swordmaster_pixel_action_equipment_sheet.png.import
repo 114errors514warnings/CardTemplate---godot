@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cmdkdkrn40ofe"
-path="res://.godot/imported/intent_move.png-c676f297859d908d246ec3edd4205b5f.ctex"
+uid="uid://bwsbqwfcn5pic"
+path="res://.godot/imported/swordmaster_pixel_action_equipment_sheet.png-4aa6609bc99b6fa050ec71774f64c8b8.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Images/UI/IntentIcons/intent_move.png"
-dest_files=["res://.godot/imported/intent_move.png-c676f297859d908d246ec3edd4205b5f.ctex"]
+source_file="res://Resources/Images/Characters/Pixel/swordmaster_pixel_action_equipment_sheet.png"
+dest_files=["res://.godot/imported/swordmaster_pixel_action_equipment_sheet.png-4aa6609bc99b6fa050ec71774f64c8b8.ctex"]
 
 [params]
 

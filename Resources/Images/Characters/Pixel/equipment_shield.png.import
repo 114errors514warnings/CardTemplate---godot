@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://drec2rtbypxut"
-path="res://.godot/imported/world-map-ui-reference.png-46f1c0a6d78f8d74a382311b74569159.ctex"
+uid="uid://c8pl46s7llyxy"
+path="res://.godot/imported/equipment_shield.png-b6d2ea894d4566d2a2c44fc1b59841e0.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Images/UI/Map/world-map-ui-reference.png"
-dest_files=["res://.godot/imported/world-map-ui-reference.png-46f1c0a6d78f8d74a382311b74569159.ctex"]
+source_file="res://Resources/Images/Characters/Pixel/equipment_shield.png"
+dest_files=["res://.godot/imported/equipment_shield.png-b6d2ea894d4566d2a2c44fc1b59841e0.ctex"]
 
 [params]
 

@@ -30,6 +30,10 @@ public sealed class RunSaveData
 	public Dictionary<int, int> Items { get; set; } = new Dictionary<int, int>();
 	public Dictionary<int, int> Equipment { get; set; } = new Dictionary<int, int>();
 
+	/// <summary>被怪物窃取的金币账本（**按怪物实例分开记**）：每条记录对应关卡里的一个怪物实例，
+	/// 战斗内按实例实时记账（进入存档），结算时只返还"该实例被击杀"的那一条。</summary>
+	public List<StolenGoldEntry> StolenGoldFromMonsters { get; set; } = new List<StolenGoldEntry>();
+
 	public RunMapStateSave MapState { get; set; } = new RunMapStateSave();
 
 	// ── 待处理战斗（InBattleStart）──
@@ -65,6 +69,15 @@ public sealed class RunDeckEntry
 {
 	public int CardId;
 	public int PermanentUpgradeLevel;
+}
+
+/// <summary>单个怪物实例的窃取记录：`InstanceId` 取自关卡 CSV 的对象实例 ID（如 `F1-006-M01`），
+/// 同一 `MonsterId` 的多只怪物各占一条，互不合并。</summary>
+public sealed class StolenGoldEntry
+{
+	public string InstanceId = string.Empty;
+	public int MonsterId;
+	public int Amount;
 }
 
 public sealed class RunMapStateSave

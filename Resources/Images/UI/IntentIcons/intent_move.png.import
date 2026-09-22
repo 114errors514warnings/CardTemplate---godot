@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d4lm5hbhjvuoq"
-path="res://.godot/imported/bg_night_road.png-72c022c3d678165931e03d3ac3a81021.ctex"
+uid="uid://cmdkdkrn40ofe"
+path="res://.godot/imported/intent_move.png-7e1575870315d8ce3e785dde283c1169.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Images/UI/Story/Backgrounds/bg_night_road.png"
-dest_files=["res://.godot/imported/bg_night_road.png-72c022c3d678165931e03d3ac3a81021.ctex"]
+source_file="res://Resources/Images/UI/IntentIcons/intent_move.png"
+dest_files=["res://.godot/imported/intent_move.png-7e1575870315d8ce3e785dde283c1169.ctex"]
 
 [params]
 

@@ -65,6 +65,13 @@ public sealed class BattleMapDefinition
     /// <summary>Runtime-composed level spawns; never written in permanent map JSON.</summary>
     [JsonIgnore] public List<HexCoordinateData> FixedEnemySpawnCoords { get; set; } = new();
 
+    /// <summary>Runtime-composed per-monster initial values（与 MonsterIds 一一对应；来自关卡 CSV 的 InitialValue 列）。</summary>
+    [JsonIgnore] public List<string> MonsterInitialValues { get; set; } = new();
+
+    /// <summary>Runtime-composed per-monster instance keys（与 MonsterIds 一一对应；来自关卡 CSV 的 InstanceId，
+    /// 作为窃取金币等"按怪物实例"记账的稳定键）。</summary>
+    [JsonIgnore] public List<string> MonsterInstanceIds { get; set; } = new();
+
     public static BattleMapDefinition Parse(string json)
     {
         var options = new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
@@ -82,7 +89,8 @@ public sealed class BattleMapDefinition
         if (Radius < 1 || Radius > 64) throw new ArgumentException("地图半径应在 1–64 范围内。");
         if (Cells == null || CellOverrides == null || PlayerSpawnCoords == null || ExitAnchors == null ||
             GenerationExcludedCoords == null || ObjectPlacements == null || RandomItemDefinitions == null ||
-            PlayerCharacterIds == null || MonsterIds == null || FixedEnemySpawnCoords == null) throw new ArgumentException("地图集合字段不能为 null。");
+            PlayerCharacterIds == null || MonsterIds == null || FixedEnemySpawnCoords == null || MonsterInitialValues == null ||
+            MonsterInstanceIds == null) throw new ArgumentException("地图集合字段不能为 null。");
         if (PlayerSpawnCoords.Count != 3 || PlayerCharacterIds.Count != 3) throw new ArgumentException("必须配置三个玩家槽与出生格。");
         if (Cells.Count > 20000 || CellOverrides.Count > 20000 || ObjectPlacements.Count > 20000 || MonsterIds.Count > 1000)
             throw new ArgumentException("地图配置超过支持容量。");
@@ -100,5 +108,9 @@ public sealed class BattleMapDefinition
         }
         if (FixedEnemySpawnCoords.Count != 0 && FixedEnemySpawnCoords.Count != MonsterIds.Count)
             throw new ArgumentException("固定怪物出生点数量必须与怪物数量一致。");
+        if (MonsterInitialValues.Count != 0 && MonsterInitialValues.Count != MonsterIds.Count)
+            throw new ArgumentException("怪物初始值条目数量必须与怪物数量一致。");
+        if (MonsterInstanceIds.Count != 0 && MonsterInstanceIds.Count != MonsterIds.Count)
+            throw new ArgumentException("怪物实例键数量必须与怪物数量一致。");
     }
 }

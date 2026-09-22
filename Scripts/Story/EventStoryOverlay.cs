@@ -69,22 +69,24 @@ public partial class EventStoryOverlay : Control
     { node.AnchorLeft = l; node.AnchorTop = t; node.AnchorRight = r; node.AnchorBottom = b; node.OffsetLeft = node.OffsetTop = node.OffsetRight = node.OffsetBottom = 0; }
     private static Label Text(string value, int size) { var label = new Label { Text = value, AutowrapMode = TextServer.AutowrapMode.WordSmart, MouseFilter = MouseFilterEnum.Ignore }; label.AddThemeFontSizeOverride("font_size", size); return label; }
 
+    /// <summary>背景图是否真的加载成功（供烟测/自检确认 `Resources/Images/UI/Story/Backgrounds/<id>.png` 路径有效）。</summary>
+    public bool HasBackgroundTexture { get; private set; }
     private void Build()
     {
-        bool hasBackground = false;
+        HasBackgroundTexture = false;
         if (!string.IsNullOrWhiteSpace(definition.BackgroundId))
         {
-            string path = $"res://Images/UI/Story/Backgrounds/{definition.BackgroundId}.png";
+            string path = $"res://Resources/Images/UI/Story/Backgrounds/{definition.BackgroundId}.png";
             var texture = ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
             if (texture != null)
             {
                 var eventBackground = new TextureRect { Texture = texture, ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered, MouseFilter = MouseFilterEnum.Ignore };
                 eventBackground.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(eventBackground);
-                hasBackground = true;
+                HasBackgroundTexture = true;
             }
         }
         // A configured background is displayed unmasked. The dark layer is only the no-background fallback.
-        if (!hasBackground)
+        if (!HasBackgroundTexture)
         {
             var shade = new ColorRect { Color = new Color(0.02f, 0.03f, 0.05f, .72f), MouseFilter = MouseFilterEnum.Ignore };
             shade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); AddChild(shade);

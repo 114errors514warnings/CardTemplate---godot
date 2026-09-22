@@ -58,7 +58,8 @@ public class BattlefieldFoundationTests
     public void Json_OfficialLayerOneMapLoadsAndGenerates()
     {
         // 正式关卡地图（DataBase/BattleMap/Maps）随关卡数据拷贝到测试输出目录；
-        // 旧的六边形测试关（FoundationMap.json）已退役，不再作为夹具。
+        // 旧的六边形测试关（DataBase/Battlefield/FoundationMap.json）只作 **场景烟测夹具**（`--battlefield-smoke`），
+        // 单测一律用内联定义，不再依赖这个文件。
         var definition = BattleMapDefinition.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "BattleMap", "M-F1-001.json")));
         var map = BattleDeploymentService.Generate(definition);
         Assert.Equal(127, map.Board.Cells.Count);
@@ -250,6 +251,20 @@ public class BattlefieldFoundationTests
     }
 
     [Fact]
+    public void WeaponCsv_EquipmentTypeSeparatesMeleeRangedAndDerivesWhenMissing()
+    {
+        var weapons = BattleWeaponCatalog.LoadAll(useCache: false);
+        Assert.Equal(EquipmentType.Ranged, weapons["弓箭"].Type);
+        Assert.Equal(EquipmentType.Ranged, weapons["法典"].Type);
+        Assert.Equal(EquipmentType.Melee, weapons["双手剑"].Type);
+        Assert.Equal(EquipmentType.Melee, weapons["长枪"].Type);
+        Assert.Equal(EquipmentType.Ranged, WeaponAttackSpec.DeriveType(WeaponAttackMode.RangedLine));
+        Assert.Equal(EquipmentType.Ranged, WeaponAttackSpec.DeriveType(WeaponAttackMode.ThrowSingle));
+        Assert.Equal(EquipmentType.Melee, WeaponAttackSpec.DeriveType(WeaponAttackMode.MeleeLine));
+        Assert.Equal(EquipmentType.Melee, WeaponAttackSpec.Unarmed.Type);
+    }
+
+    [Fact]
     public void WeaponTrace_ThrowBypassesMiddleButRangedLineStopsAtFirstUnit()
     {
         var cells = new[] { new BattleCell(new(0, 0)), new BattleCell(new(1, 0)), new BattleCell(new(2, 0)), new BattleCell(new(3, 0)) };
@@ -260,6 +275,69 @@ public class BattlefieldFoundationTests
         var thrown = new WeaponAttackSpec("tome", 3, 2, WeaponAttackMode.ThrowSingle, 0);
         Assert.Equal(new[] { new AxialHex(1, 0) }, BattleAttackTraceResolver.Resolve(board, occupancy, new(0, 0), new(3, 0), ranged));
         Assert.Equal(new[] { new AxialHex(3, 0) }, BattleAttackTraceResolver.Resolve(board, occupancy, new(0, 0), new(3, 0), thrown));
+    }
+
+    [Fact]
+    public void RayGeometry_AxialRayStopsAtFirstBlockerAndRejectsOffAxisDirections()
+    {
+        var cells = new[] { new BattleCell(new(0, 0)), new BattleCell(new(1, 0)), new BattleCell(new(2, 0)), new BattleCell(new(3, 0)),
+            new BattleCell(new(4, 0)), new BattleCell(new(1, 1)) };
+        var board = new BattleBoard(cells); var occupancy = new BattleOccupancyService(board);
+        var blocker = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 91, HP = 10 }, "blocker", BattlefieldRole.Enemy, 0);
+        Assert.True(occupancy.TryPlace(blocker, new(2, 0), out _));
+
+        // 首个阻挡格本身可被命中，其后不再前进。
+        Assert.Equal(new[] { new AxialHex(1, 0), new AxialHex(2, 0) },
+            BattleAttackSystem.ResolveAxialRay(board, occupancy, new(0, 0), new(1, 0), 5));
+        // 非轴向方向一律为空：射线不会被“吸附”成最近的方向。
+        Assert.Empty(BattleAttackSystem.ResolveAxialRay(board, occupancy, new(0, 0), new(1, 1), 5));
+        Assert.Empty(BattleAttackSystem.ResolveAxialRay(board, occupancy, new(0, 0), new(0, 0), 5));
+        // 穿透无视单位阻挡，走满到地图边界。
+        Assert.Equal(new[] { new AxialHex(1, 0), new AxialHex(2, 0), new AxialHex(3, 0), new AxialHex(4, 0) },
+            BattleAttackSystem.ResolveAxialRay(board, occupancy, new(0, 0), new(1, 0), 5, penetrates: true));
+    }
+
+    [Fact]
+    public void RayGeometry_RayCandidatesOnlyCoverTheSixAxialRays()
+    {
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 5).Select(x => new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+
+        var candidates = BattleAttackSystem.ResolveRayCandidates(board, occupancy, new(0, 0), 5);
+
+        Assert.Equal(30, candidates.Count);
+        Assert.All(candidates, cell => Assert.True(BattleRangeResolver.TryGetExactLineDirection(new AxialHex(0, 0), cell, out _)));
+        Assert.DoesNotContain(new AxialHex(1, 1), candidates);
+        Assert.DoesNotContain(new AxialHex(2, 1), candidates);
+    }
+
+    [Fact]
+    public void RayGeometry_RayCandidatesStopPerDirectionAndKeepTheBlockerCell()
+    {
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 5)
+            .Select(x => x == new AxialHex(1, 0) ? new BattleCell(x, BattleCellKind.Obstacle) : new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+
+        var candidates = BattleAttackSystem.ResolveRayCandidates(board, occupancy, new(0, 0), 5);
+
+        Assert.Contains(new AxialHex(1, 0), candidates);
+        Assert.DoesNotContain(new AxialHex(2, 0), candidates);
+        Assert.Contains(new AxialHex(0, 5), candidates);
+    }
+
+    [Fact]
+    public void RayGeometry_FullRayCandidatesIgnoreBlockersForTheRangeIndicator()
+    {
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 5)
+            .Select(x => x == new AxialHex(2, 0) ? new BattleCell(x, BattleCellKind.Obstacle) : new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+
+        var range = BattleAttackSystem.ResolveRayCandidates(board, occupancy, new(0, 0), 5, penetrates: true);
+
+        Assert.Equal(30, range.Count);
+        Assert.Contains(new AxialHex(2, 0), range);
+        Assert.Contains(new AxialHex(5, 0), range);
+        Assert.DoesNotContain(new AxialHex(1, 1), range);
     }
 
     [Fact]

@@ -1,3 +1,8 @@
 PoolId,Act,NodeType,Difficulty,LevelId,Weight
 P-F1-NORMAL-LOW,1,NormalCombat,Low,F1-001,1
+P-F1-NORMAL-LOW,1,NormalCombat,Low,F1-002,1
+P-F1-NORMAL-LOW,1,NormalCombat,Low,F1-003,1
 P-F1-HIGH-RISK,1,HighRiskCombat,High,F1-H-001,1
+P-F1-NORMAL-MID,1,NormalCombat,Mid,F1-004,1
+P-F1-NORMAL-MID,1,NormalCombat,Mid,F1-005,1
+P-F1-NORMAL-MID,1,NormalCombat,Mid,F1-006,1

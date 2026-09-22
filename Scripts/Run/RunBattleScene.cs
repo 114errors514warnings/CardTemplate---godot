@@ -16,6 +16,7 @@ public partial class RunBattleScene : Control
 	private bool outcomeResolved;
 	private bool resultShown;
 	private bool resultWasVictory;
+	private int refundedStolenGold;
 
 	private CanvasLayer resultLayer;
 	private int chosenCardId;
@@ -95,6 +96,9 @@ public partial class RunBattleScene : Control
 		// 战后把活体角色全量回写：HP + 整副默认卡组（含战斗中永久升级级数与顺序）
 		WriteBackLiveCharacters(session);
 
+		// 结算被窃金币：只返还被击杀怪物偷走的部分，其余清账（未被击杀的不返还）。
+		refundedStolenGold = RefundStolenGold(session);
+
 		StageEncounterRow row = session.PendingEncounter;
 		int dropTableId = row != null ? row.DropTableId : session.Current.PendingDropTableId;
 		string name = row != null && !string.IsNullOrEmpty(row.Name) ? row.Name : session.Current.PendingEncounterName;
@@ -103,6 +107,26 @@ public partial class RunBattleScene : Control
 		List<int> candidateIds = BuildCardCandidates(session, dropTableId);
 		session.EnterSettlement(string.IsNullOrEmpty(name) ? "胜利" : name, dropTableId, candidateIds);
 		BuildResultOverlay(true, string.IsNullOrEmpty(name) ? "胜利" : name, candidateIds);
+	}
+
+	/// <summary>胜利结算：把"被击杀怪物实例"偷走的金币原额返还（存活实例的不返还），并清掉剩余账本。</summary>
+	private int RefundStolenGold(RunSession session)
+	{
+		if (session?.Current == null) return 0;
+		var defeatedInstanceKeys = new List<string>();
+		if (battlefield != null)
+		{
+			foreach (BattleUnitPlacement placement in battlefield.Occupancy.Placements.Values)
+			{
+				if (placement.Role != BattlefieldRole.Enemy || placement.Presence != BattlefieldPresence.Defeated) continue;
+				string instanceKey = battlefield.GetMonsterInstanceKey(placement.UnitId);
+				if (!string.IsNullOrWhiteSpace(instanceKey)) defeatedInstanceKeys.Add(instanceKey);
+			}
+		}
+
+		int refunded = RunGoldLedger.RefundDefeated(session.Current, defeatedInstanceKeys);
+		RunGoldLedger.Clear(session.Current);
+		return refunded;
 	}
 
 	/// <summary>把战后角色 HP 与 DefaultDeck（含每张永久升级级数）回写进存档。</summary>
@@ -237,6 +261,19 @@ public partial class RunBattleScene : Control
 		title.AddThemeFontSizeOverride("font_size", 34);
 		title.AddThemeColorOverride("font_color", victory ? Colors.LightYellow : Colors.IndianRed);
 		vbox.AddChild(title);
+
+		// 结算展示：追回被窃金币（结算时已实际入账，这里只做说明，无需再领取）。
+		if (victory && refundedStolenGold > 0)
+		{
+			Label refundLine = new Label
+			{
+				Text = $"追回被窃金币 +{refundedStolenGold}（被击杀的怪物原额返还）",
+				HorizontalAlignment = HorizontalAlignment.Center,
+			};
+			refundLine.AddThemeFontSizeOverride("font_size", 18);
+			refundLine.AddThemeColorOverride("font_color", Colors.LightGreen);
+			vbox.AddChild(refundLine);
+		}
 
 		RunSession session = RunSession.Instance;
 		int settlementDropTableId = session?.Current?.SettlementDropTableId ?? 0;

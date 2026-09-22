@@ -34,7 +34,18 @@ public sealed partial class BattlefieldSession : IDisposable
     public event Action<BattlePhase> Finished;
     public event Action<BattlefieldEntry> UnitEntered;
     public event Action<BattlefieldAttackEvent> AttackResolved;
+
+    /// <summary>怪物攻击命中玩家时触发（攻击者、被命中玩家），每次攻击只触发一次。
+    /// 战斗层不认识金币：窃取等依赖局外数据的机制由运行局侧订阅后自行结算。</summary>
+    public event Action<BattleUnitPlacement, BattleUnitPlacement> MonsterHitPlayer;
     private long attackEventSequence;
+
+    /// <summary>怪物单位 → 实例键（来自关卡 CSV 的 `InstanceId`）：窃取金币等"按怪物实例"记账的稳定标识。</summary>
+    private readonly Dictionary<int, string> monsterInstanceKeys = new();
+
+    /// <summary>取某只怪物单位的实例键；不是怪物或未知单位返回空串。</summary>
+    public string GetMonsterInstanceKey(int unitId) =>
+        monsterInstanceKeys.TryGetValue(unitId, out string key) ? key : string.Empty;
 
     // 空间场景持有独立牌堆，但卡牌效果仍统一调用 Card.Apply / EffectSystem / StateSystem。
     private readonly Dictionary<int, List<Card>> drawPiles = new();
@@ -101,13 +112,25 @@ public sealed partial class BattlefieldSession : IDisposable
 
     public IReadOnlyCollection<AxialHex> GetCastCandidates(int cardId)
     {
-        var spec = GetSpatialSpec(cardId); var origin = Selected.Coord;
-        int effectiveRange = spec.Shape is CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line
-            ? Math.Max(spec.MaxRange, CurrentAttackRange) : spec.MaxRange;
+        CardSpatialSpec spec = GetSpatialSpec(cardId); var origin = Selected.Coord;
         if (spec.Shape == CardSpatialShape.SelfMove) return Movement.LegalDestinations(SelectedId);
-        if (spec.Shape == CardSpatialShape.Trap)
+        if (spec.Shape == CardSpatialShape.Trap)   // 陷阱不是攻击：射程仍用卡牌配置
             return BattleRangeResolver.CellsWithinRange(origin, spec.MaxRange).Where(x => x != origin && Board.Cells.TryGetValue(x, out var c) && c.Walkable && c.Trigger == null && c.Items.Count == 0 && Occupancy.At(x) == null).ToArray();
         if (spec.Shape == CardSpatialShape.None) return new[] { origin };
+        // 攻击范围类数值（射程 / 直线长度 / 扇形半径）一律取武器攻击距离；爆炸半径与突刺位移格数保留卡牌值。
+        CardSpatialSpec effective = EffectiveSpec(spec);
+        int effectiveRange = EffectiveCastRange(effective);
+        // 按武器几何打：卡牌没声明特殊攻击方式，或武器类型不满足其条件。
+        if (UsesWeaponGeometry(spec))
+        {
+            // 远程直线（弓 / 弓箭）：只能沿六个方向瞄准，候选 = 六个方向的完整直线（途中目标不截断高亮）。
+            if (WeaponIsRay) return RayCandidates(effective);
+            // 投掷（魔典 / 法典）：射程内任意落点，中间单位与障碍都不阻挡。
+            if (WeaponIsThrown)
+                return BattleRangeResolver.CellsWithinRange(origin, effectiveRange)
+                    .Where(x => x != origin && Board.Cells.ContainsKey(x)).ToArray();
+            // 近战类武器的几何细化未落地（长枪直线/扇形切换等在待接入清单），先沿用卡牌形状 + 武器距离。
+        }
         if (spec.Shape == CardSpatialShape.Fan)
             return BattleRangeResolver.Neighbors(origin).Where(Board.Cells.ContainsKey).ToArray();
         if (spec.Shape == CardSpatialShape.Line)
@@ -117,7 +140,8 @@ public sealed partial class BattlefieldSession : IDisposable
             {
                 if (spec.AttackMode == WeaponAttackMode.Thrust)
                 {
-                    var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, spec.Length), 0, WeaponAttackMode.Thrust, 0);
+                    // 突刺：位移沿方向走到卡牌规定的格数；这里的“长度”是击退攻击范围，取武器距离。
+                    var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, effective.Length), 0, WeaponAttackMode.Thrust, 0);
                     cells.AddRange(BattleAttackTraceResolver.ResolveDirection(Board, Occupancy, origin, direction, thrust));
                     continue;
                 }
@@ -132,31 +156,130 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             return cells;
         }
-        // 投掷型武器的单点/爆发卡使用抛物线定点命中：只受距离和地图边界限制，不检查单位或障碍遮挡。
-        bool thrownTargeting = CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle
-            && spec.Shape is CardSpatialShape.Single or CardSpatialShape.Burst;
+        // 其余形状（单点 / 爆发）：格点目标，按武器距离取射程；被阻挡的目标格不可选。
         return BattleRangeResolver.CellsWithinRange(origin, effectiveRange)
-            .Where(x => x != origin && Board.Cells.ContainsKey(x) && (thrownTargeting || HasClearTrace(origin, x, spec.Penetrates))).ToArray();
+            .Where(x => x != origin && Board.Cells.ContainsKey(x) && HasClearTrace(origin, x, spec.Penetrates)).ToArray();
     }
 
     public IReadOnlyCollection<AxialHex> GetAffectedCells(int cardId, AxialHex target)
     {
         CardSpatialSpec spec = GetSpatialSpec(cardId);
+        CardSpatialSpec effective = EffectiveSpec(spec);
+        if (UsesWeaponGeometry(spec) && WeaponIsRay
+            && spec.Shape is CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line or CardSpatialShape.Fan)
+            return RayAffectedCells(effective, target);
         if (spec.Shape == CardSpatialShape.Line)
         {
             if (spec.AttackMode == WeaponAttackMode.Thrust)
             {
-                var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, spec.Length), 0, WeaponAttackMode.Thrust, 0);
+                var thrust = new WeaponAttackSpec("card-thrust", Math.Max(1, effective.Length), 0, WeaponAttackMode.Thrust, 0);
                 return BattleAttackTraceResolver.Resolve(Board, Occupancy, Selected.Coord, target, thrust).ToArray();
             }
             AxialHex dir = BattleRangeResolver.PickLineDirection(Selected.Coord, target);
-            var line = ResolveLineUntilBlocked(dir, Math.Max(1, spec.Length), spec.Penetrates).ToHashSet();
+            var line = ResolveLineUntilBlocked(dir, Math.Max(1, effective.Length), spec.Penetrates).ToHashSet();
             if (spec.Explodes && line.Count > 0)
-                line.UnionWith(BattleRangeResolver.CellsWithinRange(line.Last(), spec.Radius).Where(Board.Cells.ContainsKey));
+                line.UnionWith(BattleRangeResolver.CellsWithinRange(line.Last(), Math.Max(1, spec.Radius)).Where(Board.Cells.ContainsKey));
             return line;
         }
-        return BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
+        return BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, effective).Where(Board.Cells.ContainsKey).ToArray();
     }
+    /// <summary>远程直线武器（弓 / 弓箭）的弹道格，供表现使用：沿瞄准方向走满射程，遇首个阻挡即停。
+    /// 非射线几何回落到结算影响格，表现层无需分支。</summary>
+    public IReadOnlyCollection<AxialHex> GetAttackTraceCells(int cardId, AxialHex target)
+    {
+        CardSpatialSpec spec = GetSpatialSpec(cardId);
+        if (!UsesWeaponGeometry(spec) || !WeaponIsRay
+            || spec.Shape is not (CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line or CardSpatialShape.Fan))
+            return GetAffectedCells(cardId, target);
+        CardSpatialSpec effective = EffectiveSpec(spec);
+        if (!BattleRangeResolver.TryGetExactLineDirection(Selected.Coord, target, out AxialHex direction)) return Array.Empty<AxialHex>();
+        return BattleAttackSystem.ResolveAxialRay(Board, Occupancy, Selected.Coord, direction,
+            EffectiveCastRange(effective), spec.Penetrates, Selected.UnitId);
+    }
+
+    /// <summary>当前手位的装备类型（近战武器 / 远程武器 / 防具）。</summary>
+    private EquipmentType CurrentWeaponType => CurrentWeapon.Type;
+
+    private bool WeaponIsRay => CurrentWeapon.Mode == WeaponAttackMode.RangedLine;
+    private bool WeaponIsThrown => CurrentWeapon.Mode == WeaponAttackMode.ThrowSingle;
+
+    /// <summary>卡牌声明的特殊攻击方式属于哪类装备；null = 没声明特殊方式（单体 / 无空间列 / 位移 / 陷阱）。</summary>
+    private static EquipmentType? CardSpecialModeType(CardSpatialSpec spec) => spec?.Shape switch
+    {
+        CardSpatialShape.Fan => EquipmentType.Melee,
+        CardSpatialShape.Burst => EquipmentType.Ranged,
+        CardSpatialShape.Line => spec.AttackMode is WeaponAttackMode.MeleeLine or WeaponAttackMode.Thrust or WeaponAttackMode.AdjacentSingle
+            ? EquipmentType.Melee : EquipmentType.Ranged,
+        _ => null,
+    };
+
+    /// <summary>卡牌声明的特殊攻击方式是否生效：武器类型必须匹配（近战型特殊方式需近战武器，远程型需远程武器）。</summary>
+    private bool CardModeApplies(CardSpatialSpec spec) =>
+        CardSpecialModeType(spec) is EquipmentType need && CurrentWeaponType == need;
+
+    /// <summary>本次出牌按武器几何结算：卡牌没声明特殊攻击方式，或武器类型不满足其条件。</summary>
+    private bool UsesWeaponGeometry(CardSpatialSpec spec) => !CardModeApplies(spec);
+
+    /// <summary>
+    /// 生效的空间规格：**攻击范围类数值一律取武器攻击距离**（射程 / 直线长度 / 扇形与环形半径 / 突刺的击退攻击范围）；
+    /// **爆炸半径与突刺位移格数**保持卡牌配置（它们与攻击距离无关）。无武器时攻击距离为 1。
+    /// </summary>
+    private CardSpatialSpec EffectiveSpec(CardSpatialSpec spec)
+    {
+        if (spec == null) return null;
+        int attackRange = Math.Max(1, CurrentAttackRange);
+        return new CardSpatialSpec
+        {
+            CardId = spec.CardId,
+            Shape = spec.Shape,
+            AttackMode = spec.AttackMode,
+            TrapId = spec.TrapId,
+            Penetrates = spec.Penetrates,
+            Explodes = spec.Explodes,
+            Radius = spec.Radius,                                                                        // 爆炸半径：卡牌固定值
+            MaxRange = spec.AttackMode == WeaponAttackMode.Thrust ? spec.MaxRange : attackRange,          // 突刺位移格数：卡牌规定
+            Length = attackRange,                                                                          // 直线长度 / 突刺攻击范围
+        };
+    }
+
+    /// <summary>卡牌射程：攻击范围类数值取武器攻击距离（生效规格里已经换算好）。</summary>
+    private int EffectiveCastRange(CardSpatialSpec spec) =>
+        spec.Shape is CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line
+            ? Math.Max(1, spec.MaxRange) : spec.MaxRange;
+
+    /// <summary>远程直线武器的候选/范围标识：六个方向的完整直线。这里刻意用 <c>penetrates: true</c>
+    /// 表示“只受地图边界限制”，途中单位与障碍不截断高亮——首个阻挡只决定弹道终点与命中谁（见 RayAffectedCells）。</summary>
+    private IReadOnlyCollection<AxialHex> RayCandidates(CardSpatialSpec spec) =>
+        BattleAttackSystem.ResolveRayCandidates(Board, Occupancy, Selected.Coord, EffectiveCastRange(spec), true, Selected.UnitId);
+
+    /// <summary>远程直线武器的“红色”范围（受影响的格 = 弹道段）：先取精确方向与**被首个阻挡截断**的射线，
+    /// 再按卡牌自身形状展开——单体/直线=该弹道段（到首个单位或障碍为止，含阻挡格）、爆发=以命中格为爆心、
+    /// 扇形=以射手为顶点朝该方向。它与黄色候选（RayCandidates 的六方向完整直线）刻意不同：
+    /// 黄色只表示“能瞄哪里”，红色表示“打出去会经过/命中哪里”，因此红会被目标与障碍截断。
+    /// 目标不在六个方向之一时返回空：箭头不会拐弯。</summary>
+    private IReadOnlyCollection<AxialHex> RayAffectedCells(CardSpatialSpec spec, AxialHex target)
+    {
+        if (!BattleRangeResolver.TryGetExactLineDirection(Selected.Coord, target, out AxialHex direction)) return Array.Empty<AxialHex>();
+        IReadOnlyList<AxialHex> ray = BattleAttackSystem.ResolveAxialRay(Board, Occupancy, Selected.Coord, direction,
+            EffectiveCastRange(spec), spec.Penetrates, Selected.UnitId);
+        if (ray.Count == 0) return Array.Empty<AxialHex>();
+        AxialHex impact = ray[^1];
+        switch (spec.Shape)
+        {
+            case CardSpatialShape.Single:
+                // 红色高亮 = 该方向的弹道段：从射手相邻格到首个阻挡为止（含阻挡格），被单位或障碍截断。
+                // 段内不会再出现第二个单位（任何单位都会截断射线），所以结算仍是“直线上的第一个阻挡”。
+                return ray;
+            case CardSpatialShape.Burst:
+                return BattleRangeResolver.CellsWithinRange(impact, Math.Max(1, spec.Radius)).Where(Board.Cells.ContainsKey).ToArray();
+            case CardSpatialShape.Fan:
+                return BattleRangeResolver.ResolveFanCells(Selected.Coord, direction, Math.Max(1, spec.MaxRange)).Where(Board.Cells.ContainsKey).ToArray();
+            default:
+                return ray;
+        }
+    }
+
+
 
     private bool HasClearTrace(AxialHex origin, AxialHex target, bool penetrates)
     {
@@ -194,7 +317,16 @@ public sealed partial class BattlefieldSession : IDisposable
         for (int i = 0; i < definition.MonsterIds.Count; i++)
         {
             var monster = new MonsterInstance(LoadingSystem.MonsterDictionary[definition.MonsterIds[i]]);
+            // 关卡 CSV 的 InitialValue：开局写入初始生命与初始状态（见 UnitInitialStateConfig）。
+            string initialValue = i < definition.MonsterInitialValues.Count ? definition.MonsterInitialValues[i] : string.Empty;
+            if (!string.IsNullOrWhiteSpace(initialValue))
+                UnitInitialStateConfig.Apply(monster, initialValue, $"{monster.Name}（{definition.MapId} 第 {i + 1} 只怪物）");
             Register(new BattleUnitPlacement(monster, monster.Name, BattlefieldRole.Enemy, 0), Generated.EnemyCoords[i]);
+            // 怪物实例键：窃取金币等"按实例"记账的稳定标识（关卡 CSV 的 InstanceId）。
+            string instanceKey = i < definition.MonsterInstanceIds.Count && !string.IsNullOrWhiteSpace(definition.MonsterInstanceIds[i])
+                ? definition.MonsterInstanceIds[i]
+                : $"unit-{monster.UniqueInGameId}";
+            monsterInstanceKeys[monster.UniqueInGameId] = instanceKey;
         }
         SelectedId = PlayerIds[0];
         InitializeDecks();
@@ -1006,6 +1138,9 @@ public sealed partial class BattlefieldSession : IDisposable
                 }
                 TrackHpLoss(victim.Unit, before);
             }
+            // 每次攻击只触发一次窃取类机制：命中任意玩家即通知一次（伤害已结算）。
+            BattleUnitPlacement hitPlayer = victims.FirstOrDefault(v => v.Role == BattlefieldRole.Player);
+            if (hitPlayer != null) MonsterHitPlayer?.Invoke(enemy, hitPlayer);
         }
         else if (type == EffectType.Shield)
         {
@@ -1102,9 +1237,9 @@ public sealed partial class BattlefieldSession : IDisposable
     {
         CardSpatialSpec spec = GetSpatialSpec(cardId);
         if (spec.Shape is not (CardSpatialShape.Single or CardSpatialShape.Burst or CardSpatialShape.Line or CardSpatialShape.Fan)) return Array.Empty<BattleUnitPlacement>();
-        IReadOnlyCollection<AxialHex> affected = spec.Shape == CardSpatialShape.Line
+        IReadOnlyCollection<AxialHex> affected = spec.Shape == CardSpatialShape.Line || UsesWeaponGeometry(spec) && WeaponIsRay
             ? GetAffectedCells(cardId, target)
-            : BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
+            : BattleRangeResolver.ResolveAffectedCells(Selected.Coord, target, EffectiveSpec(spec)).Where(Board.Cells.ContainsKey).ToArray();
         return affected.Select(Occupancy.At).Where(x => x != null && x.Presence == BattlefieldPresence.Active && x.Role == Selected.Role).ToArray();
     }
 
@@ -1179,9 +1314,14 @@ public sealed partial class BattlefieldSession : IDisposable
             case CardSpatialShape.Fan:
             {
                 if (!GetCastCandidates(cardId).Contains(target)) { error = "超出卡牌射程或被单位/障碍阻挡。"; return false; }
-                var affected = spec.Shape == CardSpatialShape.Line
+                bool rayAimed = UsesWeaponGeometry(spec) && WeaponIsRay;
+                bool thrustApplies = spec.AttackMode == WeaponAttackMode.Thrust && CardModeApplies(spec);
+                var affected = spec.Shape == CardSpatialShape.Line || rayAimed
                     ? GetAffectedCells(cardId, target)
                     : BattleRangeResolver.ResolveAffectedCells(p.Coord, target, spec).Where(Board.Cells.ContainsKey).ToArray();
+                // 远程直线武器：弹道表现走满整条射线（打空也飞到射程末端或被障碍挡住处），命中处就是射线末端。
+                IReadOnlyList<AxialHex> rayTrace = rayAimed ? GetAttackTraceCells(cardId, target).ToArray() : null;
+                AxialHex presentationCenter = rayTrace is { Count: > 0 } ? rayTrace[^1] : target;
                 var affectedTargets = new List<BattleUnitPlacement>();
                 var seen = new HashSet<int>();
                 foreach (var cell in affected)
@@ -1193,7 +1333,7 @@ public sealed partial class BattlefieldSession : IDisposable
                 // 目标格只需在射程内即可（无论其中是否存在单位）；无敌人时传入 null 目标并让效果层跳过空目标。
                 BattleUnitPlacement selected = Occupancy.At(target);
                 if (selected == null || !affectedTargets.Contains(selected)) selected = affectedTargets.FirstOrDefault();
-                if (affectedTargets.Count == 0 && spec.AttackMode == WeaponAttackMode.Thrust)
+                if (affectedTargets.Count == 0 && thrustApplies)
                 {
                     AxialHex endpoint = affected.LastOrDefault();
                     if (endpoint == default) endpoint = target;
@@ -1201,17 +1341,16 @@ public sealed partial class BattlefieldSession : IDisposable
                         endpoint, WeaponAttackMode.Thrust, 0, 0, false, AffectedCells: affected,
                         Direction: BattleRangeResolver.PickLineDirection(p.Coord, target)));
                     FinalizeNoTargetSpatialCard(p, handCard, actualCost);
-                    ExecuteDash(p, target, spec);
+                    ExecuteDash(p, target, spec, Math.Max(1, CurrentAttackRange));
                     return true;
                 }
 
                 bool applied = ApplyCardThroughExistingPipeline(p, handCard, selected, affectedTargets, actualCost, out error,
-                    affectedCells: affected, presentationCenter: target);
-                if (applied && spec.AttackMode == WeaponAttackMode.Thrust && !IsFinished)
+                    affectedCells: rayTrace ?? affected, presentationCenter: presentationCenter);
+                if (applied && thrustApplies && !IsFinished)
                 {
-                    AxialHex? blockedTarget = selected?.Coord;
                     if (selected != null) TryApplyThrustKnockback(p, selected, selected.Coord);
-                    ExecuteDash(p, target, spec, blockedTarget);
+                    ExecuteDash(p, target, spec, Math.Max(1, CurrentAttackRange), selected);
                 }
                 return applied;
             }
@@ -1303,15 +1442,19 @@ public sealed partial class BattlefieldSession : IDisposable
         Message?.Invoke($"{source.Name} 打出 {card.CardName}，该方向没有敌人，伤害落空。消耗 {cost} 能量。");
     }
 
-    private void ExecuteDash(BattleUnitPlacement source, AxialHex target, CardSpatialSpec spec, AxialHex? blockedTarget = null)
+    /// <summary>突刺的位移部分：沿选定方向直线前进，直到用完**卡牌规定的位移格数**
+    /// （与每回合移动次数无关，也不消耗移动额度），或前方目标已经落在**攻击范围**内。
+    /// 击退攻击由调用方单独结算：角色在位移结束后保持不动，把目标击退一格。</summary>
+    private void ExecuteDash(BattleUnitPlacement source, AxialHex target, CardSpatialSpec spec,
+        int attackRange, BattleUnitPlacement victim = null)
     {
         AxialHex direction = BattleRangeResolver.PickLineDirection(source.Coord, target);
-        int requested = Math.Min(Math.Max(1, spec.Length), AxialHex.Distance(source.Coord, target));
+        int requested = Math.Max(1, spec.MaxRange);   // 位移格数 = 卡牌规定，不由点击距离或每回合移动额度决定
         int moved = 0;
         for (int i = 0; i < requested; i++)
         {
+            if (victim != null && AxialHex.Distance(source.Coord, victim.Coord) <= attackRange) break;
             AxialHex next = new AxialHex(source.Coord.Q + direction.Q, source.Coord.R + direction.R);
-            if (blockedTarget.HasValue && next == blockedTarget.Value) break;
             if (!Movement.TryMoveWithoutPlayerCost(source.UnitId, next, out _)) break;
             moved++;
             if (source.Presence != BattlefieldPresence.Active || source.Unit.HP <= 0) break;

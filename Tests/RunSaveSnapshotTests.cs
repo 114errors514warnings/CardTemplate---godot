@@ -47,6 +47,8 @@ public class RunSaveSnapshotTests
 		data.Items[201] = 1;
 		data.Equipment[301] = 1;
 		data.SettlementClaimedRewardKeys.Add("1:Gold:0:50");
+		data.StolenGoldFromMonsters.Add(new StolenGoldEntry { InstanceId = "F1-006-M01", MonsterId = 3115, Amount = 4 });
+		data.StolenGoldFromMonsters.Add(new StolenGoldEntry { InstanceId = "F1-006-M02", MonsterId = 3115, Amount = 1 });
         return data;
     }
 
@@ -68,6 +70,19 @@ public class RunSaveSnapshotTests
         Assert.Equal(2, restored.CharacterSlots.Count);
         Assert.Equal(23, restored.CharacterSlots[0].CurrentHp);
         Assert.Equal(30, restored.CharacterSlots[0].MaxHp);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesStolenGoldLedgerPerMonsterInstance()
+    {
+        RunSaveData restored = RunSaveJson.Deserialize(RunSaveJson.Serialize(BuildSampleData()));
+
+        Assert.Equal(2, restored.StolenGoldFromMonsters.Count);
+        Assert.Equal("F1-006-M01", restored.StolenGoldFromMonsters[0].InstanceId);
+        Assert.Equal(3115, restored.StolenGoldFromMonsters[0].MonsterId);
+        Assert.Equal(4, restored.StolenGoldFromMonsters[0].Amount);
+        Assert.Equal("F1-006-M02", restored.StolenGoldFromMonsters[1].InstanceId);
+        Assert.Equal(1, restored.StolenGoldFromMonsters[1].Amount);
     }
 
     [Fact]

@@ -11,6 +11,7 @@ public partial class MainMenuScene : Control
 	public const string RunFlowScenePath = "res://Scenes/Run/RunFlowScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
+	public const string AnimationMaterialTestScenePath = "res://Scenes/Debug/AnimationMaterialTestScene.tscn";
 
 	private VBoxContainer buttonBox;
 	private Button startButton;
@@ -121,6 +122,9 @@ public partial class MainMenuScene : Control
 			Button storyButton = CreateMenuButton("剧情模式");
 			storyButton.Pressed += OnStoryModePressed;
 		}
+
+		Button animationMaterialTestButton = CreateMenuButton("动画素材测试");
+		animationMaterialTestButton.Pressed += () => GetTree().ChangeSceneToFile(AnimationMaterialTestScenePath);
 
 		Button exitButton = CreateMenuButton("退出");
 		exitButton.Pressed += () => GetTree().Quit();

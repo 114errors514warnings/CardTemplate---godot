@@ -96,6 +96,7 @@ namespace CardSimulator
 		BattleCardBlocked = 18,    // 禁止打出战斗牌（回合始移除）
 		DrawLock = 19,             // 战术支援：本回合不能再抽牌
 		NextBattleCardFree = 20,   // 统一战线：下一张战斗牌免费
+		Steal = 21,                // 窃取：怪物自身状态，层数 = 每次攻击窃取的金币数（机制待接入）
 	}
 
 	/// <summary>TurnStartEffect 状态下，回合开始时获得的资源类型</summary>

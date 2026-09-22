@@ -100,6 +100,8 @@ public partial class HexBattleScene : Control
     [Export] public string StoryEventId = "";
     [Export] public string StoryMapId = "";
     [Export] public bool ShowBuiltInResult = true;
+    /// <summary>`--battlefield-smoke` 专用夹具地图：3 人 + 6 怪 + (-1,0) 拾取物，见 `DataBase/Battlefield/FoundationMap.json`。</summary>
+    private const string SmokeFixtureMapPath = "res://DataBase/Battlefield/FoundationMap.json";
     /// <summary>事件选项请求进入战斗时的关卡 Id；为空表示事件结束后直接返回地图。</summary>
     public string PendingStoryBattleLevelId { get; private set; } = string.Empty;
     public event Action<BattlefieldSession> BattleReady;
@@ -117,10 +119,13 @@ public partial class HexBattleScene : Control
         {
             LoadingSystem.EnsureAllDataLoaded();
             BattleLevelConfig level = null;
+            // 烟测夹具：`--battlefield-smoke` 固定加载专用测试地图（3 人 + 6 怪 + (-1,0) 拾取物），
+            // 不再借用正式地图，避免正式地图改版把场景内集成烟测打断。
+            bool useSmokeFixture = OS.GetCmdlineUserArgs().Contains("--battlefield-smoke");
             // There is no standalone test battlefield in the shipped menu; use the first formal map as the safe fallback.
-            string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
-            if (!string.IsNullOrWhiteSpace(StoryMapId)) path = BattleLevelCatalog.ResolveMapPath(StoryMapId);
-            else if (UseRunSession && !string.IsNullOrWhiteSpace(RunSession.Instance?.Current?.PendingLevelId))
+            string path = useSmokeFixture ? SmokeFixtureMapPath : BattleLevelCatalog.ResolveMapPath("M-F1-001");
+            if (!useSmokeFixture && !string.IsNullOrWhiteSpace(StoryMapId)) path = BattleLevelCatalog.ResolveMapPath(StoryMapId);
+            else if (!useSmokeFixture && UseRunSession && !string.IsNullOrWhiteSpace(RunSession.Instance?.Current?.PendingLevelId))
             {
                 level = BattleLevelCatalog.Load(RunSession.Instance.Current.PendingLevelId);
                 path = BattleLevelCatalog.ResolveMapPath(level.MapId);
@@ -128,8 +133,8 @@ public partial class HexBattleScene : Control
             using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
             if (file == null) throw new InvalidOperationException($"无法打开战场 JSON：{path}");
             BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
-            if (!string.IsNullOrWhiteSpace(StoryEventId)) ConfigureEventDefinition(definition);
-            else if (UseRunSession) ConfigureRunDefinition(definition, level);
+            if (!useSmokeFixture && !string.IsNullOrWhiteSpace(StoryEventId)) ConfigureEventDefinition(definition);
+            else if (!useSmokeFixture && UseRunSession) ConfigureRunDefinition(definition, level);
             Session = new BattlefieldSession(definition);
             if (UseRunSession) Session.RestoreRunState(RunSession.Instance.Current.CharacterSlots, RunSession.Instance.Current.DeckSlots);
             Session.Changed += RefreshHud;
@@ -137,6 +142,7 @@ public partial class HexBattleScene : Control
             if (ShowBuiltInResult) Session.Finished += ShowResult;
             Session.Finished += outcome => BattleFinished?.Invoke(outcome);
             MapView.Bind(Session);
+            Session.MonsterHitPlayer += OnMonsterHitPlayer;
             MapView.HoverDetails += ShowTooltip;
             MapView.PointerPressed += OnMovePointerPressed;
             MapView.PointerDragged += OnMovePointerDragged;
@@ -195,9 +201,7 @@ public partial class HexBattleScene : Control
         definition.PlayerCharacterIds = run.Current.CharacterSlots.Select(x => x.CharacterId).ToList();
         if (level != null)
         {
-            var monsters = level.Objects.Where(x => x.ObjectType == "Monster").ToList();
-            definition.MonsterIds = monsters.Select(x => int.Parse(x.DefinitionId)).ToList();
-            definition.FixedEnemySpawnCoords = monsters.Select(x => new HexCoordinateData { Q = x.Q, R = x.R }).ToList();
+            BattleLevelCatalog.ApplyMonstersTo(definition, level);
             definition.ObjectPlacements.Clear(); definition.RandomItemCount = 0; definition.RandomItemDefinitions.Clear();
         }
         else definition.MonsterIds = run.PendingEncounter.MonsterIds.ToList();
@@ -228,7 +232,36 @@ public partial class HexBattleScene : Control
         return panel;
     }
 
-    private void OpenStoryTest() => OpenStoryEvent("EVT-F1-001");
+    private void OpenStoryTest()
+    {
+        GD.Print("STORY_SMOKE: 打开 EVT-F1-001（headless 下会在自检后自动退出）");
+        OpenStoryEvent("EVT-F1-001");
+        // 无窗口时 `--story-smoke` 没有可视意义：自检剧情浮层与背景图加载后退出，作为命令行回归入口。
+        if (DisplayServer.GetName() == "headless") CallDeferred(nameof(FinishHeadlessStorySmoke));
+    }
+
+    private async void FinishHeadlessStorySmoke()
+    {
+        // 等剧情浮层完成首帧布局：过早 Quit 会被主循环忽略，导致进程挂着不退出。
+        await ToSignal(GetTree().CreateTimer(0.75), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"STORY_SMOKE: 浮层={(ActiveStoryOverlay != null)} 背景图={(ActiveStoryOverlay?.HasBackgroundTexture ?? false)}");
+        if (ActiveStoryOverlay == null || !GodotObject.IsInstanceValid(ActiveStoryOverlay))
+        {
+            GD.PrintErr("STORY_SMOKE_FAIL: 剧情浮层未创建（EVT-F1-001）");
+            GetTree().Quit(1);
+            return;
+        }
+
+        if (!ActiveStoryOverlay.HasBackgroundTexture)
+        {
+            GD.PrintErr("STORY_SMOKE_FAIL: 剧情背景图未加载（Resources/Images/UI/Story/Backgrounds/bg_night_road.png）");
+            GetTree().Quit(1);
+            return;
+        }
+
+        GD.Print("STORY_SMOKE_PASS: EVT-F1-001 剧情浮层已打开，背景图 Resources/Images/UI/Story/Backgrounds/bg_night_road.png 加载成功");
+        GetTree().Quit();
+    }
     public void OpenStoryEvent(string eventId)
     {
         if (Session == null) return;
@@ -1065,6 +1098,24 @@ public partial class HexBattleScene : Control
         tooltip.Position = new Vector2(Math.Clamp(screenPosition.X + 16, 0, Math.Max(0, Size.X - 330)),
             Math.Clamp(screenPosition.Y + 16, 0, Math.Max(0, Size.Y - Math.Max(tooltip.Size.Y, 200))));
     }
+    /// <summary>怪物攻击命中玩家：按该怪物的 `StateType.Steal` 层数窃取局内金币（金币不足不扣），
+    /// 记账写入存档（`StolenGoldEntry{InstanceId,MonsterId,Amount}`，按怪物实例分开），供胜利结算按"该实例是否被击杀"返还。</summary>
+    private void OnMonsterHitPlayer(BattleUnitPlacement attacker, BattleUnitPlacement victim)
+    {
+        if (!UseRunSession || RunSession.Instance?.Current == null) return;
+        if (attacker?.Unit is not MonsterInstance monster) return;
+        if (!StateSystem.TryGetStateStacks(attacker.Unit, StateType.Steal, out int perAttack) || perAttack <= 0) return;
+
+        RunSaveData run = RunSession.Instance.Current;
+        // 按实例记账：同一 MonsterId 的多只怪物各记一条，结算时只返还被击杀的那只的份。
+        string instanceKey = Session.GetMonsterInstanceKey(attacker.UnitId);
+        int stolen = RunGoldLedger.Steal(run, instanceKey, monster.id, perAttack);
+        if (stolen > 0) RunSession.Instance.Save();
+        ShowMessage(stolen > 0
+            ? $"{attacker.Name} 窃取了 {stolen} 金币（剩余 {run.Gold}）；击杀它可在结算时追回。"
+            : $"{attacker.Name} 想窃取 {perAttack} 金币，但你的金币不足，未被扣。");
+    }
+
     private void CancelPendingCast()
     {
         if (draggedItem != null) { CancelItemDrag(); ShowMessage("已取消使用道具。"); return; }
@@ -1730,6 +1781,7 @@ public partial class HexBattleScene : Control
         if (GetTree() != null) GetTree().Paused = false;
         if (Session == null) return;
         Session.Changed -= RefreshHud; Session.Message -= ShowMessage;
+        Session.MonsterHitPlayer -= OnMonsterHitPlayer;
         Session.Finished -= ShowResult;
         MapView.HoverDetails -= ShowTooltip;
         MapView.PointerPressed -= OnMovePointerPressed;

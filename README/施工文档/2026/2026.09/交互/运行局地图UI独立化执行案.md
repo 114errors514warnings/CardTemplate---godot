@@ -43,7 +43,7 @@ RunFlowScene
 - `RunFlowScene` 是新局、继续游戏后的唯一运行局入口。
 - `ContentHost` 同时最多有一个内容实例。
 - `WorldMapOverlay` 不负责金币、角色、暂停、调试或内容按钮；这些信息继续由当前内容的局内 UI 显示。
-- 地图视觉参考：`Images/UI/Map/world-map-ui-reference.png`。
+- 地图视觉参考：`Resources/Images/UI/Map/world-map-ui-reference.png`。
 
 ## 三、地图 UI 状态
 

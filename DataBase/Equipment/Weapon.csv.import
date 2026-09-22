@@ -6,10 +6,10 @@ uid="uid://c0bp8mif87jne"
 
 [deps]
 
-files=["res://DataBase/Equipment/Weapon.DefinitionId.translation", "res://DataBase/Equipment/Weapon.HandsRequired.translation", "res://DataBase/Equipment/Weapon.AttackMode.translation", "res://DataBase/Equipment/Weapon.AttackRange.translation", "res://DataBase/Equipment/Weapon.DefenseValue.translation", "res://DataBase/Equipment/Weapon.DamageBonus.translation", "res://DataBase/Equipment/Weapon.MoveBonus.translation", "res://DataBase/Equipment/Weapon.ResourceCost.translation", "res://DataBase/Equipment/Weapon.BlocksDefenseShield.translation"]
+files=["res://DataBase/Equipment/Weapon.DefinitionId.translation", "res://DataBase/Equipment/Weapon.HandsRequired.translation", "res://DataBase/Equipment/Weapon.AttackMode.translation", "res://DataBase/Equipment/Weapon.AttackRange.translation", "res://DataBase/Equipment/Weapon.DefenseValue.translation", "res://DataBase/Equipment/Weapon.DamageBonus.translation", "res://DataBase/Equipment/Weapon.MoveBonus.translation", "res://DataBase/Equipment/Weapon.ResourceCost.translation", "res://DataBase/Equipment/Weapon.BlocksDefenseShield.translation", "res://DataBase/Equipment/Weapon.EquipmentType.translation"]
 
 source_file="res://DataBase/Equipment/Weapon.csv"
-dest_files=["res://DataBase/Equipment/Weapon.DefinitionId.translation", "res://DataBase/Equipment/Weapon.HandsRequired.translation", "res://DataBase/Equipment/Weapon.AttackMode.translation", "res://DataBase/Equipment/Weapon.AttackRange.translation", "res://DataBase/Equipment/Weapon.DefenseValue.translation", "res://DataBase/Equipment/Weapon.DamageBonus.translation", "res://DataBase/Equipment/Weapon.MoveBonus.translation", "res://DataBase/Equipment/Weapon.ResourceCost.translation", "res://DataBase/Equipment/Weapon.BlocksDefenseShield.translation"]
+dest_files=["res://DataBase/Equipment/Weapon.DefinitionId.translation", "res://DataBase/Equipment/Weapon.HandsRequired.translation", "res://DataBase/Equipment/Weapon.AttackMode.translation", "res://DataBase/Equipment/Weapon.AttackRange.translation", "res://DataBase/Equipment/Weapon.DefenseValue.translation", "res://DataBase/Equipment/Weapon.DamageBonus.translation", "res://DataBase/Equipment/Weapon.MoveBonus.translation", "res://DataBase/Equipment/Weapon.ResourceCost.translation", "res://DataBase/Equipment/Weapon.BlocksDefenseShield.translation", "res://DataBase/Equipment/Weapon.EquipmentType.translation"]
 
 [params]
 

@@ -9,9 +9,12 @@ public partial class LoadStateCsv : Node
 	/// <summary>
 	/// CSV 列定义（按顺序）：
 	/// [0] StateType, [1] Name, [2] IsStackable, [3] IsDebuff, [4] IsElite,
-	/// [5] DecayTiming, [6] DecayMode, [7] StacksToRemove, [8] EffectDescription
+	/// [5] DecayTiming, [6] DecayMode, [7] StacksToRemove, [8] EffectDescription, [9] EnumName
+	/// [9] EnumName 记录该行对应的 `StateType` 枚举名（如 `Steal`）；留空时按数字列自动取枚举名，
+	/// 填写时必须与 [0] 的数字一致，否则整行报错丢弃。
 	/// </summary>
 	private const int MinFieldCount = 5;
+	private const int EnumNameFieldIndex = 9;
 
 	public static StateDefinition[] LoadStatesFromCSV(string filePath)
 	{
@@ -118,6 +121,18 @@ public partial class LoadStateCsv : Node
 
 			string effectDescription = fields.Length > 8 ? fields[8] : string.Empty;
 
+			// EnumName（第 10 列，可空）：记录该行对应的枚举名，供人查阅并校验"名字 ↔ 数字"一致。
+			string enumName = fields.Length > EnumNameFieldIndex ? (fields[EnumNameFieldIndex] ?? string.Empty).Trim() : string.Empty;
+			if (enumName.Length > 0 && !StateTypeNames.Matches(stateType, enumName))
+			{
+				string detail = StateTypeNames.TryParse(enumName, out StateType named)
+					? $"枚举名 {enumName} 对应 {(int)named}，与 StateType 列 {rawStateType} 不一致"
+					: $"EnumName 不是已定义的 StateType 枚举名：{enumName}";
+				GD.PrintErr($"State CSV EnumName mismatch: {detail}；该行已跳过。行内容：{line}");
+				return null;
+			}
+			if (enumName.Length == 0) enumName = StateTypeNames.NameOf(stateType);
+
 			return new StateDefinition(
 				stateType,
 				fields[1],
@@ -127,7 +142,8 @@ public partial class LoadStateCsv : Node
 				stacksToRemove,
 				isDebuff,
 				isElite,
-				effectDescription);
+				effectDescription,
+				enumName);
 		}
 		catch (Exception ex)
 		{

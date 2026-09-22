@@ -1,3 +1,3 @@
 MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra
-M-F1-001,2001,HighRiskCombat,High,F1-H-001-M01,Monster,3105,-1,-4,None,None,None
-M-F1-001,2001,HighRiskCombat,High,F1-H-001-M02,Monster,3105,1,-4,None,None,None
+M-F1-001,2001,HighRiskCombat,High,F1-H-001-M01,Monster,3107,-1,-4,None,None,None
+M-F1-001,2001,HighRiskCombat,High,F1-H-001-M02,Monster,3107,1,-4,None,None,None

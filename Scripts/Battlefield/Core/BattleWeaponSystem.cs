@@ -8,12 +8,22 @@ namespace CardSimulator.Battlefield;
 /// <summary>Weapon default attack modes. CSV uses these enum names exactly.</summary>
 public enum WeaponAttackMode { AdjacentSingle, MeleeLine, Fan, Ring, ThrowSingle, RangedLine, Thrust }
 
+/// <summary>
+/// 装备类型：近战武器 / 远程武器 / 防具。它只用于回答一个问题——**卡牌声明的特殊攻击方式能否生效**：
+/// 卡牌的特殊方式属于近战型时只有近战武器才能让它生效，远程型同理；不满足就回落到武器自身的攻击方式。
+/// </summary>
+public enum EquipmentType { Melee, Ranged, Armor }
+
 /// <summary>Battlefield-only weapon rules. Card ranges consume AttackRange, while normal attacks consume Mode.</summary>
 public sealed record WeaponAttackSpec(string DefinitionId, int AttackRange, int HandsRequired,
     WeaponAttackMode Mode, int DefenseValue, int DamageBonus = 0, int MoveBonus = 0, int ResourceCost = 0,
-    bool BlocksDefenseShield = false)
+    bool BlocksDefenseShield = false, EquipmentType Type = EquipmentType.Melee)
 {
     public static readonly WeaponAttackSpec Unarmed = new("unarmed", 1, 0, WeaponAttackMode.AdjacentSingle, 0, 0);
+
+    /// <summary>未显式配置 <see cref="EquipmentType"/> 时的兜底：远程直线与投掷算远程，其余算近战。</summary>
+    public static EquipmentType DeriveType(WeaponAttackMode mode) =>
+        mode is WeaponAttackMode.RangedLine or WeaponAttackMode.ThrowSingle ? EquipmentType.Ranged : EquipmentType.Melee;
 }
 
 public static class BattleWeaponCatalog
@@ -44,7 +54,15 @@ public static class BattleWeaponCatalog
             bool blocksDefenseShield = fields.Length >= 10 && bool.TryParse(fields[9], out bool parsedBlocks) && parsedBlocks;
             if (fields.Length >= 10 && !bool.TryParse(fields[9], out _))
                 throw new ArgumentException($"武器 CSV 的 BlocksDefenseShield 必须为 true 或 false：{line}");
-            if (!loaded.TryAdd(fields[1], new WeaponAttackSpec(fields[1], range, hands, mode, defense, damage, moveBonus, resourceCost, blocksDefenseShield)))
+            // EquipmentType（近战 / 远程 / 防具）：缺省时按 AttackMode 推导，保证旧数据与地图内联装备仍然可用。
+            EquipmentType equipmentType = WeaponAttackSpec.DeriveType(mode);
+            if (fields.Length >= 11 && !string.IsNullOrWhiteSpace(fields[10]))
+            {
+                string rawType = fields[10].Trim();
+                if (int.TryParse(rawType, out _) || !Enum.TryParse(rawType, true, out equipmentType) || !Enum.IsDefined(equipmentType))
+                    throw new ArgumentException($"武器 CSV 的 EquipmentType 必须是 Melee / Ranged / Armor：{line}");
+            }
+            if (!loaded.TryAdd(fields[1], new WeaponAttackSpec(fields[1], range, hands, mode, defense, damage, moveBonus, resourceCost, blocksDefenseShield, equipmentType)))
                 throw new ArgumentException($"武器 DefinitionId 重复：{fields[1]}");
         }
         specs = loaded; return specs;

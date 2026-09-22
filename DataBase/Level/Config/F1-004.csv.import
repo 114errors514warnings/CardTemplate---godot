@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://c3w4pppj3msbl"
+
+[deps]
+
+files=["res://DataBase/Level/Config/F1-004.DropTableId.translation", "res://DataBase/Level/Config/F1-004.LevelType.translation", "res://DataBase/Level/Config/F1-004.Difficulty.translation", "res://DataBase/Level/Config/F1-004.InstanceId.translation", "res://DataBase/Level/Config/F1-004.ObjectType.translation", "res://DataBase/Level/Config/F1-004.DefinitionId.translation", "res://DataBase/Level/Config/F1-004.Q.translation", "res://DataBase/Level/Config/F1-004.R.translation", "res://DataBase/Level/Config/F1-004.Facing.translation", "res://DataBase/Level/Config/F1-004.en.translation", "res://DataBase/Level/Config/F1-004.en.translation"]
+
+source_file="res://DataBase/Level/Config/F1-004.csv"
+dest_files=["res://DataBase/Level/Config/F1-004.DropTableId.translation", "res://DataBase/Level/Config/F1-004.LevelType.translation", "res://DataBase/Level/Config/F1-004.Difficulty.translation", "res://DataBase/Level/Config/F1-004.InstanceId.translation", "res://DataBase/Level/Config/F1-004.ObjectType.translation", "res://DataBase/Level/Config/F1-004.DefinitionId.translation", "res://DataBase/Level/Config/F1-004.Q.translation", "res://DataBase/Level/Config/F1-004.R.translation", "res://DataBase/Level/Config/F1-004.Facing.translation", "res://DataBase/Level/Config/F1-004.en.translation", "res://DataBase/Level/Config/F1-004.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
