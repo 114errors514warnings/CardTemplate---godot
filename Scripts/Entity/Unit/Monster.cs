@@ -6,16 +6,24 @@ public class Monster : Unit
 {
     public int[][][] Table { get; private set; }
 
-    public Monster(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int[][][] table = null)
+    /// <summary>
+    /// 是否为爪牙（数据来源：`DataBase/Unit/Monster.csv` 的 `IsMinion` 列，缺列时为 false）。
+    /// 爪牙不属于默认通关必杀目标，也不计入非生存关卡的战利品价值比例（玩法 §7.4 / §7.5）。
+    /// </summary>
+    public bool IsMinion { get; private set; }
+
+    public Monster(int id, string Name, int MAX_HP, int Ini_Attack, int Ini_Defend, int[][][] table = null, bool isMinion = false)
         : base(id, Name, MAX_HP, Ini_Attack, Ini_Defend)
     {
         Table = CloneTable(table);
+        IsMinion = isMinion;
     }
 
     public Monster(Monster m)
         : base(m)
     {
         Table = CloneTable(m.Table);
+        IsMinion = m.IsMinion;
     }
 
     protected static int[][] CloneIntention(int[][] source)

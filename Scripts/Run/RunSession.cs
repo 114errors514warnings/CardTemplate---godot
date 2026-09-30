@@ -61,7 +61,6 @@ public partial class RunSession : Node
 				Seed = seed ?? new Random().Next(),
 				LayoutVersion = 1,
 				CurrentNodeId = -1,
-				NormalEncounterIndex = 0,
 				TimePoints = 0,
 			},
 		};
@@ -137,6 +136,9 @@ public partial class RunSession : Node
 					return false;
 				}
 
+				MigrateSettlementCompat(data);
+				// P2-11：旧档遗留的全局普通敌袭计数按当前层归入（新档该字段恒为 0，此调用无副作用）。
+				data.MapState.MigrateLegacyNormalEncounterCount();
 				Current = data;
 				GD.Print($"[RunSession] 已读取存档：角色 {Current.CharacterSlots.Count}，当前位置 {Current.MapState.CurrentNodeId}。");
 				return true;
@@ -282,13 +284,16 @@ public partial class RunSession : Node
 		Save();
 	}
 
-	public void BeginRunEvent(string eventId, int sourceNodeId)
+	/// <summary>进入事件节点：置内容为 Event 并落档；`sourceNodeType` = 来源节点类型（商人 / 普通事件 / 危险事件），供非战斗来源发卡的结算来源与放弃日志使用（§5.7）。
+	/// </summary>
+	public void BeginRunEvent(string eventId, int sourceNodeId, MapNodeType sourceNodeType = MapNodeType.Empty)
 	{
 		if (Current == null || string.IsNullOrWhiteSpace(eventId)) return;
 		Current.GameMode = RunGameModes.InBattleStart;
 		Current.PendingContentType = "Event";
 		Current.PendingContentId = eventId;
 		Current.PendingSourceNodeId = sourceNodeId;
+		Current.PendingSourceNodeType = (int)sourceNodeType;
 		Save();
 	}
 
@@ -298,6 +303,7 @@ public partial class RunSession : Node
 		MarkCurrentNodeVisitedAndAdvanceEncounter();
 		Current.GameMode = RunGameModes.OnMap;
 		Current.PendingContentType = string.Empty; Current.PendingContentId = string.Empty; Current.PendingSourceNodeId = -1;
+		Current.PendingSourceNodeType = 0;
 		Save();
 	}
 
@@ -322,7 +328,7 @@ public partial class RunSession : Node
 	}
 
 	/// <summary>战斗胜利、结算弹出前调用：落盘“胜利未领奖”存档，保证重进重现同款结算。</summary>
-	public void EnterSettlement(string encounterName, int dropTableId, IReadOnlyList<int> candidateCardIds)
+	public void EnterSettlement(SettlementStartRequest request)
 	{
 		if (Current == null)
 		{
@@ -330,10 +336,21 @@ public partial class RunSession : Node
 		}
 
 		Current.GameMode = RunGameModes.InSettlement;
-		Current.SettlementEncounterName = encounterName ?? string.Empty;
-		Current.SettlementDropTableId = dropTableId;
-		Current.SettlementCandidateCardIds = candidateCardIds == null ? new List<int>() : new List<int>(candidateCardIds);
+		SettlementStartRequest start = request ?? new SettlementStartRequest();
+		Current.SettlementEncounterName = start.SourceName ?? string.Empty;
+		Current.SettlementSourceNodeType = (int)start.SourceNodeType;
+		Current.SettlementDropTableId = start.DropTableId;
+		Current.SettlementCardPools = start.CardPools == null
+			? new List<SettlementCardPoolSave>()
+			: new List<SettlementCardPoolSave>(start.CardPools);
+		Current.SettlementCandidateCardIds = new List<int>(); // 旧字段不再写入：只在读旧档时按「1 份」还原
+		Current.SettlementCardClaims = new List<SettlementCardClaimSave>();
 		Current.SettlementClaimedRewardKeys = new List<string>();
+		Current.SettlementPanelClosed = false;
+		Current.SettlementLossTier = start.LossTier;
+		Current.SettlementValueRatio = start.ValueRatio;
+		// 新一次结算 = 新一张战后战场：旧快照立即作废（事件 / 商人发卡结算不会有新快照）。
+		Current.PostBattleBattlefield = null;
 		Save();
 	}
 
@@ -349,6 +366,12 @@ public partial class RunSession : Node
 		Current.SettlementEncounterName = string.Empty;
 		Current.SettlementDropTableId = 0;
 		Current.SettlementCandidateCardIds.Clear();
+		Current.SettlementCardPools.Clear();
+		Current.SettlementCardClaims.Clear();
+		Current.SettlementPanelClosed = false;
+		Current.SettlementSourceNodeType = 0;
+		Current.SettlementLossTier = 0;
+		Current.SettlementValueRatio = 1.0;
 		Current.SettlementClaimedRewardKeys.Clear();
 		Current.PendingEncounterLayer = string.Empty;
 		Current.PendingEncounterNodeType = 0;
@@ -356,8 +379,166 @@ public partial class RunSession : Node
 		Current.PendingDropTableId = 0;
 		Current.PendingLevelId = string.Empty;
 		Current.PendingMonsterIds.Clear();
+		Current.PostBattleBattlefield = null; // 结算完成 = 战后战场不再需要：位置落档的使命结束
 		ClearPendingEncounter();
 		Save();
+	}
+
+	// ── 结算未领取项：领取 / 关闭 / 放弃闸门（交互案 §四 §五 §6 §7） ──
+
+	/// <summary>物品 Tab 领取：立即入账 + 去重键落档；已领过返回 false（不重复发放）。</summary>
+	public bool TryClaimSettlementReward(string claimKey, DropTableEntry entry)
+	{
+		if (Current == null || entry == null || string.IsNullOrEmpty(claimKey))
+		{
+			return false;
+		}
+
+		if (Current.SettlementClaimedRewardKeys.Contains(claimKey))
+		{
+			return false;
+		}
+
+		BattleRewardPresenter.ApplyRewardEntryToRun(entry, Current);
+		Current.SettlementClaimedRewardKeys.Add(claimKey);
+		Save();
+		return true;
+	}
+
+	/// <summary>卡牌份领取：该份只能领一次、只能领一张；入组槽位取「份自带槽位」（旧档没有槽位时按卡池反查兜底）。</summary>
+	public bool TryClaimSettlementCard(int slotIndex, int cardId, out int ownerSlot)
+	{
+		ownerSlot = slotIndex;
+		if (Current == null || cardId <= 0 || SettlementRewardPresenter.FindCardClaim(Current, slotIndex) != null)
+		{
+			return false;
+		}
+
+		bool hasPool = false;
+		foreach (SettlementCardPoolSave pool in Current.SettlementCardPools)
+		{
+			if (pool != null && pool.SlotIndex == slotIndex)
+			{
+				hasPool = true;
+				break;
+			}
+		}
+
+		if (!hasPool)
+		{
+			return false;
+		}
+
+		if (ownerSlot < 0 || ownerSlot >= Current.CharacterSlots.Count)
+		{
+			ownerSlot = BattleRewardPresenter.FindOwningSlotIndex(Current, cardId);
+			if (ownerSlot < 0)
+			{
+				ownerSlot = 0;
+			}
+		}
+
+		AddCardToSlotDeck(ownerSlot, cardId, 0);
+		Current.SettlementCardClaims.Add(new SettlementCardClaimSave { SlotIndex = slotIndex, CardId = cardId });
+		Save();
+		return true;
+	}
+
+	/// <summary>
+	/// 战后布局落档（交互案 §七 4 改口径「位置落档」）：进入战后操作态时落一次，之后每次战后移动 / 拾取再落一次；
+	/// 读档重进结算界面时按它重建同一张战场（`RunBattleScene` 的 `InSettlement` 分支）。
+	/// </summary>
+	public void SavePostBattleBattlefield(RunPostBattleSave snapshot)
+	{
+		if (Current == null || snapshot == null)
+		{
+			return;
+		}
+
+		Current.PostBattleBattlefield = snapshot;
+		Save();
+	}
+
+	/// <summary>关闭 / 重新打开结算面板的落档标记（读档重进：true → 只显示待领取浮窗，不自动弹面板）。</summary>
+	public void SetSettlementPanelClosed(bool closed)
+	{
+		if (Current == null)
+		{
+			return;
+		}
+
+		Current.SettlementPanelClosed = closed;
+		Save();
+	}
+
+	/// <summary>放弃确认弹窗的「本局游戏内不再显示」勾选落档（本局有效；新局 / 放弃本局后重置）。</summary>
+	public void SetSuppressAbandonSettlementConfirm(bool suppress)
+	{
+		if (Current == null)
+		{
+			return;
+		}
+
+		Current.SuppressAbandonSettlementConfirm = suppress;
+		Save();
+	}
+
+	/// <summary>队伍槽位的角色显示名（交互案 §3.1 的唯一取名口）：同名按出现次序编号（重剑手 / 重剑手2）。</summary>
+	public string GetSlotDisplayName(int slotIndex)
+	{
+		if (Current == null || slotIndex < 0 || slotIndex >= Current.CharacterSlots.Count)
+		{
+			return "角色 ?";
+		}
+
+		List<int> characterIds = new List<int>();
+		foreach (RunCharacterSlotSave slot in Current.CharacterSlots)
+		{
+			characterIds.Add(slot.CharacterId);
+		}
+
+		return CharacterSlotNaming.GetDisplayName(characterIds, slotIndex, ResolveCharacterName);
+	}
+
+	/// <summary>槽位角色 Id → `Character.csv` 的 `Name`（统一取值见 LoadingSystem.GetCharacterName）；
+	/// 找不到返回空串，由 CharacterSlotNaming 兜底为「角色 {id}」。</summary>
+	private static string ResolveCharacterName(int characterId)
+	{
+		return LoadingSystem.GetCharacterName(characterId);
+	}
+
+	/// <summary>旧档兼容（交互案 §八）：只有单一 `SettlementCandidateCardIds` 的旧档按「1 份」还原到 `SettlementCardPools`。</summary>
+	private static void MigrateSettlementCompat(RunSaveData data)
+	{
+		if (data == null)
+		{
+			return;
+		}
+
+		if (data.SettlementCardPools == null)
+		{
+			data.SettlementCardPools = new List<SettlementCardPoolSave>();
+		}
+
+		if (data.SettlementCardClaims == null)
+		{
+			data.SettlementCardClaims = new List<SettlementCardClaimSave>();
+		}
+
+		if (data.SettlementCardPools.Count > 0
+			|| data.SettlementCandidateCardIds == null
+			|| data.SettlementCandidateCardIds.Count == 0)
+		{
+			return;
+		}
+
+		data.SettlementCardPools.Add(new SettlementCardPoolSave
+		{
+			SlotIndex = SettlementRewardPresenter.LegacySlotIndex,
+			CharacterId = 0,
+			CandidateCardIds = new List<int>(data.SettlementCandidateCardIds),
+		});
+		GD.Print($"[RunSession] 旧档结算候选按「1 份」还原：{data.SettlementCandidateCardIds.Count} 张候选。");
 	}
 
 	public void BeginPendingEncounter(string layer, StageEncounterRow row)

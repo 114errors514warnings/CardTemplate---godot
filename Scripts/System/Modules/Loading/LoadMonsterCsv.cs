@@ -13,35 +13,59 @@ public partial class LoadMonsterCsv : Node
 
 	/// <summary>
 	/// 从CSV文件加载所有怪物
-	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,Intention1...Intention10
+	/// CSV格式: id,Name,MAX_HP,Ini_Attack,Ini_Defend,Intention1...Intention10[,IsMinion]
 	/// </summary>
 	/// <param name="filePath">CSV文件路径</param>
 	/// <returns>怪物数组</returns>
 	public static Monster[] LoadMonstersFromCSV(string filePath)
 	{
-		string[] dataLines = LoadCsv.LoadCSVDataLines(filePath);
+		string[] allLines = LoadCsv.LoadCSVLines(filePath);
 
-		if (dataLines.Length == 0)
+		if (allLines.Length == 0)
 		{
 			GD.Print($"No monster data found in {filePath}");
 			return Array.Empty<Monster>();
 		}
 
-		List<Monster> monsterList = new List<Monster>();
+		Monster[] monsters = ParseMonstersFromLines(allLines);
+		GD.Print($"Successfully loaded {monsters.Length} monsters from {filePath}");
+		return monsters;
+	}
 
-		foreach (string line in dataLines)
+	/// <summary>
+	/// 解析整份怪物表（含表头）：跳过第一行，逐行解析为 `Monster`。
+	/// **`IsMinion`（是否为爪牙）列按表头列名定位**（列结构见 `MonsterCsvSchema`；位置无关，缺列时全部按非爪牙）；
+	/// 意图列仍按固定偏移解析（`Intention1..10` = 前五列之后的 10 列），因此新列请追加在意图列之后。
+	/// 除 CSV 拆列与失败告警外不做别的处理；纯 .NET 单测覆盖的是 `MonsterCsvSchema`（本类派生自 `Node`，测试工程未引用 GodotSharp），
+	/// 本类的整表解析由 Godot 侧 `--battlefield-smoke` 的 `VerifyMonsterTableColumns()` 覆盖。
+	/// </summary>
+	/// <param name="lines">CSV 全部行（第 0 行为表头）</param>
+	/// <returns>怪物数组；没有数据行时为空数组</returns>
+	public static Monster[] ParseMonstersFromLines(string[] lines)
+	{
+		if (lines == null || lines.Length <= 1)
 		{
-			if (string.IsNullOrWhiteSpace(line))
-				continue;
+			return Array.Empty<Monster>();
+		}
 
-			Monster monster = ParseMonsterFromCSVLine(line);
+		int isMinionColumnIndex = MonsterCsvSchema.ResolveIsMinionColumnIndex(LoadCsv.ParseCSVFields(lines[0]));
+
+		List<Monster> monsterList = new List<Monster>();
+		for (int lineIndex = 1; lineIndex < lines.Length; lineIndex++)
+		{
+			string line = lines[lineIndex];
+			if (string.IsNullOrWhiteSpace(line))
+			{
+				continue;
+			}
+
+			Monster monster = ParseMonsterFromCSVLine(line, isMinionColumnIndex);
 			if (monster != null)
 			{
 				monsterList.Add(monster);
 			}
 		}
 
-		GD.Print($"Successfully loaded {monsterList.Count} monsters from {filePath}");
 		return monsterList.ToArray();
 	}
 
@@ -49,8 +73,9 @@ public partial class LoadMonsterCsv : Node
 	/// 解析单个CSV行为怪物对象
 	/// </summary>
 	/// <param name="line">CSV行</param>
+	/// <param name="isMinionColumnIndex">`IsMinion` 列下标（-1 = 该表无此列，按非爪牙）</param>
 	/// <returns>解析后的怪物对象，失败返回null</returns>
-	private static Monster ParseMonsterFromCSVLine(string line)
+	public static Monster ParseMonsterFromCSVLine(string line, int isMinionColumnIndex = -1)
 	{
 		try
 		{
@@ -74,7 +99,13 @@ public partial class LoadMonsterCsv : Node
 				return null;
 			}
 
-			return new Monster(id, name, maxHp, iniAttack, iniDefend, table);
+			// 是否为爪牙：不属于必杀目标、不计入战利品价值比例（玩法 §7.4 / §7.5）。
+			if (!MonsterCsvSchema.TryParseIsMinion(fields, isMinionColumnIndex, out bool isMinion, out string minionError))
+			{
+				GD.PrintErr($"Monster CSV: {minionError}. Source: {line}");
+			}
+
+			return new Monster(id, name, maxHp, iniAttack, iniDefend, table, isMinion);
 		}
 		catch (Exception ex)
 		{

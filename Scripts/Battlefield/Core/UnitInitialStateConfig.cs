@@ -18,8 +18,10 @@ public sealed record UnitInitialState(int? Hp, IReadOnlyList<(StateType State, i
 /// - `State=&lt;StateType&gt;:&lt;层数&gt;`：初始状态，可重复出现并依次叠加；层数省略时按 1 层。
 /// `StateType` 可写枚举名（如 `Ignite`）或编号（与 `通用State.csv` 的 `StateType` 列一致，如 `3`）。
 /// **未定义的键不报错、也不会被丢弃**：原样保留在 <see cref="UnitInitialState.Extras"/> 里，供后续机制读取
-/// （例如关卡 `F1-006` 使用的 `窃取=1`）。已知键的值非法（HP 非正整数、层数 ≤0、StateType 不存在等）
+/// （例如 `SpawnTag=elite`）。已知键的值非法（HP 非正整数、层数 ≤0、StateType 不存在等）
 /// 或条目缺少 `=` 时抛错并带出原始文本——配置错误必须在开局就暴露，不能静默忽略。
+/// 当前只有 `ObjectType=Monster` 的行会被消费（`BattleLevelCatalog.ApplyMonstersTo` → 建怪时应用）。
+/// 说明文档：`README/功能说明文档/数据系统/数据配置/对象初始值.md`。
 /// </summary>
 public static class UnitInitialStateConfig
 {

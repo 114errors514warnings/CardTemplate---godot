@@ -7,14 +7,14 @@ using System.Collections.Generic;
 /// <summary>
 /// 窃取金币规则（2026-09-22 定，按实例分开）：
 /// 1) 怪物**每次攻击命中玩家**时，按其 `StateType.Steal` 层数偷取同额金币；
-/// 2) **金币不足则一分不扣**（不做部分扣除，也不会扣成负数）；
+/// 2) **余额不足时扣到归零**（可部分扣除：余额 1、窃取 3 → 扣 1；不会扣成负数；2026-09-26 口径）；
 /// 3) 每只怪物实例各记一条 <see cref="StolenGoldEntry"/>（`InstanceId` = 关卡对象实例 ID），
 ///    同一 `MonsterId` 的多只互不合并；
 /// 4) 结算时**只返还被击杀实例对应的那一条**，其余（存活的）不返还并清账。
 /// </summary>
 public static class RunGoldLedger
 {
-	/// <summary>按怪物实例偷取金币；不足或参数非法时返回 0 且不改动存档。</summary>
+	/// <summary>按怪物实例偷取金币，返回**实际扣款**；参数非法或余额已归零时返回 0 且不改动存档。</summary>
 	public static int Steal(RunSaveData run, string instanceId, int monsterId, int amount)
 	{
 		if (run == null || string.IsNullOrWhiteSpace(instanceId) || amount <= 0)
@@ -22,12 +22,14 @@ public static class RunGoldLedger
 			return 0;
 		}
 
-		if (run.Gold < amount)
+		// 口径（2026-09-26）：余额不足时**扣到归零**（部分扣除），而不是"一分不扣"。
+		int take = Math.Min(amount, run.Gold);
+		if (take <= 0)
 		{
 			return 0;
 		}
 
-		run.Gold -= amount;
+		run.Gold -= take;
 		StolenGoldEntry entry = Find(run, instanceId);
 		if (entry == null)
 		{
@@ -36,8 +38,8 @@ public static class RunGoldLedger
 		}
 
 		entry.MonsterId = monsterId;
-		entry.Amount += amount;
-		return amount;
+		entry.Amount += take;
+		return take;
 	}
 
 	/// <summary>结算返还：对每个"被击杀的怪物实例"返还其名下的记录并删除该条，返回实际返还总金币。</summary>

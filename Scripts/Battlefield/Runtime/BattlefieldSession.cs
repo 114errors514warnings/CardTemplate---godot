@@ -47,6 +47,16 @@ public sealed partial class BattlefieldSession : IDisposable
     public string GetMonsterInstanceKey(int unitId) =>
         monsterInstanceKeys.TryGetValue(unitId, out string key) ? key : string.Empty;
 
+    /// <summary>关卡级战斗规则实例（关卡 CSV 的 `BattleRule` 列解析而来）；为空 = 全部沿用现状。</summary>
+    private readonly IReadOnlyList<IBattleRule> battleRules = Array.Empty<IBattleRule>();
+    /// <summary>意图批次计数：第几个"怪物回合的意图批次"（从 1 开始；意图在上一怪物回合结束时准备）。</summary>
+    private int enemyIntentBatch;
+    /// <summary>怪物单位 → 累计命中玩家次数（含被护盾格挡），供战斗规则读取。</summary>
+    private readonly Dictionary<int, int> monsterHitPlayerCounts = new();
+
+    /// <summary>当前战斗挂载的规则（只读，供自检/调试）。</summary>
+    public IReadOnlyList<IBattleRule> Rules => battleRules;
+
     // 空间场景持有独立牌堆，但卡牌效果仍统一调用 Card.Apply / EffectSystem / StateSystem。
     private readonly Dictionary<int, List<Card>> drawPiles = new();
     private readonly Dictionary<int, List<Card>> discardPiles = new();
@@ -78,6 +88,7 @@ public sealed partial class BattlefieldSession : IDisposable
         public int EffectIndex;
         public int[][] Intention;
         public bool NeedsTargetInRange;
+        public bool FleeMode;
         public AxialHex LandingCell;
         public IReadOnlyList<AxialHex> PlannedPath;
         public AxialHex? AttackDirection;
@@ -320,7 +331,11 @@ public sealed partial class BattlefieldSession : IDisposable
             // 关卡 CSV 的 InitialValue：开局写入初始生命与初始状态（见 UnitInitialStateConfig）。
             string initialValue = i < definition.MonsterInitialValues.Count ? definition.MonsterInitialValues[i] : string.Empty;
             if (!string.IsNullOrWhiteSpace(initialValue))
-                UnitInitialStateConfig.Apply(monster, initialValue, $"{monster.Name}（{definition.MapId} 第 {i + 1} 只怪物）");
+            {
+                // 报错上下文写关卡 Id（没有关卡来源的纯地图路径退回 MapId）：同一张地图被多个关卡复用，只有 MapId 定位不到出错关卡。
+                string source = string.IsNullOrWhiteSpace(definition.LevelId) ? definition.MapId : definition.LevelId;
+                UnitInitialStateConfig.Apply(monster, initialValue, $"{monster.Name}（关卡 {source} 第 {i + 1} 只怪物）");
+            }
             Register(new BattleUnitPlacement(monster, monster.Name, BattlefieldRole.Enemy, 0), Generated.EnemyCoords[i]);
             // 怪物实例键：窃取金币等"按实例"记账的稳定标识（关卡 CSV 的 InstanceId）。
             string instanceKey = i < definition.MonsterInstanceIds.Count && !string.IsNullOrWhiteSpace(definition.MonsterInstanceIds[i])
@@ -330,6 +345,7 @@ public sealed partial class BattlefieldSession : IDisposable
         }
         SelectedId = PlayerIds[0];
         InitializeDecks();
+        battleRules = BattleRuleRegistry.Create(definition.Rules);
         PrepareEnemyIntentions();
         Occupancy.Changed += Notify;
         Board.CellChanged += OnCellChanged;
@@ -934,6 +950,180 @@ public sealed partial class BattlefieldSession : IDisposable
         Message?.Invoke("怪物回合开始。"); Notify();
     }
 
+    /// <summary>
+    /// 战后战场操作态的自由移动开关（新案 §四 / §五）：宿主在关闭结算面板后开启。
+    /// `Phase` 保持 `Victory`（`IsFinished` 仍为 true → 出牌 / 攻击 / `EndCurrentTurn` / 常规 `TryMove` 继续拒绝），
+    /// 只有移动服务的「非玩家阶段」校验被放开；实际移动走 <see cref="BattleMovementService.TryMoveWithoutPlayerCost"/>
+    /// （本就不扣能量、不扣回合移动次数）。
+    /// </summary>
+    public bool IsPostBattleFreeMove { get; private set; }
+
+    /// <summary>进入战后自由移动：只在胜负已定（结算已存在）后成立，未结束的战斗一律拒绝。</summary>
+    public bool EnterPostBattleFreeMove()
+    {
+        if (!IsFinished) return false;
+        IsPostBattleFreeMove = true;
+        Movement.PlayerTurn = true;
+        Notify();
+        return true;
+    }
+
+    /// <summary>退出战后自由移动（战场即将销毁 / 内容收起时收敛，恢复胜负已定的常规校验）。</summary>
+    public void ExitPostBattleFreeMove()
+    {
+        if (!IsPostBattleFreeMove) return;
+        IsPostBattleFreeMove = false;
+        Movement.PlayerTurn = false;
+        Notify();
+    }
+
+    /// <summary>
+    /// 战后自由移动（新案 §五）：沿最短合法路径走到目标格，**不消耗能量与移动次数**，可反复调用。
+    /// 不可达 / 非法目标一律返回 false 并把原因写入 <paramref name="error"/>（调用方只打控制台日志，不弹提示框）。
+    /// 目标格已有单位（含自己人）时不可达 —— 与逐格移动同规则。
+    /// </summary>
+    public bool TryPostBattleMove(int unitId, AxialHex destination, out string error)
+    {
+        error = "";
+        if (!IsPostBattleFreeMove) { error = "当前不是战后自由移动状态。"; return false; }
+        if (!Occupancy.Placements.TryGetValue(unitId, out var mover) || mover.Role != BattlefieldRole.Player ||
+            mover.Presence != BattlefieldPresence.Active || mover.Unit.HP <= 0) { error = "当前角色无法移动。"; return false; }
+        if (destination == mover.Coord) return true;
+
+        IReadOnlyList<AxialHex> path = Movement.FindPathIgnoringBudget(unitId, destination);
+        if (path.Count == 0) { error = "目标不可达。"; return false; }
+        // 逐格走：每一步都复用「不扣玩家成本」的现成移动（含可走 / 可进入 / 相邻校验与移动表现）。
+        foreach (AxialHex step in path)
+        {
+            if (!Movement.TryMoveWithoutPlayerCost(unitId, step, out string stepError)) { error = stepError; return false; }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 导出战后战场快照（交互案 §七 4 改口径：**位置落档**）：单位位置 / 存活 / 生命 + 地面物件 +
+    /// 每个角色槽的随身道具与左右手装备。由宿主在进入战后操作态与每次战后操作（移动 / 拾取）后调用并落档；
+    /// 读档重进结算界面时用 <see cref="RestorePostBattleState"/> 按它重建同一张战场。
+    /// </summary>
+    public RunPostBattleSave ExportPostBattleState(string levelId)
+    {
+        var save = new RunPostBattleSave
+        {
+            LevelId = levelId ?? string.Empty,
+            MapId = Definition?.MapId ?? string.Empty,
+            Round = Round,
+            SelectedSlotIndex = Math.Max(0, PlayerIds.IndexOf(SelectedId)),
+        };
+
+        int orderIndex = 0;
+        foreach (BattleUnitPlacement placement in Occupancy.Placements.Values)
+        {
+            save.Units.Add(new RunUnitPlacementSave
+            {
+                OrderIndex = orderIndex++,
+                UnitId = placement.UnitId,
+                Name = placement.Name ?? string.Empty,
+                Role = (int)placement.Role,
+                InstanceKey = GetMonsterInstanceKey(placement.UnitId) ?? string.Empty,
+                SlotIndex = placement.Role == BattlefieldRole.Player ? PlayerIds.IndexOf(placement.UnitId) : -1,
+                Q = placement.Coord.Q,
+                R = placement.Coord.R,
+                Presence = (int)placement.Presence,
+                Hp = placement.Unit.HP,
+            });
+        }
+
+        foreach (BattleCell cell in Board.Cells.Values)
+        {
+            if (cell.Trigger != null) save.GroundObjects.Add(PostBattleSnapshotCodec.ToSave(cell.Trigger, cell.Coord));
+            foreach (GroundObject item in cell.Items) save.GroundObjects.Add(PostBattleSnapshotCodec.ToSave(item, cell.Coord));
+        }
+
+        for (int i = 0; i < PlayerIds.Count; i++) save.Loadouts.Add(ExportLoadout(loadouts[PlayerIds[i]]));
+        return save;
+    }
+
+    private static RunLoadoutSave ExportLoadout(PlayerLoadout loadout) => new RunLoadoutSave
+    {
+        LeftHand = PostBattleSnapshotCodec.ToSave(loadout?.LeftHand),
+        RightHand = PostBattleSnapshotCodec.ToSave(loadout?.RightHand),
+        Items = loadout == null ? new List<RunGroundObjectSave>() : loadout.Items.Select(item => PostBattleSnapshotCodec.ToSave(item)).ToList(),
+    };
+
+    /// <summary>
+    /// 按快照重建战后战场（位置落档）：单位位置 / 在场 / 生命、地面物件、随身与手位，并把阶段置为胜利。
+    /// 只在结算态使用（宿主重建「胜利未领奖」的战场）。先把阶段置胜利，重放「已阵亡」单位的死亡记录时
+    /// 不会再判一次胜负、也不会再触发结算；快照与重建战场无法匹配（例如此前是事件结算）直接失败，由宿主退回原表现。
+    /// </summary>
+    public bool RestorePostBattleState(RunPostBattleSave snapshot, out string error)
+    {
+        error = "";
+        if (snapshot == null) { error = "战后快照为空。"; return false; }
+        if (snapshot.Loadouts == null || snapshot.Loadouts.Count != PlayerIds.Count)
+        { error = "战后快照的携带状态与本场角色数量不一致。"; return false; }
+        if (!string.IsNullOrEmpty(snapshot.MapId) && !string.Equals(snapshot.MapId, Definition?.MapId, StringComparison.Ordinal))
+        { error = $"战后快照的地图 {snapshot.MapId} 与本场 {Definition?.MapId} 不一致。"; return false; }
+
+        if (!PostBattleSnapshotCodec.ResolveUnitLayout(snapshot, PlayerIds, GetMonsterInstanceKey, Occupancy.Placements,
+            out Dictionary<int, (AxialHex Coord, BattlefieldPresence Presence)> layout, out Dictionary<int, int> hp, out string layoutError))
+        { error = layoutError; return false; }
+
+        // 先置胜利：还原过程中重放「已阵亡」单位不会再次判胜负、也不再触发 Finished / 结算。
+        Phase = BattlePhase.Victory;
+        activeMonsterAction = null;
+        monsterTurnQueue.Clear();
+
+        Occupancy.RestoreLayout(layout);
+        foreach (var pair in hp)
+        {
+            if (!Occupancy.Placements.TryGetValue(pair.Key, out BattleUnitPlacement placement)) continue;
+            if (pair.Value <= 0 && placement.Presence != BattlefieldPresence.Active) continue; // 已退场：不重放死亡
+            int hpValue = placement.Role == BattlefieldRole.Player ? Math.Max(1, pair.Value) : Math.Max(0, pair.Value);
+            if (placement.Unit.HP != hpValue) placement.Unit.HP = hpValue;
+        }
+
+        RestoreLoadouts(snapshot.Loadouts);
+        PostBattleSnapshotCodec.RestoreGroundObjects(Board, snapshot.GroundObjects, out string groundWarning);
+        if (groundWarning.Length > 0) Message?.Invoke("战后战场还原警告：" + groundWarning);
+
+        Round = Math.Max(1, snapshot.Round);
+        SelectedId = PlayerIds[Math.Clamp(snapshot.SelectedSlotIndex, 0, PlayerIds.Count - 1)];
+        Notify();
+        return true;
+    }
+
+    private void RestoreLoadouts(IReadOnlyList<RunLoadoutSave> saves)
+    {
+        for (int i = 0; i < PlayerIds.Count; i++)
+        {
+            int playerId = PlayerIds[i];
+            BattleUnitPlacement placement = Occupancy.Placements[playerId];
+            PlayerLoadout loadout = loadouts[playerId];
+            // 先摘掉旧物件带来的额度 / 攻防加成，再按快照重建（与战斗内换装同一套加成口径）。
+            foreach (GroundObject old in new[] { loadout.LeftHand, loadout.RightHand }.Concat(loadout.Items).Where(x => x != null))
+            {
+                placement.SetEquipmentMoveModifier(old.InstanceId, 0);
+                placement.SetEquipmentCombatModifiers(old.InstanceId, 0, 0);
+            }
+
+            RunLoadoutSave save = saves[i] ?? new RunLoadoutSave();
+            loadout.LeftHand = PostBattleSnapshotCodec.ToGroundObject(save.LeftHand);
+            loadout.RightHand = PostBattleSnapshotCodec.ToGroundObject(save.RightHand);
+            for (int slot = 0; slot < loadout.Items.Length; slot++)
+                loadout.Items[slot] = save.Items != null && slot < save.Items.Count
+                    ? PostBattleSnapshotCodec.ToGroundObject(save.Items[slot]) : null;
+
+            foreach (GroundObject equipment in new[] { loadout.LeftHand, loadout.RightHand }.Where(x => x != null))
+            {
+                WeaponAttackSpec spec = BattleWeaponCatalog.ForDefinition(equipment.DefinitionId);
+                placement.SetEquipmentMoveModifier(equipment.InstanceId, spec?.MoveBonus ?? equipment.MoveBonus);
+                placement.SetEquipmentCombatModifiers(equipment.InstanceId, spec?.DamageBonus ?? 0, spec?.DefenseValue ?? 0);
+            }
+
+            selectedHands[playerId] = HandSlot.Left;
+        }
+    }
+
     public bool ExecuteNextMonsterTurnStep()
     {
         while (true)
@@ -951,6 +1141,29 @@ public sealed partial class BattlefieldSession : IDisposable
             MonsterActionState action = activeMonsterAction;
             if (action.Enemy.Presence != BattlefieldPresence.Active || action.Target.Presence != BattlefieldPresence.Active)
             {
+                FinishActiveMonsterAction();
+                continue;
+            }
+
+            // 逃跑行为：不索敌、不攻击，朝最近边界逐步移动；抵达边界格即离场。
+            if (action.FleeMode)
+            {
+                if (action.MoveSteps < Math.Max(0, action.Spec.MoveBudget) && action.MoveSteps < action.PlannedPath.Count)
+                {
+                    AxialHex step = action.PlannedPath[action.MoveSteps];
+                    action.MoveSteps++;
+                    if (Movement.TryMoveWithoutPlayerCost(action.Enemy.UnitId, step, out _))
+                    {
+                        if (IsOnMapBoundary(action.Enemy.Coord))
+                        {
+                            DepartEnemy(action.Enemy);
+                            FinishActiveMonsterAction();
+                            return !IsFinished;
+                        }
+                        // 一步一帧推进，交给表现层播放移动。
+                        return true;
+                    }
+                }
                 FinishActiveMonsterAction();
                 continue;
             }
@@ -993,6 +1206,12 @@ public sealed partial class BattlefieldSession : IDisposable
             StateDecayProcessor.ProcessDecayAtTiming(enemy.Unit, DecayTrigger.OnTurnStart);
             MonsterInstance monster = enemy.Unit as MonsterInstance;
             EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+            // 逃跑行为不索敌：直接按"朝最近边界"规划，不走攻击管线。
+            if (spec.Behavior == EnemyIntentBehavior.Flee)
+            {
+                if (BeginFleeAction(enemy, spec, monster)) return true;
+                continue;
+            }
             EnemyIntentPlan plan = EnemyIntentPlanner.Plan(Board, Occupancy, enemy, PlayerIds.Select(id => Occupancy.Placements[id]),
                 Occupancy.Placements.Values.FirstOrDefault(x => x.Role == BattlefieldRole.Protected && x.Presence == BattlefieldPresence.Active), spec, random);
             if (plan?.Target == null)
@@ -1030,12 +1249,76 @@ public sealed partial class BattlefieldSession : IDisposable
         Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
     }
 
+    /// <summary>逃跑行动的准备：不索敌、不攻击；已站在边界格则直接离场，否则按预算规划逃向最近边界。</summary>
+    private bool BeginFleeAction(BattleUnitPlacement enemy, EnemyIntentSpec spec, MonsterInstance monster)
+    {
+        if (IsOnMapBoundary(enemy.Coord))
+        {
+            Message?.Invoke($"{enemy.Name} 已在战场边缘，直接逃离。");
+            DepartEnemy(enemy);
+            return false;
+        }
+
+        IReadOnlyList<AxialHex> path = EnemyIntentPlanner.PlanFleePath(Board, Occupancy, enemy, MapBoundaryRadius,
+            Math.Max(0, spec.MoveBudget), out _);
+        int[][] intention = monster?.SelectedIntention;
+        activeMonsterAction = new MonsterActionState
+        {
+            Enemy = enemy, Target = enemy, Spec = spec,
+            Intention = intention ?? Array.Empty<int[]>(),
+            LandingCell = enemy.Coord, PlannedPath = path,
+            NeedsTargetInRange = false, FleeMode = true,
+        };
+        Message?.Invoke(path.Count == 0 ? $"{enemy.Name} 想逃跑但无路可走。" : $"{enemy.Name} 开始逃跑。");
+        Notify();
+        return true;
+    }
+
+    /// <summary>离场：走 `Departed`（不是 `Defeated`），因此结算不会把逃跑实例算作被击杀。</summary>
+    private void DepartEnemy(BattleUnitPlacement enemy)
+    {
+        Occupancy.RemoveFromBoard(enemy.UnitId, BattlefieldPresence.Departed);
+        Message?.Invoke($"{enemy.Name} 逃出了战场。");
+        Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
+    }
+
+    /// <summary>地图最外圈格点的判定半径（正式地图按 `Radius`）。</summary>
+    private int MapBoundaryRadius => Math.Max(1, Definition.Radius);
+    private bool IsOnMapBoundary(AxialHex coord) => EnemyIntentPlanner.IsOnMapBoundary(coord, MapBoundaryRadius);
+
     private void PrepareEnemyIntentions()
     {
+        enemyIntentBatch++;
         foreach (var enemy in Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active))
         {
             if (enemy.Unit is not MonsterInstance monster || monster.Table == null || monster.Table.Length == 0) continue;
-            int index = random.Next(monster.Table.Length);
+            // 候选池只含非空意图列（空列既不选也不展示），避免抽中"什么都不做"的空列。
+            int[] candidates = Enumerable.Range(0, monster.Table.Length)
+                .Where(index => monster.Table[index] != null && monster.Table[index].Length > 0).ToArray();
+            if (candidates.Length == 0) continue;
+
+            int index = -1;
+            if (battleRules.Count > 0)
+            {
+                var context = new IntentSelectionContext
+                {
+                    Round = Round,
+                    IntentBatch = enemyIntentBatch,
+                    EnemyId = enemy.UnitId,
+                    Monster = monster,
+                    Candidates = candidates,
+                    HitPlayerCount = monsterHitPlayerCounts.TryGetValue(enemy.UnitId, out int hits) ? hits : 0,
+                    Random = random,
+                };
+                foreach (IBattleRule rule in battleRules)
+                {
+                    if (!rule.TrySelectIntention(context)) continue;
+                    index = candidates.Contains(context.SelectedIndex) ? context.SelectedIndex : -1;
+                    break;
+                }
+            }
+
+            if (index < 0) index = candidates[random.Next(candidates.Length)];
             monster.SetSelectedIntention(index, monster.Table[index]);
         }
         Notify();
@@ -1046,8 +1329,10 @@ public sealed partial class BattlefieldSession : IDisposable
         if (!Occupancy.Placements.TryGetValue(unitId, out var placement) || placement.Unit is not MonsterInstance monster || monster.SelectedIntention == null)
             return "无意图";
         EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+        if (spec.Behavior != EnemyIntentBehavior.Attack) return "逃跑";
         int hitCount = monster.SelectedIntention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
-        int bonus = monster.SelectedIntention.Where(effect => effect != null && effect.Length > 2 && (EffectType)effect[0] == EffectType.Damage).Select(effect => effect[2]).DefaultIfEmpty(0).Max();
+        // 伤害修正值取参与执行侧同源（EnemyIntentDamageArgs）：两元素写法 `1;<修正值>` 必须计入，否则预览与实伤不一致。
+        int bonus = monster.SelectedIntention.Where(effect => effect != null).Select(EnemyIntentDamageArgs.GetDamageModifier).DefaultIfEmpty(0).Max();
         if (spec.PreviewCertainty == EnemyIntentPreviewCertainty.UnknownNumbers) return "移动 / 攻击";
         int hits = Math.Max(1, hitCount);
         int damage = placement.Unit.Attack + bonus;
@@ -1059,8 +1344,10 @@ public sealed partial class BattlefieldSession : IDisposable
         if (!Occupancy.Placements.TryGetValue(unitId, out var placement) || placement.Unit is not MonsterInstance monster || monster.SelectedIntention == null)
             return new EnemyIntentDisplay(EnemyIntentPreviewCertainty.UnknownNumbers, 0, 0, 0, "无可用意图。");
         EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
+        if (spec.Behavior != EnemyIntentBehavior.Attack)
+            return new EnemyIntentDisplay(spec.PreviewCertainty, 0, 0, spec.ActionBudget, "逃跑：不攻击，朝最近的战场边缘移动，抵达边界即离场。");
         int hits = monster.SelectedIntention.Count(effect => effect != null && effect.Length > 0 && (EffectType)effect[0] == EffectType.Damage);
-        int bonus = monster.SelectedIntention.Where(effect => effect != null && effect.Length > 2 && (EffectType)effect[0] == EffectType.Damage).Select(effect => effect[2]).DefaultIfEmpty(0).Max();
+        int bonus = monster.SelectedIntention.Where(effect => effect != null).Select(EnemyIntentDamageArgs.GetDamageModifier).DefaultIfEmpty(0).Max();
         int damage = placement.Unit.Attack + bonus;
         string detail = spec.PreviewCertainty switch
         {
@@ -1094,7 +1381,7 @@ public sealed partial class BattlefieldSession : IDisposable
             EffectType type = (EffectType)effect[0];
             parts.Add(type switch
             {
-                EffectType.Damage => $"攻击 +{(effect.Length > 2 ? effect[2] : 0)}",
+                EffectType.Damage => $"攻击 +{EnemyIntentDamageArgs.GetDamageModifier(effect)}",
                 EffectType.Shield => $"防御 +{(effect.Length > 1 ? effect[1] : 0)}",
                 EffectType.AddState => "施加状态",
                 _ => type.ToString(),
@@ -1109,7 +1396,9 @@ public sealed partial class BattlefieldSession : IDisposable
         EffectType type = (EffectType)effect[0];
         if (type == EffectType.Damage)
         {
-            int[] args = effect.Length > 2 ? effect.Skip(2).ToArray() : Array.Empty<int>();
+            // 伤害段取参：`1;<修正值>`（两元素）与 `1;<模式>;<修正值>`（三元素起）都按 EnemyIntentDamageArgs 解析。
+            // 此前统一 Skip(2) 会把两元素写法的修正值整段丢掉（P2-10.4）。
+            int[] args = EnemyIntentDamageArgs.ResolveDamageParams(effect);
             IReadOnlyList<BattleUnitPlacement> victims = ResolveEnemyAffectedTargets(enemy, target, spec, landing, attackDirection,
                 out IReadOnlyCollection<AxialHex> affectedCells);
             if (victims.Count == 0 && spec.AttackMode == WeaponAttackMode.RangedLine && attackDirection.HasValue)
@@ -1140,7 +1429,12 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             // 每次攻击只触发一次窃取类机制：命中任意玩家即通知一次（伤害已结算）。
             BattleUnitPlacement hitPlayer = victims.FirstOrDefault(v => v.Role == BattlefieldRole.Player);
-            if (hitPlayer != null) MonsterHitPlayer?.Invoke(enemy, hitPlayer);
+            if (hitPlayer != null)
+            {
+                // 命中计数（含被护盾格挡）供战斗规则读取；本局内按怪物单位累计。
+                monsterHitPlayerCounts[enemy.UnitId] = monsterHitPlayerCounts.TryGetValue(enemy.UnitId, out int hits) ? hits + 1 : 1;
+                MonsterHitPlayer?.Invoke(enemy, hitPlayer);
+            }
         }
         else if (type == EffectType.Shield)
         {

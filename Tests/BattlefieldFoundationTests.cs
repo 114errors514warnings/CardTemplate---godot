@@ -453,4 +453,82 @@ public class BattlefieldFoundationTests
         Assert.DoesNotContain(target.Coord, BattleAttackTraceResolver.Resolve(board, occupancy, plan.Path[^1], target.Coord,
             new WeaponAttackSpec("bow", 2, 0, WeaponAttackMode.RangedLine, 0)));
     }
+
+    // ── 战后自由移动（战斗结算后战场操作交互案 §五 / 代码需求清单 P2-13 ③）──
+    // 战后没有「移动额度」：可达格 = 从当前格出发的连通可达区域，路径不限格数；逐格走复用不扣成本的现成移动。
+    private static (BattleBoard board, BattleOccupancyService occupancy, BattleMovementService movement, BattleUnitPlacement actor) PostBattleFixture()
+    {
+        // 半径 3 的开放战场（37 格）＋「1 次移动 / 1 点能量」的角色：战斗内额度只够一步，便于对照战后不限额度。
+        var board = new BattleBoard(BattleRangeResolver.CellsWithinRange(new AxialHex(0, 0), 3).Select(x => new BattleCell(x)));
+        var occupancy = new BattleOccupancyService(board);
+        var actor = new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 7, HP = 10, Energy = 1 }, "player", BattlefieldRole.Player, 1);
+        Assert.True(occupancy.TryPlace(actor, new(0, 0), out _));
+        return (board, occupancy, new BattleMovementService(board, occupancy), actor);
+    }
+
+    [Fact]
+    public void Movement_PostBattleReachabilityIgnoresBudgetButNotOccupancy()
+    {
+        var f = PostBattleFixture();
+        Assert.True(f.occupancy.TryPlace(
+            new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 8, HP = 5 }, "ally", BattlefieldRole.Player, 0), new(1, 0), out _));
+
+        // 战斗内有额度：2 格 = 2 次移动 > 1 次剩余移动，直接拒绝。
+        Assert.NotEqual("", f.movement.ValidatePath(7, new[] { new AxialHex(1, -1), new AxialHex(2, 0) }));
+
+        var reachable = f.movement.ReachableCells(7);
+        Assert.Equal(36 - 1, reachable.Count);          // 半径 3 的 37 格 − 自己所在格 − 被相邻单位占据的格
+        Assert.DoesNotContain(new AxialHex(0, 0), reachable);
+        Assert.DoesNotContain(new AxialHex(1, 0), reachable);
+        Assert.Contains(new AxialHex(3, 0), reachable); // 距离 3：战后仍可达
+        Assert.Empty(f.movement.ReachableCells(99));    // 未注册单位没有可达格
+    }
+
+    [Fact]
+    public void Movement_PostBattlePathIsShortestAndIgnoresBudgetOnly()
+    {
+        var f = PostBattleFixture();
+        Assert.True(f.occupancy.TryPlace(
+            new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 8, HP = 5 }, "ally", BattlefieldRole.Player, 0), new(1, 0), out _));
+
+        Assert.Empty(f.movement.FindPath(7, new AxialHex(2, 0)));                       // 战斗内：额度只有 1 步
+        Assert.Empty(f.movement.FindPath(7, new AxialHex(2, 0), maximumActions: 5));    // 放宽额度参数也过不了「能量 / 剩余移动」这一关
+
+        IReadOnlyList<AxialHex> path = f.movement.FindPathIgnoringBudget(7, new AxialHex(2, 0));
+        Assert.Equal(3, path.Count);                        // (0,0)→(2,0) 的两步解只经过 (1,0)：被占据后必须绕行 3 步
+        Assert.Equal(new AxialHex(2, 0), path[^1]);
+        Assert.DoesNotContain(new AxialHex(1, 0), path);
+        IReadOnlyList<AxialHex> farPath = f.movement.FindPathIgnoringBudget(7, new AxialHex(3, 0));
+        Assert.Equal(new AxialHex(3, 0), farPath[^1]);
+        Assert.DoesNotContain(new AxialHex(1, 0), farPath);
+    }
+
+    [Fact]
+    public void Movement_PostBattlePathRejectsOccupiedObstacleOffBoardAndSelfTargets()
+    {
+        var f = PostBattleFixture();
+        Assert.True(f.occupancy.TryPlace(
+            new BattleUnitPlacement(new TestUnitInstance { UniqueInGameId = 8, HP = 5 }, "ally", BattlefieldRole.Player, 0), new(1, 0), out _));
+
+        Assert.Empty(f.movement.FindPathIgnoringBudget(7, new AxialHex(1, 0))); // 目标格有单位
+        Assert.Empty(f.movement.FindPathIgnoringBudget(7, new AxialHex(0, 0))); // 目标 = 当前格
+        Assert.Empty(f.movement.FindPathIgnoringBudget(7, new AxialHex(9, 9))); // 地图外
+        f.board.ChangeTerrain(new AxialHex(0, 1), BattleCellKind.Obstacle, BattleSurface.Ground, true);
+        Assert.Empty(f.movement.FindPathIgnoringBudget(7, new AxialHex(0, 1))); // 障碍格
+    }
+
+    [Fact]
+    public void Movement_PostBattleWalkUsesTheSharedCostFreeStep()
+    {
+        var f = PostBattleFixture();
+        IReadOnlyList<AxialHex> path = f.movement.FindPathIgnoringBudget(7, new AxialHex(3, 0));
+        Assert.Equal(3, path.Count);
+        foreach (AxialHex step in path) Assert.True(f.movement.TryMoveWithoutPlayerCost(7, step, out _));
+
+        Assert.Equal(new AxialHex(3, 0), f.actor.Coord);
+        Assert.Equal(1, f.actor.Unit.Energy);       // 不扣能量
+        Assert.Equal(0, f.actor.MovesUsedThisTurn); // 不扣移动次数
+        Assert.Equal(10, f.actor.Unit.HP);
+        Assert.DoesNotContain(f.actor.Coord, f.movement.ReachableCells(7));
+    }
 }

@@ -41,31 +41,82 @@ public sealed class BattleMovementService
     /// <summary>Shortest legal player path. The returned path excludes the actor's current cell.</summary>
     public IReadOnlyList<AxialHex> FindPath(int unitId, AxialHex destination, int? maximumActions = null)
     {
-        if (!occupancy.Placements.TryGetValue(unitId, out var actor) || actor.Presence != BattlefieldPresence.Active) return Array.Empty<AxialHex>();
+        if (!TryGetMover(unitId, out var actor)) return Array.Empty<AxialHex>();
         if (destination == actor.Coord) return Array.Empty<AxialHex>();
-        var queue = new Queue<AxialHex>();
-        var previous = new Dictionary<AxialHex, AxialHex>();
-        queue.Enqueue(actor.Coord); previous[actor.Coord] = actor.Coord;
         int availableActions = Math.Min(actor.RemainingMoves, actor.Unit.Energy);
         if (maximumActions.HasValue) availableActions = Math.Min(availableActions, Math.Max(0, maximumActions.Value));
         int maxSteps = availableActions * actor.EffectiveMoveDistancePerAction;
+        return BuildPath(actor.Coord, destination, Search(actor.Coord, destination, maxSteps));
+    }
+
+    /// <summary>
+    /// 战后自由移动的最短合法路径（新案 §五）：除**额度**外与 <see cref="FindPath"/> 完全同规则
+    /// （逐格可走、逐格可进入、不穿过障碍与单位）。返回的路径不含起点；目标不可达时为空。
+    /// </summary>
+    public IReadOnlyList<AxialHex> FindPathIgnoringBudget(int unitId, AxialHex destination)
+    {
+        if (!TryGetMover(unitId, out var actor)) return Array.Empty<AxialHex>();
+        if (destination == actor.Coord) return Array.Empty<AxialHex>();
+        return BuildPath(actor.Coord, destination, Search(actor.Coord, destination, NoStepLimit));
+    }
+
+    /// <summary>
+    /// 战后自由移动的可达格（新案 §五）：从当前格出发的**连通可达区域**（不限步数、不含当前格）。
+    /// 判定与逐格移动同规则，因此这里列出的每一格都能被 <see cref="TryMoveWithoutPlayerCost"/> 逐格走到。
+    /// </summary>
+    public IReadOnlyCollection<AxialHex> ReachableCells(int unitId)
+    {
+        if (!TryGetMover(unitId, out var actor)) return Array.Empty<AxialHex>();
+        var previous = Search(actor.Coord, null, NoStepLimit);
+        return previous.Keys.Where(x => x != actor.Coord).OrderBy(x => x.Q).ThenBy(x => x.R).ToArray();
+    }
+
+    /// <summary>不限步数（战后自由移动）。</summary>
+    private const int NoStepLimit = -1;
+
+    /// <summary>与 <see cref="FindPath"/> 同一口径的可移动单位：已注册且在场。</summary>
+    private bool TryGetMover(int unitId, out BattleUnitPlacement placement)
+    {
+        if (!occupancy.Placements.TryGetValue(unitId, out placement)) return false;
+        return placement.Presence == BattlefieldPresence.Active;
+    }
+
+    /// <summary>
+    /// 同规则 BFS：逐格可走（非地图外 / 障碍 / 坑洞）且逐格可进入（不被任何单位占据）。
+    /// <paramref name="maxSteps"/> 为 <see cref="NoStepLimit"/> 时不限步数（战后自由移动）。
+    /// </summary>
+    private Dictionary<AxialHex, AxialHex> Search(AxialHex start, AxialHex? destination, int maxSteps)
+    {
+        var queue = new Queue<AxialHex>();
+        var previous = new Dictionary<AxialHex, AxialHex>();
+        queue.Enqueue(start); previous[start] = start;
         while (queue.Count > 0)
         {
             var current = queue.Dequeue();
-            if (current == destination) break;
-            int depth = 0; for (var cursor = current; cursor != actor.Coord; cursor = previous[cursor]) depth++;
-            if (depth >= maxSteps) continue;
+            if (destination.HasValue && current == destination.Value) break;
+            if (maxSteps >= 0 && Depth(start, current, previous) >= maxSteps) continue;
             foreach (var next in BattleHexLayout.Neighbors(current).OrderBy(x => x.Q).ThenBy(x => x.R))
             {
-                if (previous.ContainsKey(next) || !board.IsWalkable(next)) continue;
-                if (next != destination && occupancy.At(next) != null) continue;
-                if (next == destination && occupancy.At(next) != null) continue;
+                if (previous.ContainsKey(next) || !board.IsWalkable(next) || occupancy.At(next) != null) continue;
                 previous[next] = current; queue.Enqueue(next);
             }
         }
+        return previous;
+    }
+
+    private static int Depth(AxialHex start, AxialHex current, Dictionary<AxialHex, AxialHex> previous)
+    {
+        int depth = 0;
+        for (var cursor = current; cursor != start; cursor = previous[cursor]) depth++;
+        return depth;
+    }
+
+    /// <summary>由 BFS 前驱表回溯路径（不含起点）；目标不可达时为空。</summary>
+    private static IReadOnlyList<AxialHex> BuildPath(AxialHex start, AxialHex destination, Dictionary<AxialHex, AxialHex> previous)
+    {
         if (!previous.ContainsKey(destination)) return Array.Empty<AxialHex>();
         var result = new List<AxialHex>();
-        for (var cursor = destination; cursor != actor.Coord; cursor = previous[cursor]) result.Add(cursor);
+        for (var cursor = destination; cursor != start; cursor = previous[cursor]) result.Add(cursor);
         result.Reverse(); return result;
     }
 

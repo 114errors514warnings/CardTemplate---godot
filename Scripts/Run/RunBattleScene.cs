@@ -1,5 +1,7 @@
 // RunBattleScene.cs
-// 正式运行局的六边形战斗宿主：注入角色、永久卡组、装备状态与遭遇怪物，负责结算回写。
+// 正式运行局的六边形战斗宿主：注入角色、永久卡组、装备状态与遭遇怪物。
+// 胜利后按「综合价值点数」口径算奖励折损、落盘 InSettlement，并通知 RunFlowScene 弹出结算面板
+// （结算界面本体见 SettlementUi；本文件只负责战斗、折损与落档）。
 using Godot;
 using System;
 using System.Collections.Generic;
@@ -8,6 +10,20 @@ using CardSimulator.Battlefield;
 public partial class RunBattleScene : Control
 {
 	public event Action ContentFinished;
+
+	/// <summary>结算已落档（InSettlement），宿主应显示结算界面；参数 = 本场追回的被窃金币（未追回为 0）。</summary>
+	public event Action<int> SettlementReady;
+
+	/// <summary>
+	/// 本内容是否持有**实机战场**（这一场真的打过，而不是读档重进直接复现结算界面）。
+	/// 关闭结算面板后的落点据此分流（新案 §三）：true → 停留战场（不自动打开世界地图）；
+	/// false → 没有可操作的战场，仍以「已打开 + 可选」的世界地图覆盖。
+	/// </summary>
+	public bool HasLiveBattlefield => battleView != null && GodotObject.IsInstanceValid(battleView) && battleView.MapView != null;
+
+	/// <summary>本内容的战场视图（烟测断言 / 宿主接管表现用）；没有实机战场时为 null。</summary>
+	public HexBattleScene BattleView => battleView;
+
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 
@@ -18,14 +34,13 @@ public partial class RunBattleScene : Control
 	private bool resultWasVictory;
 	private int refundedStolenGold;
 
+	/// <summary>失败面板层（ModalLayer）；胜利结算面板由 RunFlowScene 的 SettlementUi 常驻持有。</summary>
 	private CanvasLayer resultLayer;
-	private int chosenCardId;
-	private bool hasCardReward;
 
 	public override void _Ready()
 	{
-		// 结算属于 ModalLayer：高于世界地图（30），低于全局按钮（50）。
-		resultLayer = new CanvasLayer { Layer = 40 };
+		// 层号只认 RunUiLayers：失败面板与结算面板同属模态层（40），高于世界地图（30）、低于全局按钮（50）。
+		resultLayer = new CanvasLayer { Layer = RunUiLayers.Modal };
 		AddChild(resultLayer);
 
 		RunSession session = RunSession.Instance;
@@ -36,10 +51,13 @@ public partial class RunBattleScene : Control
 			return;
 		}
 
-		// InSettlement：重进不再开新战斗，直接重现“胜利未领奖”的结算界面
+		// InSettlement：重进不再开新战斗。有战后布局落档（位置落档，交互案 §七 4 改口径）时先按快照重建战场，
+		// 让「关掉面板 → 走几步 / 捡东西 → 退出再继续」回到同一张战场；没有快照（事件 / 商人发卡、旧档）
+		// 就只把「胜利未领奖」交给宿主复现（弹面板还是只显示浮窗由 `SettlementPanelClosed` 决定，见 SettlementUi.RefreshFromSave）。
 		if (session.IsInSettlement)
 		{
-			ShowStoredSettlement(session);
+			TryRestorePostBattleBattlefield(session);
+			SettlementReady?.Invoke(0);
 			return;
 		}
 
@@ -57,12 +75,18 @@ public partial class RunBattleScene : Control
 		}
 
 		// 正式运行局复用六边形战场表现；角色、卡组和怪物由 RunSession 注入。
+		CreateBattleView();
+	}
+
+	/// <summary>正式运行局复用六边形战场表现；角色、卡组和怪物由 RunSession 注入。返回 false = 场景不可用（已转主菜单）。</summary>
+	private bool CreateBattleView()
+	{
 		PackedScene battleScene = GD.Load<PackedScene>("res://Scenes/Battle/HexBattleScene.tscn");
 		if (battleScene == null)
 		{
 			GD.PrintErr("[RunBattle] 无法加载 HexBattleScene.tscn。");
 			CallDeferred(nameof(GoToMainMenuAbort));
-			return;
+			return false;
 		}
 
 		battleView = battleScene.Instantiate<HexBattleScene>();
@@ -70,9 +94,60 @@ public partial class RunBattleScene : Control
 		battleView.ShowBuiltInResult = false;
 		battleView.EnableCommandApi = false;
 		battleView.EnableDebugPanel = true;
-		battleView.BattleReady += session => battlefield = session;
+		battleView.BattleReady += readySession => battlefield = readySession;
 		battleView.BattleFinished += OnHexBattleFinished;
-		AddChild(battleView);
+		battleView.PostBattleStateChanged += OnPostBattleStateChanged;
+		AddChild(battleView); // AddChild 同步跑 HexBattleScene._Ready：BattleReady 已在上一行的事件处回填 battlefield
+		return true;
+	}
+
+	/// <summary>
+	/// 战后布局落档（交互案 §七 4 改口径「位置落档」）：进入战后操作态、以及每次战后移动 / 拾取后，
+	/// 把位置、存活 / 生命、地面物件与随身 / 手位写进本局存档；读档重进结算界面时按它重建战场。
+	/// </summary>
+	private void OnPostBattleStateChanged()
+	{
+		RunSession session = RunSession.Instance;
+		if (session == null || session.Current == null || battlefield == null || battleView == null) return;
+		if (!battleView.IsPostSettlementMode) return;
+		session.SavePostBattleBattlefield(battlefield.ExportPostBattleState(session.Current.PendingLevelId));
+	}
+
+	/// <summary>
+	/// 读档重进结算界面：有本场战斗的战后布局落档就重建战场并还原布局（宿主随即停留战场、进入战后操作态）；
+	/// 还原失败（快照与待处理内容对不上、地图不一致、角色数量不符）或场景不可用时销毁重建的战场，
+	/// 退回「只复现结算界面」——关闭面板后打开可选地图。
+	/// </summary>
+	private void TryRestorePostBattleBattlefield(RunSession session)
+	{
+		if (!CanRebuildPostBattleBattlefield(session)) return;
+		if (!CreateBattleView()) return;
+
+		if (battleView.ApplyPostBattleSnapshot(session.Current.PostBattleBattlefield, out string error))
+		{
+			battleView.SetPostSettlementMode(true);
+			GD.Print($"[RunBattle] 战后战场按落档重建：单位 {session.Current.PostBattleBattlefield.Units.Count}、地面物件 {session.Current.PostBattleBattlefield.GroundObjects.Count}。");
+			return;
+		}
+
+		GD.PrintErr("[RunBattle] 战后战场还原失败，退回「只复现结算界面」：" + error);
+		// 快照已被证明不可用（与本次待处理内容对不上）：清掉它，避免每次读档都重复失败与刷日志。
+		session.Current.PostBattleBattlefield = null;
+		session.Save();
+		battleView.QueueFree();
+		battleView = null;
+		battlefield = null;
+	}
+
+	/// <summary>能否按落档重建战后战场：必须是同一关卡的战斗结算（事件 / 商人发卡、旧档没有快照）。</summary>
+	private static bool CanRebuildPostBattleBattlefield(RunSession session)
+	{
+		RunSaveData data = session.Current;
+		RunPostBattleSave snapshot = data.PostBattleBattlefield;
+		return snapshot != null
+			&& string.Equals(data.PendingContentType, "Level", StringComparison.Ordinal)
+			&& !string.IsNullOrWhiteSpace(data.PendingLevelId)
+			&& string.Equals(snapshot.LevelId, data.PendingLevelId, StringComparison.Ordinal);
 	}
 
 	private void OnHexBattleFinished(BattlefieldSession.BattlePhase outcome)
@@ -85,6 +160,10 @@ public partial class RunBattleScene : Control
 		else ShowDefeatResult();
 	}
 
+	/// <summary>
+	/// 胜利：回写角色 → 追回被窃金币 → 按击败比例算卡牌份（含折损）→ 落档 InSettlement → 通知宿主弹结算面板。
+	/// 候选与折损结果都先落盘：重进不再重抽、折损行沿用落档值（§6.4）。
+	/// </summary>
 	private void ShowVictoryResult()
 	{
 		RunSession session = RunSession.Instance;
@@ -102,14 +181,111 @@ public partial class RunBattleScene : Control
 		StageEncounterRow row = session.PendingEncounter;
 		int dropTableId = row != null ? row.DropTableId : session.Current.PendingDropTableId;
 		string name = row != null && !string.IsNullOrEmpty(row.Name) ? row.Name : session.Current.PendingEncounterName;
+		if (string.IsNullOrEmpty(name))
+		{
+			name = "胜利";
+		}
 
-		// 生成候选并**先落盘为 InSettlement（未领奖）**，再弹窗——重进可重现同款结算
-		List<int> candidateIds = BuildCardCandidates(session, dropTableId);
-		session.EnterSettlement(string.IsNullOrEmpty(name) ? "胜利" : name, dropTableId, candidateIds);
-		BuildResultOverlay(true, string.IsNullOrEmpty(name) ? "胜利" : name, candidateIds);
+		MapNodeType nodeType = row != null ? row.NodeType : (MapNodeType)session.Current.PendingEncounterNodeType;
+		DropTableEntry cardRow = FindCardRewardRow(dropTableId);
+
+		// 折损（P2-10.3）：只有本场真的会发卡时才折损；非战斗来源 / 无卡牌奖励不折损（§5.7）；
+		// 生存关按回合数结算、**通关总是全额**（玩法 §7.4），因此直接按「无折损」落档（比例 1.0 → 档位 0）。
+		bool survival = MonsterValuePoints.IsSurvivalLevelType(battleView == null ? string.Empty : battleView.LevelType);
+		double valueRatio = cardRow == null || survival ? 1.0 : ComputeDefeatValueRatio();
+		int rewardCount = MonsterValuePoints.GetCardRewardCount(valueRatio);
+		List<SettlementCardPoolSave> pools = cardRow == null
+			? new List<SettlementCardPoolSave>()
+			: BuildCardPools(session.Current, cardRow, rewardCount);
+
+		session.EnterSettlement(new SettlementStartRequest
+		{
+			SourceName = name,
+			SourceNodeType = nodeType,
+			DropTableId = dropTableId,
+			CardPools = pools,
+			LossTier = MonsterValuePoints.GetLossTier(valueRatio),
+			ValueRatio = valueRatio,
+		});
+
+		SettlementReady?.Invoke(refundedStolenGold);
 	}
 
-	/// <summary>胜利结算：把"被击杀怪物实例"偷走的金币原额返还（存活实例的不返还），并清掉剩余账本。</summary>
+	/// <summary>本场掉落表里的 Card 行：多行 Card 只作为「本次卡牌奖励」的整体配置，不额外增加卡牌份（§三）。</summary>
+	private static DropTableEntry FindCardRewardRow(int dropTableId)
+	{
+		foreach (DropTableEntry entry in BattleRewardPresenter.GetEntriesForTable(LoadingSystem.DropTableEntries, dropTableId))
+		{
+			if (entry != null && entry.Category == DropCategory.Card)
+			{
+				return entry;
+			}
+		}
+
+		return null;
+	}
+
+	/// <summary>每份的宿主槽位 = 卡牌行角色过滤命中的槽位（`RewardParam = 0` → 全队每个槽位各一份）。</summary>
+	private static List<SettlementCardSlot> BuildCardSlots(RunSaveData run, DropTableEntry cardRow)
+	{
+		List<SettlementCardSlot> slots = new List<SettlementCardSlot>();
+		if (run == null || cardRow == null)
+		{
+			return slots;
+		}
+
+		List<int> characterIds = BattleRewardPresenter.ResolveCardRewardCharacterIds(cardRow, run);
+		for (int slotIndex = 0; slotIndex < run.CharacterSlots.Count; slotIndex++)
+		{
+			int characterId = run.CharacterSlots[slotIndex].CharacterId;
+			if (characterIds.Contains(characterId))
+			{
+				slots.Add(new SettlementCardSlot { SlotIndex = slotIndex, CharacterId = characterId });
+			}
+		}
+
+		return slots;
+	}
+
+	/// <summary>按份数生成候选：每份**只取该份角色自己的卡池**（§5.3），候选常态 3 张、不随折损变化。</summary>
+	private static List<SettlementCardPoolSave> BuildCardPools(RunSaveData run, DropTableEntry cardRow, int rewardCount)
+	{
+		return SettlementRewardPresenter.BuildCardPools(
+			BuildCardSlots(run, cardRow),
+			rewardCount,
+			characterId => LoadingSystem.GetCharacterRewardCardIds(characterId),
+			SettlementRewardPresenter.DefaultCandidateCount,
+			BattleSytem.RandomGenerator);
+	}
+
+	/// <summary>
+	/// 击败比例（P2-10.3）：按战场占位统计本场部署的全部敌方单位与被击败者，用「综合价值点数」口径求比例
+	/// （**分母含逃跑 / 存活者**）；**爪牙不计入**（玩法 §7.4 / §7.5）；没有部署数据时返回 1.0（视为不折损）。
+	/// 爪牙标记来自 `Monster.csv` 的 `IsMinion` 列（`LoadMonsterCsv` → `Monster.IsMinion`，`MonsterInstance` 继承）；
+	/// 当前无怪物置 1，因此实际全部按非爪牙计入。
+	/// </summary>
+	private double ComputeDefeatValueRatio()
+	{
+		if (battlefield == null)
+		{
+			return 1.0;
+		}
+
+		List<MonsterValuePoints.EnemyValueSample> samples = new List<MonsterValuePoints.EnemyValueSample>();
+		foreach (BattleUnitPlacement placement in battlefield.Occupancy.Placements.Values)
+		{
+			if (placement == null || placement.Role != BattlefieldRole.Enemy || placement.Unit is not MonsterInstance monster)
+			{
+				continue;
+			}
+
+			samples.Add(new MonsterValuePoints.EnemyValueSample(monster.id, placement.Presence == BattlefieldPresence.Defeated, monster.IsMinion));
+		}
+
+		return MonsterValuePoints.GetDefeatRatio(samples, MonsterValuePoints.GetValuePointsForMonster);
+	}
+
+	/// <summary>胜利结算：把「被击杀怪物实例」偷走的金币原额返还（存活 / 逃跑实例的不返还），并清掉剩余账本。</summary>
 	private int RefundStolenGold(RunSession session)
 	{
 		if (session?.Current == null) return 0;
@@ -166,251 +342,11 @@ public partial class RunBattleScene : Control
 		}
 	}
 
-	/// <summary>InSettlement 读档重进：不开新战斗，直接用存档中的同款候选卡重现结算。</summary>
-	private void ShowStoredSettlement(RunSession session)
-	{
-		List<int> candidates = new List<int>(session.Current.SettlementCandidateCardIds);
-		hasCardReward = candidates.Count > 0;
-		string name = string.IsNullOrEmpty(session.Current.SettlementEncounterName)
-			? "胜利"
-			: session.Current.SettlementEncounterName;
-		BuildResultOverlay(true, name, candidates);
-	}
-
-	private List<int> BuildCardCandidates(RunSession session, int dropTableId)
-	{
-		hasCardReward = false;
-		List<int> candidates = new List<int>();
-		List<DropTableEntry> rows = BattleRewardPresenter.GetEntriesForTable(LoadingSystem.DropTableEntries, dropTableId);
-		DropTableEntry cardRow = null;
-		foreach (DropTableEntry entry in rows)
-		{
-			if (entry != null && entry.Category == DropCategory.Card)
-			{
-				cardRow = entry;
-				break;
-			}
-		}
-
-		if (cardRow == null)
-		{
-			return candidates;
-		}
-
-		hasCardReward = true;
-		List<int> characterIds = BattleRewardPresenter.ResolveCardRewardCharacterIds(cardRow, session.Current);
-		List<int> pool = new List<int>();
-		foreach (int characterId in characterIds)
-		{
-			List<int> ids = LoadingSystem.GetCharacterRewardCardIds(characterId);
-			foreach (int id in ids)
-			{
-				if (!pool.Contains(id))
-				{
-					pool.Add(id);
-				}
-			}
-		}
-
-		int amount = cardRow.Amount > 0 ? cardRow.Amount : 3;
-		return BattleRewardPresenter.SampleFromPool(pool, amount, BattleSytem.RandomGenerator);
-	}
-
-	private void ShowDefeatResult()
-	{
-		BuildResultOverlay(false, "失败", new List<int>());
-	}
-
-	private void BuildResultOverlay(bool victory, string titleText, List<int> candidateIds)
-	{
-		Control overlay = new Control();
-		overlay.Name = "ResultOverlay";
-		overlay.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.MouseFilter = MouseFilterEnum.Stop;
-		resultLayer.AddChild(overlay);
-
-		ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.55f) };
-		dim.SetAnchorsPreset(LayoutPreset.FullRect);
-		dim.MouseFilter = MouseFilterEnum.Ignore;
-		overlay.AddChild(dim);
-
-		CenterContainer center = new CenterContainer();
-		center.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.AddChild(center);
-
-		PanelContainer panel = new PanelContainer();
-		panel.CustomMinimumSize = new Vector2(780, 520);
-		center.AddChild(panel);
-
-		MarginContainer margin = new MarginContainer();
-		margin.AddThemeConstantOverride("margin_left", 28);
-		margin.AddThemeConstantOverride("margin_top", 24);
-		margin.AddThemeConstantOverride("margin_right", 28);
-		margin.AddThemeConstantOverride("margin_bottom", 24);
-		panel.AddChild(margin);
-
-		VBoxContainer vbox = new VBoxContainer();
-		vbox.AddThemeConstantOverride("separation", 14);
-		margin.AddChild(vbox);
-
-		Label title = new Label
-		{
-			Text = victory ? $"胜利 —— {titleText}" : titleText,
-			HorizontalAlignment = HorizontalAlignment.Center,
-		};
-		title.AddThemeFontSizeOverride("font_size", 34);
-		title.AddThemeColorOverride("font_color", victory ? Colors.LightYellow : Colors.IndianRed);
-		vbox.AddChild(title);
-
-		// 结算展示：追回被窃金币（结算时已实际入账，这里只做说明，无需再领取）。
-		if (victory && refundedStolenGold > 0)
-		{
-			Label refundLine = new Label
-			{
-				Text = $"追回被窃金币 +{refundedStolenGold}（被击杀的怪物原额返还）",
-				HorizontalAlignment = HorizontalAlignment.Center,
-			};
-			refundLine.AddThemeFontSizeOverride("font_size", 18);
-			refundLine.AddThemeColorOverride("font_color", Colors.LightGreen);
-			vbox.AddChild(refundLine);
-		}
-
-		RunSession session = RunSession.Instance;
-		int settlementDropTableId = session?.Current?.SettlementDropTableId ?? 0;
-		List<DropTableEntry> rewardRows = victory
-			? BattleRewardPresenter.GetEntriesForTable(LoadingSystem.DropTableEntries, settlementDropTableId)
-			: new List<DropTableEntry>();
-		HBoxContainer rewardTabs = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-		rewardTabs.AddThemeConstantOverride("separation", 10);
-		vbox.AddChild(rewardTabs);
-		VBoxContainer cardSection = new VBoxContainer { Visible = false };
-		cardSection.AddThemeConstantOverride("separation", 12);
-		vbox.AddChild(cardSection);
-
-		for (int rewardIndex = 0; rewardIndex < rewardRows.Count; rewardIndex++)
-		{
-			DropTableEntry entry = rewardRows[rewardIndex];
-			if (entry == null) continue;
-			Button rewardTab = new Button { Text = entry.Category == DropCategory.Card ? "卡牌" : BattleRewardPresenter.FormatRewardLine(entry) };
-			rewardTab.CustomMinimumSize = new Vector2(150, 48);
-			rewardTabs.AddChild(rewardTab);
-			if (entry.Category == DropCategory.Card)
-			{
-				rewardTab.Pressed += () => cardSection.Visible = true;
-				continue;
-			}
-
-			string rewardKey = $"{rewardIndex}:{entry.Category}:{entry.RewardParam}:{entry.Amount}";
-			bool claimed = session?.Current?.SettlementClaimedRewardKeys?.Contains(rewardKey) == true;
-			rewardTab.Disabled = claimed;
-			if (claimed) rewardTab.Text += "（已领取）";
-			rewardTab.Pressed += () =>
-			{
-				RunSession currentSession = RunSession.Instance;
-				if (currentSession?.Current == null || currentSession.Current.SettlementClaimedRewardKeys.Contains(rewardKey)) return;
-				BattleRewardPresenter.ApplyRewardEntryToRun(entry, currentSession.Current);
-				currentSession.Current.SettlementClaimedRewardKeys.Add(rewardKey);
-				currentSession.Save();
-				rewardTab.Text = BattleRewardPresenter.FormatRewardLine(entry) + "（已领取）";
-				rewardTab.Disabled = true;
-			};
-		}
-
-		chosenCardId = 0;
-		Button confirmReturn = null;
-		bool hasPickableCards = victory && hasCardReward && candidateIds.Count > 0;
-
-		if (hasPickableCards)
-		{
-			Label hint = new Label { Text = "请选择一张卡牌加入永久卡组：", HorizontalAlignment = HorizontalAlignment.Center };
-			hint.AddThemeFontSizeOverride("font_size", 18);
-			cardSection.AddChild(hint);
-
-			HBoxContainer cardRowBox = new HBoxContainer();
-			cardRowBox.Alignment = BoxContainer.AlignmentMode.Center;
-			cardRowBox.AddThemeConstantOverride("separation", 12);
-			cardSection.AddChild(cardRowBox);
-
-			List<Button> cardButtons = new List<Button>();
-			foreach (int cardId in candidateIds)
-			{
-				Card template = LoadingSystem.CardDictionary.TryGetValue(cardId, out Card c) ? c : null;
-				int ownerSlot = RunSession.Instance?.Current == null ? -1 : BattleRewardPresenter.FindOwningSlotIndex(RunSession.Instance.Current, cardId);
-				string ownerName = "未知角色";
-				if (ownerSlot >= 0 && ownerSlot < RunSession.Instance.Current.CharacterSlots.Count)
-				{
-					int ownerCharacterId = RunSession.Instance.Current.CharacterSlots[ownerSlot].CharacterId;
-					ownerName = LoadingSystem.CharacterDictionary.TryGetValue(ownerCharacterId, out Character owner) ? owner.Name : $"角色 {ownerCharacterId}";
-				}
-				string text = template == null
-					? $"卡牌ID {cardId}"
-					: $"归属：{ownerName}\n{template.CardName}\n费用 {template.EnergyCost}　类型 {template.Category}";
-				Button cardButton = new Button { Text = text, ToggleMode = true };
-				cardButton.CustomMinimumSize = new Vector2(210, 110);
-				cardButton.AddThemeFontSizeOverride("font_size", 15);
-				int capturedId = cardId;
-				cardButton.Toggled += (bool on) =>
-				{
-					if (on)
-					{
-						chosenCardId = capturedId;
-						foreach (Button other in cardButtons)
-						{
-							if (other != cardButton)
-							{
-								other.ButtonPressed = false;
-							}
-						}
-					}
-					else if (chosenCardId == capturedId)
-					{
-						chosenCardId = 0;
-					}
-
-					if (confirmReturn != null)
-					{
-						confirmReturn.Disabled = chosenCardId == 0;
-					}
-				};
-				cardRowBox.AddChild(cardButton);
-				cardButtons.Add(cardButton);
-			}
-		}
-		else if (victory)
-		{
-			Label noReward = new Label
-			{
-				Text = hasCardReward ? "该角色暂无可用卡池（请检查 CharacterRewardPool.csv）" : "本次没有额外掉落。",
-				HorizontalAlignment = HorizontalAlignment.Center,
-			};
-			noReward.AddThemeFontSizeOverride("font_size", 18);
-			noReward.AddThemeColorOverride("font_color", Colors.OrangeRed);
-			cardSection.Visible = true;
-			cardSection.AddChild(noReward);
-		}
-
-		confirmReturn = new Button
-		{
-			Text = victory ? (hasCardReward ? "确认选择并返回地图" : "返回地图") : "返回主菜单",
-			Disabled = hasPickableCards,
-		};
-		confirmReturn.CustomMinimumSize = new Vector2(300, 52);
-		confirmReturn.AddThemeFontSizeOverride("font_size", 22);
-		confirmReturn.Pressed += () =>
-		{
-			if (victory)
-			{
-				OnReturnToMap();
-			}
-			else
-			{
-				OnAbortToMainMenu();
-			}
-		};
-		vbox.AddChild(confirmReturn);
-	}
-
-	private void OnReturnToMap()
+	/// <summary>
+	/// 结算完成（全部领取后关闭 / 确认放弃）后由宿主调用：推进节点 → 清结算态 → 回地图（§7.3）。
+	/// 已领取的物品与卡牌保留（领取当刻已入账 / 已入组并落档）；未领取的卡牌不补偿。
+	/// </summary>
+	public void FinishSettlementToMap()
 	{
 		RunSession session = RunSession.Instance;
 		if (session == null || session.Current == null)
@@ -419,36 +355,62 @@ public partial class RunBattleScene : Control
 			return;
 		}
 
-		// 结算界面已被本次“返回地图”消费：隐藏它，让世界地图覆盖层能盖住已完成的战斗。
-		// 结算层（40）高于世界地图层（30），不隐藏会压在地图上并吃掉地图输入。
+		// 结算界面已被消费：隐藏失败 / 结算层，让世界地图覆盖层能盖住已完成的战斗（结算层 40 > 地图层 30）。
 		if (resultLayer != null)
 		{
 			resultLayer.Visible = false;
 		}
 
 		StageEncounterRow row = session.PendingEncounter ?? session.BuildPendingEncounterRowFromSave();
-		int dropTableId = row != null ? row.DropTableId : session.Current.SettlementDropTableId;
-
-		if (chosenCardId > 0)
-		{
-			int ownerSlot = BattleRewardPresenter.FindOwningSlotIndex(session.Current, chosenCardId);
-			if (ownerSlot < 0)
-			{
-				ownerSlot = 0;
-			}
-
-			session.AddCardToSlotDeck(ownerSlot, chosenCardId, 0);
-		}
-
 		if (row != null && row.NodeType == MapNodeType.NormalCombat)
 		{
-			session.Current.MapState.NormalEncounterIndex++;
+			session.Current.MapState.IncrementCurrentNormalEncounterCount();
 		}
 
 		session.MarkCurrentNodeVisitedAndAdvanceEncounter();
 		session.CompleteSettlementToMap();
 		if (ContentFinished != null) { ContentFinished.Invoke(); return; }
 		GetTree().ChangeSceneToFile(MapScenePath);
+	}
+
+	/// <summary>失败面板（交互案 §二）：无奖励、无浮窗，只提供「返回主菜单」。</summary>
+	private void ShowDefeatResult()
+	{
+		Control overlay = new Control { Name = "DefeatOverlay", MouseFilter = MouseFilterEnum.Stop };
+		overlay.SetAnchorsPreset(LayoutPreset.FullRect);
+		resultLayer.AddChild(overlay);
+
+		ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.55f), MouseFilter = MouseFilterEnum.Ignore };
+		dim.SetAnchorsPreset(LayoutPreset.FullRect);
+		overlay.AddChild(dim);
+
+		CenterContainer center = new CenterContainer { MouseFilter = MouseFilterEnum.Ignore };
+		center.SetAnchorsPreset(LayoutPreset.FullRect);
+		overlay.AddChild(center);
+
+		PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(440, 220) };
+		center.AddChild(panel);
+
+		MarginContainer margin = new MarginContainer();
+		margin.AddThemeConstantOverride("margin_left", 24);
+		margin.AddThemeConstantOverride("margin_right", 24);
+		margin.AddThemeConstantOverride("margin_top", 20);
+		margin.AddThemeConstantOverride("margin_bottom", 20);
+		panel.AddChild(margin);
+
+		VBoxContainer vbox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+		vbox.AddThemeConstantOverride("separation", 18);
+		margin.AddChild(vbox);
+
+		Label title = new Label { Text = "失败", HorizontalAlignment = HorizontalAlignment.Center };
+		title.AddThemeFontSizeOverride("font_size", 34);
+		title.AddThemeColorOverride("font_color", Colors.IndianRed);
+		vbox.AddChild(title);
+
+		Button back = new Button { Text = "返回主菜单", CustomMinimumSize = new Vector2(300, 52) };
+		back.AddThemeFontSizeOverride("font_size", 22);
+		back.Pressed += OnAbortToMainMenu;
+		vbox.AddChild(back);
 	}
 
 	private void OnAbortToMainMenu()

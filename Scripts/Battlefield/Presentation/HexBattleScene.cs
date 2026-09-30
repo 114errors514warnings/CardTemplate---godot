@@ -30,9 +30,25 @@ public partial class HexBattleScene : Control
     private bool moveAwaitingConfirmation;
     private bool moveExecuting;
     private IReadOnlyList<AxialHex> plannedMovePath = Array.Empty<AxialHex>();
+
+    /// <summary>战后战场操作态（新案 §四 / §五）：由宿主 `SetPostSettlementMode` 控制，只保留切换角色与自由移动。</summary>
+    public bool IsPostSettlementMode { get; private set; }
+    /// <summary>是否处于移动规划态（战后烟测断言用）。</summary>
+    public bool IsMovePlanning => movePlanning;
+    /// <summary>
+    /// 烟测断言用（新案 §九 6）：战后操作态下，手牌槽 / 能量与额度面板 / 结束回合必须全部隐藏，
+    /// 且移动按钮文案不含「能量」。规划态下按钮文案是「取消移动」，该断言只在非规划态成立。
+    /// </summary>
+    public bool PostSettlementUiCollapsed => IsPostSettlementMode
+        && handAreaNode != null && !handAreaNode.Visible
+        && resPanelNode != null && !resPanelNode.Visible
+        && endTurnButton != null && !endTurnButton.Visible
+        && moveButton != null && moveButton.Text == "移动";
     private Control handRow;
     private Control handPanelNode;
     private EventStoryOverlay storyOverlay;
+    /// <summary>当前剧情的标题（非战斗来源发卡的结算来源名，§5.7）：与 OpenStoryEvent 加载的配置同源。</summary>
+    private string storyEventTitle = string.Empty;
     private readonly List<CanvasItem> storyHiddenUi = new();
     private Label moveInfo;
     private Button drawPileButton;
@@ -44,6 +60,10 @@ public partial class HexBattleScene : Control
     private Label pileDetail;
     private PanelContainer energyDisplay;
     private Label energyLabel;
+    /// <summary>左下资源面板（角色名 / 能量 / 移动额度 / 三个牌堆按钮）：战后整块隐藏（新案 §四）。</summary>
+    private PanelContainer resPanelNode;
+    /// <summary>结束回合按钮：战后隐藏，且不再触发敌人回合（新案 §四）。</summary>
+    private Button endTurnButton;
     private bool victoryShown;
     private Control resultShade;
     private Label resultTitle;
@@ -107,9 +127,27 @@ public partial class HexBattleScene : Control
     public event Action<BattlefieldSession> BattleReady;
     public event Action<BattlefieldSession.BattlePhase> BattleFinished;
     public event Action StoryCompleted;
+    /// <summary>事件内发卡（`CardAdd`）已落档 InSettlement（交互案 §5.7）：宿主应显示统一结算界面（与战斗结算同一界面形态）。</summary>
+    public event Action SettlementReady;
     public event Action<HexBattleScene> StoryOverlayOpened;
     public event Action<HexBattleScene> DebugRequested;
+    /// <summary>
+    /// 战后布局发生变化（进入战后操作态 / 移动播完 / 拾取成功）：宿主据此把位置与拾取结果落档
+    /// （交互案 §七 4 改口径「位置落档」）。只在战后操作态触发。
+    /// </summary>
+    public event Action PostBattleStateChanged;
     public EventStoryOverlay ActiveStoryOverlay => storyOverlay;
+
+    /// <summary>
+    /// 运行局的 `Esc` 分层出口：本场没有内部状态可退出（非施法 / 移动 / 暂停）时先问宿主，
+    /// 返回 true = 宿主已消费（结算界面逐层关闭、待领取态关地图）。运行局之外保持 null = 直接开暂停。
+    /// </summary>
+    public Func<bool> EscapeFallback { get; set; }
+    /// <summary>当前关卡的 `LevelType`（关卡 CSV 第 3 列）：运行局用于折损分流（生存关全额、§7.4）；非关卡路径为空串。</summary>
+    public string LevelType { get; private set; } = string.Empty;
+    /// <summary>当前关卡的关卡 Id（`LevelIndex.csv` 键 = 关卡 CSV 文件名）：初始化失败时用于定位是哪一关；非关卡路径为空串。</summary>
+    public string LevelId { get; private set; } = string.Empty;
+
     private BattleApiHost commandApi;
 
     public override void _Ready()
@@ -130,6 +168,8 @@ public partial class HexBattleScene : Control
                 level = BattleLevelCatalog.Load(RunSession.Instance.Current.PendingLevelId);
                 path = BattleLevelCatalog.ResolveMapPath(level.MapId);
             }
+            LevelType = level?.LevelType ?? string.Empty;
+            LevelId = level?.LevelId ?? string.Empty;
             using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
             if (file == null) throw new InvalidOperationException($"无法打开战场 JSON：{path}");
             BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
@@ -176,7 +216,8 @@ public partial class HexBattleScene : Control
         }
         catch (Exception ex)
         {
-            ShowMessage("战场初始化失败：" + ex.Message);
+            // 关卡 Id 一起打出来：同一张地图被多个关卡复用，只靠地图 / 怪物名定位不到出错关卡（如「危」节点 = F1-H-001）。
+            ShowMessage("战场初始化失败" + (string.IsNullOrWhiteSpace(LevelId) ? "：" : $"（关卡 {LevelId}）：") + ex.Message);
             GD.PrintErr(ex);
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-smoke")) GetTree().Quit(1);
         }
@@ -277,6 +318,7 @@ public partial class HexBattleScene : Control
         StoryEventConfig config;
         try { config = StoryEventCatalog.Load(eventId); }
         catch (Exception ex) { RestoreBattleHudAfterStory(); ShowMessage("剧情事件加载失败：" + ex.Message); return; }
+        storyEventTitle = string.IsNullOrWhiteSpace(config.Title) ? eventId : config.Title;
         StoryEventDefinition definition = StoryEventCatalog.ToDefinition(config, ApplyStoryChoiceEffects);
         storyOverlay = new EventStoryOverlay(definition, () =>
         {
@@ -336,14 +378,82 @@ public partial class HexBattleScene : Control
         {
             // 先记录跳转意图再应用效果：即使当前角色数据不可用，进入战斗的请求也不丢失。
             PendingStoryBattleLevelId = StoryEventCatalog.ResolveBattleLevelId(choice.Next);
+            // 发卡（CardAdd）不依赖战斗 Session：先落档进统一结算界面（交互案 §5.7，事件 / 商人等非战斗来源同一界面）。
+            TryEnterEventCardSettlement(choice.Effects);
             if (Session == null) return;
             foreach (StoryEffectConfig effect in choice.Effects)
             {
+                if (effect == null) continue;
                 if (effect.Type == "HpDelta" && effect.Target == "SelectedPlayer") ApplyStoryHpDelta(effect.Value);
                 else if (effect.Type == "GoldDelta" && effect.Target == "Run") ApplyStoryGoldDelta(effect.Value);
+                else if (effect.Type == EventCardReward.EffectTypeCardAdd) continue; // 已由 TryEnterEventCardSettlement 处理
                 else ShowMessage($"剧情效果暂未支持：{effect.Type} / {effect.Target}");
             }
         };
+    }
+
+    /// <summary>
+    /// 事件发卡（效果 `CardAdd`）→ 统一结算界面（交互案 §5.7 / 剧情事件.md）：
+    /// 一份 = 一个槽位 = 一个卡牌 Tab；指定具体卡时该份候选恒为该 1 张；**不做折损**（档位 0 / 比例 1.0）。
+    /// 返回 true = 已进入结算，宿主不要按「事件结束」直接推进节点。
+    /// </summary>
+    private bool TryEnterEventCardSettlement(List<StoryEffectConfig> effects)
+    {
+        if (effects == null || effects.Count == 0)
+        {
+            return false;
+        }
+
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null)
+        {
+            ShowMessage("剧情结果：获得卡牌（测试战场未加载局内存档，未落档）。");
+            return false;
+        }
+
+        List<EventCardRewardSpec> specs = new List<EventCardRewardSpec>();
+        HashSet<int> usedSlots = new HashSet<int>();
+        foreach (StoryEffectConfig effect in effects)
+        {
+            if (effect == null || effect.Type != EventCardReward.EffectTypeCardAdd) continue;
+            if (!EventCardReward.TryParseEffect(effect.Type, effect.Target, effect.Value, effect.ReferenceId, out EventCardRewardSpec spec, out string error))
+            {
+                ShowMessage($"剧情发卡配置无效：{error}");
+                continue;
+            }
+
+            if (spec.SlotIndex >= run.Current.CharacterSlots.Count || !usedSlots.Add(spec.SlotIndex))
+            {
+                ShowMessage($"剧情发卡目标无效：槽位 {spec.SlotIndex}（队伍 {run.Current.CharacterSlots.Count} 人；同一槽位只出一份）。");
+                continue;
+            }
+
+            specs.Add(spec);
+        }
+
+        if (specs.Count == 0)
+        {
+            return false;
+        }
+
+        List<SettlementCardPoolSave> pools = EventCardReward.BuildPools(
+            specs,
+            run.Current,
+            characterId => LoadingSystem.GetCharacterRewardCardIds(characterId),
+            SettlementRewardPresenter.DefaultCandidateCount,
+            BattleSytem.RandomGenerator);
+        if (pools.Count == 0)
+        {
+            ShowMessage("剧情发卡未生成任何卡牌份，已跳过。");
+            return false;
+        }
+
+        MapNodeType sourceNodeType = (MapNodeType)run.Current.PendingSourceNodeType;
+        run.EnterSettlement(EventCardReward.BuildRequest(storyEventTitle, sourceNodeType, pools));
+        string poolText = string.Join(" / ", pools.Select(pool => SettlementRewardPresenter.GetSlotDisplayName(pool, run.GetSlotDisplayName)));
+        GD.Print($"[结算] 事件发卡进入统一结算界面：{storyEventTitle}（{SettlementRewardPresenter.GetSourceNodeTypeText(sourceNodeType)}）| {pools.Count} 份 | {poolText}");
+        SettlementReady?.Invoke();
+        return true;
     }
 
     private void ApplyStoryHpDelta(int delta)
@@ -519,6 +629,7 @@ public partial class HexBattleScene : Control
 
         // ── 底部：能量 / 牌堆（手牌左侧）──
         var resPanel = MakePanel();
+        resPanelNode = resPanel;
         Place(resPanel, 0.135f, 0.69f, 0.23f, 0.92f);
         AddChild(resPanel);
         var resBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; resBox.AddThemeConstantOverride("separation", 6); resPanel.AddChild(resBox);
@@ -577,14 +688,15 @@ public partial class HexBattleScene : Control
         var actionCol = new VBoxContainer(); actionCol.AddThemeConstantOverride("separation", 8);
         Place(actionCol, 0.73f, 0.68f, 0.865f, 0.89f);
         AddChild(actionCol);
-        AddButton(actionCol, "结束回合", () =>
+        endTurnButton = AddButton(actionCol, "结束回合", () =>
         {
-            if (Session == null) return;
+            if (Session == null || IsPostSettlementMode) return; // 战后没有回合推进，也不会触发敌人回合（新案 §四）
             CancelPendingCast();
             MapView.SetMoving(false);
             Session.EndCurrentTurn();
             RunMonsterQueue();
-        }).CustomMinimumSize = new Vector2(0, 44);
+        });
+        endTurnButton.CustomMinimumSize = new Vector2(0, 44);
         moveButton = AddButton(actionCol, "移动（1 能量）", () =>
         {
             if (Session == null) return;
@@ -607,6 +719,13 @@ public partial class HexBattleScene : Control
         tooltip.AddChild(tooltipText); AddChild(tooltip);
         pauseLayer = new CanvasLayer { Name = "PauseLayer", Layer = RunUiLayers.Pause };
         AddChild(pauseLayer);
+        // 暂停时的 Esc 归口：暂停让整棵树停摆，只有 ProcessMode = Always 的节点还能收到输入（交互案 §九）。
+        pauseLayer.AddChild(new PauseEscapeCloser
+        {
+            Name = "PauseEscapeCloser",
+            ProcessMode = ProcessModeEnum.Always,
+            Escape = () => SetPaused(false),
+        });
         pauseShade = new ColorRect { Color = new Color(0, 0, 0, .65f), Visible = false, ProcessMode = ProcessModeEnum.Always, ZIndex = 200 };
         pauseShade.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); pauseLayer.AddChild(pauseShade);
         var pauseCenter = new CenterContainer { ProcessMode = ProcessModeEnum.Always };
@@ -828,11 +947,79 @@ public partial class HexBattleScene : Control
         var loadout = Session.SelectedLoadout;
         RefreshHandEquipmentPrefab(leftHandButton, loadout.LeftHand, Session.SelectedHand == BattlefieldSession.HandSlot.Left);
         RefreshHandEquipmentPrefab(rightHandButton, loadout.RightHand, Session.SelectedHand == BattlefieldSession.HandSlot.Right);
+        if (IsPostSettlementMode)
+        {
+            // 战后战场操作态（新案 §四 / §五）：不显示能量与移动额度，也没有回合推进；
+            // 移动按钮只看角色是否还在场，文案固定去掉「（1 能量）」。
+            bool canMove = p.Presence == BattlefieldPresence.Active && p.Unit.HP > 0;
+            moveButton.Disabled = !canMove;
+            if (!canMove) MapView.SetMoving(false);
+            moveButton.Text = movePlanning ? "取消移动" : "移动";
+            ApplyPostSettlementVisibility();
+            return;
+        }
+
         moveButton.Disabled = p.RemainingMoves == 0 || p.Unit.Energy < 1 || p.Presence != BattlefieldPresence.Active;
         if (moveButton.Disabled) MapView.SetMoving(false);
         RefreshHand();
         moveButton.Disabled = Session.Phase != BattlefieldSession.BattlePhase.Player || Session.HasPendingHandChoice ||
             p.RemainingMoves == 0 || p.Unit.Energy < 1 || p.Presence != BattlefieldPresence.Active;
+    }
+    /// <summary>
+    /// 战后战场操作态（新案 §四 / §五）：关闭结算面板后由宿主开启 —— 只保留「切换角色」与「自由移动」。
+    /// 隐藏手牌槽 / 能量与额度文本 / 牌堆 / 结束回合，移动按钮文案转「移动」；进出都会重排 HUD。
+    /// **未结束的战斗（例如战斗途中触发的事件发卡结算）一律不进入该状态**：收掉手牌与结束回合会让战斗无法继续。
+    /// </summary>
+    public void SetPostSettlementMode(bool enabled)
+    {
+        if (IsPostSettlementMode == enabled) return;
+        if (enabled && Session != null && !Session.IsFinished) return;
+        IsPostSettlementMode = enabled;
+        if (enabled)
+        {
+            // 战后不能出牌 / 用道具 / 换装备：先收掉进行中的拖拽与移动规划，再进入自由移动。
+            if (draggedItem != null) CancelItemDrag();
+            if (draggedCard != null) CancelCardDrag();
+            pendingCardId = 0; lastCastHover = null;
+            MapView?.ClearCastPreview();
+            if (movePlanning) EndMovePlanning(false);
+            Session?.EnterPostBattleFreeMove();
+        }
+        else
+        {
+            Session?.ExitPostBattleFreeMove();
+        }
+
+        ApplyPostSettlementVisibility();
+        RefreshHud();
+        if (enabled) PostBattleStateChanged?.Invoke(); // 进入战后操作态即落档一次：关掉面板后直接退出重进也能回到同一张战场
+    }
+
+    /// <summary>
+    /// 战后战场按存档重建（交互案 §七 4 改口径「位置落档」）：把快照写回会话（位置 / 存活 / 生命 / 地面物件 / 随身与手位），
+    /// 成功后重排 HUD；地图视图订阅会话变更后自行重绘。宿主只在结算态调用，失败时销毁本场退回「只复现结算界面」。
+    /// </summary>
+    public bool ApplyPostBattleSnapshot(RunPostBattleSave snapshot, out string error)
+    {
+        error = "";
+        if (Session == null) { error = "战场未就绪。"; return false; }
+        if (!Session.RestorePostBattleState(snapshot, out error)) return false;
+        RefreshHud();
+        return true;
+    }
+
+    /// <summary>
+    /// 战后表现收口（新案 §四）：手牌槽 / 能量与额度 / 牌堆 / 结束回合整块隐藏；
+    /// 角色 Tab 行、左右手装备槽、当前格与随身道具槽保留（只读，不响应拖拽）。
+    /// </summary>
+    private void ApplyPostSettlementVisibility()
+    {
+        if (handAreaNode != null) handAreaNode.Visible = !IsPostSettlementMode;
+        if (resPanelNode != null) resPanelNode.Visible = !IsPostSettlementMode;
+        if (endTurnButton != null) endTurnButton.Visible = !IsPostSettlementMode;
+        if (moveButton != null) moveButton.Visible = true;
+        if (IsPostSettlementMode && moveConfirmRow != null) moveConfirmRow.Visible = false;
+        if (IsPostSettlementMode && pileOverlay != null) pileOverlay.Visible = false;
     }
 
     private static string FormatPhase(BattlefieldSession.BattlePhase phase) => phase switch
@@ -896,19 +1083,31 @@ public partial class HexBattleScene : Control
         CancelPendingCast(); MapView.SetMoving(true); MapView.ClearMovePath();
         moveButton.Visible = true; moveButton.Text = "取消移动";
         moveConfirmRow.Visible = false;
-        ShowMessage("悬停在一次移动可达格上预览；按住左键拖拽绘制连续路线，松开后确认。 ");
+        ShowMessage(IsPostSettlementMode
+            ? "战后移动：点地图上任意可达格即移动到位（不消耗能量与移动次数）；按 Esc 或点「取消移动」退出。"
+            : "悬停在一次移动可达格上预览；按住左键拖拽绘制连续路线，松开后确认。 ");
     }
 
     public override void _Process(double delta)
     {
         commandApi?.ProcessPending();
-        if (Session == null || !movePlanning || moveDragActive || moveAwaitingConfirmation || !MapView.HoveredCell.HasValue) return;
+        if (Session == null) return;
+        if (IsPostSettlementMode)
+        {
+            // 战后规划态：悬停预览「走到该格的最短合法路径」（点选即移动，见 OnPostBattlePointerPressed）。
+            if (!movePlanning || moveExecuting || !MapView.HoveredCell.HasValue) return;
+            UpdatePostBattlePreview(MapView.HoveredCell.Value);
+            return;
+        }
+        if (!movePlanning || moveDragActive || moveAwaitingConfirmation || !MapView.HoveredCell.HasValue) return;
         UpdateMovePreview(MapView.HoveredCell.Value, maximumActions: 1);
     }
 
     private void OnMovePointerPressed(AxialHex coord)
     {
-        if (!movePlanning || moveAwaitingConfirmation || moveExecuting) return;
+        if (!movePlanning || moveAwaitingConfirmation) return;
+        if (IsPostSettlementMode) { OnPostBattlePointerPressed(coord); return; } // 战后点选即移动，不画路线
+        if (moveExecuting) return;
         moveDragActive = true;
         // Preserve the one-action hover preview. If there was no hover frame, seed it once here.
         if (plannedMovePath.Count == 0) UpdateMovePreview(coord, maximumActions: 1);
@@ -916,12 +1115,14 @@ public partial class HexBattleScene : Control
 
     private void OnMovePointerDragged(AxialHex coord)
     {
+        if (IsPostSettlementMode) return; // 战后只做点选，不画路线（新案 §五 7）
         if (!movePlanning || !moveDragActive || moveAwaitingConfirmation || moveExecuting) return;
         TryAppendOrRewindMoveNode(coord);
     }
 
     private void OnMovePointerReleased(AxialHex coord)
     {
+        if (IsPostSettlementMode) return; // 战后没有「确定移动 / 取消移动」两步确认（新案 §五 3）
         if (!movePlanning || !moveDragActive || moveAwaitingConfirmation || moveExecuting) return;
         moveDragActive = false;
         if (plannedMovePath.Count == 0) return;
@@ -940,6 +1141,60 @@ public partial class HexBattleScene : Control
         if (path.SequenceEqual(plannedMovePath)) return;
         plannedMovePath = path;
         MapView.SetMovePath(path);
+    }
+
+    /// <summary>战后规划态的悬停预览：走到该格的最短合法路径（不限移动额度）。</summary>
+    private void UpdatePostBattlePreview(AxialHex destination)
+    {
+        var path = Session.Movement.FindPathIgnoringBudget(Session.SelectedId, destination);
+        if (path.SequenceEqual(plannedMovePath)) return;
+        plannedMovePath = path;
+        MapView.SetMovePath(path);
+    }
+
+    /// <summary>
+    /// 战后「点选即移动」（新案 §五）：点可达格立即沿最短合法路径走到底（不消耗能量与移动次数）；
+    /// 点自己人只切换选中角色；点不可达格只打一条控制台日志 —— 不移动、不退出规划态、不弹提示框。
+    /// </summary>
+    private void OnPostBattlePointerPressed(AxialHex coord)
+    {
+        if (Session == null) return;
+        BattleUnitPlacement occupant = Session.Occupancy.At(coord);
+        if (occupant != null && occupant.Role == BattlefieldRole.Player && occupant.Presence == BattlefieldPresence.Active)
+        {
+            // 角色 Tab / 点自己人：与战斗内同一套切人逻辑（只换选中，不等价于移动）。
+            // 上一段移动的逐格表现还在播时也允许切人 —— 切人不影响正在播放的移动。
+            if (occupant.UnitId != Session.SelectedId)
+            {
+                Session.Select(occupant.UnitId);
+                plannedMovePath = Array.Empty<AxialHex>(); MapView.ClearMovePath();
+                ShowMessage($"已选中 {occupant.Name}，继续点可达格即可移动。");
+            }
+            return;
+        }
+        if (moveExecuting) return; // 上一段移动的逐格表现还在播：等播完再接收新的移动指令
+
+        int moverId = Session.SelectedId;
+        if (!Session.TryPostBattleMove(moverId, coord, out string error))
+        {
+            ShowMessage("战后再移动失败：" + error);
+            return;
+        }
+
+        MovePostBattleAlongPath();
+    }
+
+    /// <summary>战后移动表现收尾：等战场播完路径上的逐格移动动画，再清掉预览并留在规划态（可连续移动）。</summary>
+    private async void MovePostBattleAlongPath()
+    {
+        moveExecuting = true;
+        while (MapView != null && MapView.HasPendingPresentation)
+            await ToSignal(GetTree().CreateTimer(0.05f), SceneTreeTimer.SignalName.Timeout);
+        if (!GodotObject.IsInstanceValid(this) || Session == null || MapView == null) return;
+        moveExecuting = false;
+        plannedMovePath = Array.Empty<AxialHex>(); MapView.ClearMovePath();
+        ShowMessage("战后移动完成（不消耗能量与移动次数）。");
+        PostBattleStateChanged?.Invoke(); // 移动播完再落档：位置以最终落点为准（新案 §七 4 改口径）
     }
 
     /// <summary>
@@ -990,6 +1245,15 @@ public partial class HexBattleScene : Control
     private void RefreshHand()
     {
         if (Session == null || handRow == null) return;
+        if (IsPostSettlementMode)
+        {
+            // 战后手牌槽整块隐藏（新案 §四）：不再重建卡面，手牌数据仍留在 Session 里。
+            foreach (Node child in handRow.GetChildren()) child.QueueFree();
+            handCardMap.Clear(); handCardBasePositions.Clear();
+            foreach (Tween tween in handHoverTweens.Values) tween?.Kill();
+            handHoverTweens.Clear(); hoveredHandCard = null;
+            return;
+        }
         // 初始 _Ready 中 Control 尚未完成容器布局时尺寸约为 (8,24)。
         // 此时计算重叠间距会错误地把所有卡压到一起；等布局完成后只重排一次。
         if (handRow.Size.X < 300f)
@@ -1098,7 +1362,7 @@ public partial class HexBattleScene : Control
         tooltip.Position = new Vector2(Math.Clamp(screenPosition.X + 16, 0, Math.Max(0, Size.X - 330)),
             Math.Clamp(screenPosition.Y + 16, 0, Math.Max(0, Size.Y - Math.Max(tooltip.Size.Y, 200))));
     }
-    /// <summary>怪物攻击命中玩家：按该怪物的 `StateType.Steal` 层数窃取局内金币（金币不足不扣），
+    /// <summary>怪物攻击命中玩家：按该怪物的 `StateType.Steal` 层数窃取局内金币（**余额不足时扣到归零**），
     /// 记账写入存档（`StolenGoldEntry{InstanceId,MonsterId,Amount}`，按怪物实例分开），供胜利结算按"该实例是否被击杀"返还。</summary>
     private void OnMonsterHitPlayer(BattleUnitPlacement attacker, BattleUnitPlacement victim)
     {
@@ -1111,9 +1375,12 @@ public partial class HexBattleScene : Control
         string instanceKey = Session.GetMonsterInstanceKey(attacker.UnitId);
         int stolen = RunGoldLedger.Steal(run, instanceKey, monster.id, perAttack);
         if (stolen > 0) RunSession.Instance.Save();
-        ShowMessage(stolen > 0
-            ? $"{attacker.Name} 窃取了 {stolen} 金币（剩余 {run.Gold}）；击杀它可在结算时追回。"
-            : $"{attacker.Name} 想窃取 {perAttack} 金币，但你的金币不足，未被扣。");
+        // 三分支：足额 / 部分（余额被扣到归零）/ 余额已归零无可窃取。
+        ShowMessage(stolen <= 0
+            ? $"{attacker.Name} 想窃取 {perAttack} 金币，但你的金币已归零，无可窃取。"
+            : stolen < perAttack
+                ? $"{attacker.Name} 窃取了 {stolen} 金币（金币已归零）；击杀它可在结算时追回。"
+                : $"{attacker.Name} 窃取了 {stolen} 金币（剩余 {run.Gold}）；击杀它可在结算时追回。");
     }
 
     private void CancelPendingCast()
@@ -1220,7 +1487,8 @@ public partial class HexBattleScene : Control
     }
 
     private bool CanStartDrag() =>
-        Session != null && Session.Phase == BattlefieldSession.BattlePhase.Player && draggedCard == null && handRow != null;
+        Session != null && Session.Phase == BattlefieldSession.BattlePhase.Player && !IsPostSettlementMode &&
+        draggedCard == null && handRow != null;
 
     private void TryStartDragFromPosition(Vector2 position)
     {
@@ -1385,13 +1653,17 @@ public partial class HexBattleScene : Control
     // ── 道具拖拽（对齐卡牌逻辑）：无目标→跟手/拖出即用；需目标→直线选目标；丢到道具栏→移动 ──
     private void TryStartItemDragFromPosition(Vector2 position)
     {
-        if (Session == null || Session.Phase != BattlefieldSession.BattlePhase.Player) return;
+        // 战后只有「当前格道具」能拿起（交互案 §七 3 改口径：可拾取）：随身槽 / 手位不响应拖动，
+        // 也不会自动拾取；拿起后只能落到随身槽（道具）或手位（装备），见 FinishPostBattleItemDrag。
+        if (Session == null || draggedItem != null) return;
+        if (!IsPostSettlementMode && Session.Phase != BattlefieldSession.BattlePhase.Player) return;
         foreach (Control host in AllItemHosts())
         {
             foreach (Node child in host.GetChildren())
             {
                 if (child is Control ctrl && ctrl.GetGlobalRect().HasPoint(position) && itemNodeMap.TryGetValue(ctrl.GetInstanceId(), out GroundObject item))
                 {
+                    if (IsPostSettlementMode && ctrl.GetParent() != curItemHost) return;
                     StartItemDrag(item, ctrl);
                     return;
                 }
@@ -1424,9 +1696,11 @@ public partial class HexBattleScene : Control
         node.Position = mouse - node.Size / 2;
         node.Modulate = new Color(1f, 1f, 1f, 0.92f);
         MapView.ClearCastPreview();
-        ShowMessage(item.NeedsTarget
-            ? $"拖出「{item.DefinitionId}」指向目标格，松左键使用；拖回道具栏或 Esc 取消。"
-            : $"拖出「{item.DefinitionId}」离开道具栏即使用。");
+        ShowMessage(IsPostSettlementMode
+            ? $"战后：把「{item.DefinitionId}」拖到{(item.Kind == GroundObjectKind.Equipment ? "左右手位装备" : "随身道具槽拾取")}；拖到别处取消（战后不能使用 / 投掷 / 丢弃）。"
+            : item.NeedsTarget
+                ? $"拖出「{item.DefinitionId}」指向目标格，松左键使用；拖回道具栏或 Esc 取消。"
+                : $"拖出「{item.DefinitionId}」离开道具栏即使用。");
     }
 
     private void UpdateItemDrag()
@@ -1441,7 +1715,7 @@ public partial class HexBattleScene : Control
         itemDragExited = !overItemPanels && !overEquipmentSlot;
         UpdateEquipmentDropHighlights(mouse, draggedItem.Kind == GroundObjectKind.Equipment);
 
-        if ((draggedItem.NeedsTarget || draggedItem.Kind == GroundObjectKind.Equipment) && !overItemPanels && !overEquipmentSlot)
+        if (!IsPostSettlementMode && (draggedItem.NeedsTarget || draggedItem.Kind == GroundObjectKind.Equipment) && !overItemPanels && !overEquipmentSlot)
         {
             draggedItemNode.Position = new Vector2(GetViewportRect().Size.X / 2 - draggedItemNode.Size.X / 2, 22);
             UpdateItemPreview(CurrentHoveredCell());
@@ -1532,6 +1806,7 @@ public partial class HexBattleScene : Control
     private void FinishItemDrag()
     {
         if (draggedItem == null) return;
+        if (IsPostSettlementMode) { FinishPostBattleItemDrag(); return; } // 战后只做拾取（新案 §七 3 改口径）
         Vector2 mouse = GetGlobalMousePosition();
 
         if (draggedEquipmentHand >= 0)
@@ -1620,6 +1895,65 @@ public partial class HexBattleScene : Control
                 : Session.TryUseItem(draggedItemSlot, out err);
             if (ok) CleanupItemDrag(); else { CancelItemDrag(); ShowMessage(err); }
         }
+    }
+
+    /// <summary>
+    /// 战后拾取落点判定（新案 §七 3 改口径：可拾取）：装备拖到左右手位 → 装备到该手；道具拖到随身槽 → 收进该槽；
+    /// 其余落点一律取消 —— 战后**不能**使用 / 投掷 / 丢弃 / 换装之外的地面交换。
+    /// </summary>
+    private void FinishPostBattleItemDrag()
+    {
+        Vector2 mouse = GetGlobalMousePosition();
+        bool overHand = draggedItem.Kind == GroundObjectKind.Equipment &&
+            (leftHandButton.GetGlobalRect().HasPoint(mouse) || rightHandButton.GetGlobalRect().HasPoint(mouse));
+        if (overHand)
+        {
+            BattlefieldSession.HandSlot hand = leftHandButton.GetGlobalRect().HasPoint(mouse)
+                ? BattlefieldSession.HandSlot.Left : BattlefieldSession.HandSlot.Right;
+            if (TryPostBattlePickup(draggedItem.InstanceId, -1, hand, out string equipMessage)) CleanupItemDrag();
+            else { CancelItemDrag(); ShowMessage(equipMessage); }
+            return;
+        }
+
+        int slot = ItemSlotUnder(mouse);
+        if (slot >= 0 && draggedItem.Kind == GroundObjectKind.Item)
+        {
+            if (TryPostBattlePickup(draggedItem.InstanceId, slot, null, out string pickMessage)) CleanupItemDrag();
+            else { CancelItemDrag(); ShowMessage(pickMessage); }
+            return;
+        }
+
+        CancelItemDrag();
+        ShowMessage("战后只能把当前格物件拾取到随身道具槽（道具）或左右手位（装备）。");
+    }
+
+    /// <summary>
+    /// 战后拾取（交互案 §七 3 改口径）：把当前格道具收进随身槽、把当前格装备装到对应手位 ——
+    /// 复用战斗内同一批正式入口（`TryPickItemFromCurrentCell` / `TryEquipFromCurrentCell`），成功即触发
+    /// <see cref="PostBattleStateChanged"/> 让宿主把布局（含拾取结果）落档。
+    /// 拖拽落点与烟测都走本方法（同一实现，避免两套判定）。
+    /// </summary>
+    public bool TryPostBattlePickup(string instanceId, int slot, BattlefieldSession.HandSlot? hand, out string message)
+    {
+        message = "";
+        if (Session == null) { message = "战场未就绪。"; return false; }
+        if (!IsPostSettlementMode) { message = "当前不是战后操作态。"; return false; }
+
+        if (hand.HasValue)
+        {
+            if (!Session.TryEquipFromCurrentCell(instanceId, hand.Value, out string equipError)) { message = equipError; return false; }
+            message = $"已把当前格装备装到{(hand.Value == BattlefieldSession.HandSlot.Left ? "左手" : "右手")}。";
+        }
+        else if (slot is >= 0 and < 3)
+        {
+            if (!Session.TryPickItemFromCurrentCell(instanceId, slot, out string pickError)) { message = pickError; return false; }
+            message = $"已把当前格道具拾取到随身道具槽 {slot + 1}。";
+        }
+        else { message = "战后只能拾取到随身道具槽（道具）或左右手位（装备）。"; return false; }
+
+        ShowMessage(message);
+        PostBattleStateChanged?.Invoke();
+        return true;
     }
 
     private void CleanupItemDrag()
@@ -1747,7 +2081,7 @@ public partial class HexBattleScene : Control
         plannedMovePath = Array.Empty<AxialHex>();
         MapView.SetMoving(false);
         MapView.ClearMovePath();
-        if (moveButton != null) { moveButton.Text = "移动（1 能量）"; moveButton.Visible = true; }
+        if (moveButton != null) { moveButton.Text = IsPostSettlementMode ? "移动" : "移动（1 能量）"; moveButton.Visible = true; }
         if (moveConfirmRow != null) moveConfirmRow.Visible = false;
         if (showCancelMessage) ShowMessage("已取消移动。");
     }
@@ -1766,8 +2100,19 @@ public partial class HexBattleScene : Control
         if (input is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.Escape)
         {
             if (pendingCardId > 0) CancelPendingCast();
+            else if (IsPostSettlementMode)
+            {
+                // 战后 Esc 分层（新案 §六）：放弃弹窗 / 三选一 / 结算面板 / 待领取态的地图由宿主先接管，
+                // 宿主没消费才退出移动规划态；两者都不成立才落回暂停。Esc 永不等于「确认」。
+                if (EscapeFallback == null || !EscapeFallback())
+                {
+                    if (movePlanning) EndMovePlanning();
+                    else SetPaused(true);
+                }
+            }
             else if (movePlanning) EndMovePlanning();
             else if (MapView.Moving) { MapView.SetMoving(false); ShowMessage("已取消移动。"); }
+            else if (EscapeFallback != null && EscapeFallback()) { /* 宿主已消费：结算界面逐层关闭 / 关地图 */ }
             else SetPaused(true);
             GetViewport().SetInputAsHandled();
         }

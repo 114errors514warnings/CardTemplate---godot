@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "eventId": "EVT-CARD-001",
+  "battleMapId": "M-EVENT-EMPTY",
+  "title": "结算夹具：发卡事件",
+  "summary": "发卡效果 CardAdd 的配置示例与烟测夹具：选项只发卡、不进入战斗，用于验证非战斗来源（事件 / 商人）走同一结算界面（交互案 §5.7）。只在 EventIndex 登记，不进 EventPool，正式流程不可达。",
+  "canSkip": true,
+  "background": { "backgroundId": "bg_night_road", "initialEffect": "FadeIn" },
+  "actors": [],
+  "timeline": [
+    { "order": 1, "type": "Narration", "actorId": "", "side": "Narration", "bubbleStyle": "Plain", "text": "路边散着一只没人认领的行囊。", "autoDelay": 1.0 },
+    { "order": 2, "type": "Narration", "actorId": "", "side": "Narration", "bubbleStyle": "Plain", "text": "里面的东西还能用——挑一样带走。", "autoDelay": 1.0 }
+  ],
+  "choices": [
+    { "choiceId": "EVT-CARD-001-C01", "order": 1, "text": "只带走一枚旧图纸", "effectPreview": "第二位角色获得指定卡牌（1 份，候选恒为这 1 张）", "effects": [ { "type": "CardAdd", "target": "Slot", "value": 1, "referenceId": "10000001" } ], "next": { "type": "Close" } },
+    { "choiceId": "EVT-CARD-001-C02", "order": 2, "text": "整只行囊搬走", "effectPreview": "第一位角色卡池任选 1 张、第二位角色获得指定卡牌（2 份）", "effects": [ { "type": "CardAdd", "target": "Slot", "value": 0 }, { "type": "CardAdd", "target": "Slot", "value": 1, "referenceId": "10000001" } ], "next": { "type": "Close" } }
+  ]
+}

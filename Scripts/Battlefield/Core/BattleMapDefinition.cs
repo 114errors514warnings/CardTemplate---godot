@@ -44,6 +44,9 @@ public sealed class BattleObjectData
 public sealed class BattleMapDefinition
 {
     public string MapId { get; set; } = "";
+    /// <summary>运行时来源关卡（`LevelIndex.csv` 的关卡 Id = 关卡 CSV 文件名，由 `BattleLevelCatalog.ApplyMonstersTo` 带进来）。
+    /// 只用于报错定位：同一张地图会被多个关卡复用（`M-F1-001` 有 12 个关卡），光看 <see cref="MapId"/> 分不清是哪一关出的问题。</summary>
+    [JsonIgnore] public string LevelId { get; set; } = "";
     public int Version { get; set; } = 1;
     public int Seed { get; set; } = 60908;
     public double CellRadius { get; set; } = 42;
@@ -72,6 +75,10 @@ public sealed class BattleMapDefinition
     /// 作为窃取金币等"按怪物实例"记账的稳定键）。</summary>
     [JsonIgnore] public List<string> MonsterInstanceIds { get; set; } = new();
 
+    /// <summary>关卡级战斗规则（关卡 CSV 的 `BattleRule` 列，由 `BattleLevelCatalog.ApplyMonstersTo` 带进来）。
+    /// 规则不绑地图/关卡 ID：任何关卡填上枚举值即可复用。</summary>
+    [JsonIgnore] public List<BattleRuleKind> Rules { get; set; } = new();
+
     public static BattleMapDefinition Parse(string json)
     {
         var options = new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
@@ -90,7 +97,7 @@ public sealed class BattleMapDefinition
         if (Cells == null || CellOverrides == null || PlayerSpawnCoords == null || ExitAnchors == null ||
             GenerationExcludedCoords == null || ObjectPlacements == null || RandomItemDefinitions == null ||
             PlayerCharacterIds == null || MonsterIds == null || FixedEnemySpawnCoords == null || MonsterInitialValues == null ||
-            MonsterInstanceIds == null) throw new ArgumentException("地图集合字段不能为 null。");
+            MonsterInstanceIds == null || Rules == null) throw new ArgumentException("地图集合字段不能为 null。");
         if (PlayerSpawnCoords.Count != 3 || PlayerCharacterIds.Count != 3) throw new ArgumentException("必须配置三个玩家槽与出生格。");
         if (Cells.Count > 20000 || CellOverrides.Count > 20000 || ObjectPlacements.Count > 20000 || MonsterIds.Count > 1000)
             throw new ArgumentException("地图配置超过支持容量。");

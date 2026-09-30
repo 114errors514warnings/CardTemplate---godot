@@ -20,6 +20,29 @@ public partial class MapScene : Control
 	}
 	/// <summary>只读地图（内容进行中）为 true；可选地图（等待选点）为 false。烟测与外部逻辑据此断言输入模式。</summary>
 	public bool IsReadOnly => readOnlyMode;
+
+	/// <summary>
+	/// 节点进入前置闸门：宿主（RunFlowScene）可在进入前拦截（待领取态的放弃确认弹窗，§7.1）。
+	/// 返回 false = 本次点击不进入、状态不做任何改动；玩家确认后由 <see cref="ReplayPendingNodeEnter"/> 重放。
+	/// </summary>
+	public Func<int, bool> EnterGate { get; set; }
+
+	/// <summary>被闸门拦下的待进入节点 Id（-1 = 无）。</summary>
+	public int PendingNodeEnterId => pendingNodeEnterId;
+
+	private int pendingNodeEnterId = -1;
+
+	/// <summary>重放被闸门拦下的那次节点进入（放弃确认通过后由宿主调用）；没有待进入节点时什么都不做。</summary>
+	public void ReplayPendingNodeEnter()
+	{
+		int nodeId = pendingNodeEnterId;
+		if (nodeId < 0)
+		{
+			return;
+		}
+
+		EnterNode(nodeId);
+	}
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
@@ -201,13 +224,19 @@ public partial class MapScene : Control
 		panel.Setup(null, null, SetStatus, id => StartDebugContent("Level", id), id => StartDebugContent("Event", id));
 		return panel;
 	}
+	/// <summary>当前所在格点的节点类型（调试直达事件时用作结算来源类型，§5.7）；取不到返回 `Empty`（展示为「未知」）。</summary>
+	private MapNodeType ResolveCurrentNodeType()
+	{
+		MapBoardNode node = board == null ? null : board.GetNode(currentNodeId);
+		return node == null ? MapNodeType.Empty : node.Type;
+	}
 	private void StartDebugContent(string type, string id)
 	{
 		var session = RunSession.Instance; if (session?.Current == null || string.IsNullOrWhiteSpace(id)) return;
 		if (type == "Event")
 		{
 			try { StoryEventCatalog.Load(id); } catch (System.Exception ex) { SetStatus(ex.Message); return; }
-			session.BeginRunEvent(id, currentNodeId);
+			session.BeginRunEvent(id, currentNodeId, ResolveCurrentNodeType());
 			if (EmbeddedMode && EventRequested != null) { EventRequested.Invoke(id); return; }
 			GetTree().ChangeSceneToFile(RunEventScenePath); return;
 		}
@@ -244,7 +273,7 @@ public partial class MapScene : Control
 		infoLabel.Text =
 			$"当前格: {nodeText}　HP: {session.Current.CharacterSlots[0].CurrentHp}" +
 			$"　金币: {session.Current.Gold}　钥匙: {session.Current.Keys}" +
-			$"　普通敌袭已打: {session.Current.MapState.NormalEncounterIndex}";
+			$"　普通敌袭已打: {session.Current.MapState.CurrentNormalEncounterCount}";
 	}
 
 	// ── 绘制 ──────────────────────────────────────────────
@@ -509,6 +538,32 @@ public partial class MapScene : Control
 			return;
 		}
 
+		// 前置闸门（§7.1）：宿主可在进入前拦截（待领取态的放弃确认弹窗）；
+		// 被拦截时**不得改动任何状态**，节点 Id 留下来等玩家确认后由 ReplayPendingNodeEnter() 重放。
+		pendingNodeEnterId = nodeId;
+		if (EnterGate != null && !EnterGate(nodeId))
+		{
+			return;
+		}
+
+		EnterNode(nodeId);
+	}
+
+	/// <summary>
+	/// 真正进入节点（唯一的状态改动入口）：移动当前位置 → 已访问格幂等处理 → 按内容分流进战斗 / 事件 / 停留。
+	/// 点击（含闸门）与「放弃确认后重放」都走这里，保证两条路径行为完全一致。
+	/// </summary>
+	private void EnterNode(int nodeId)
+	{
+		RunSession session = RunSession.Instance;
+		MapBoardNode node = board == null ? null : board.GetNode(nodeId);
+		if (readOnlyMode || session?.Current == null || node == null)
+		{
+			return;
+		}
+
+		pendingNodeEnterId = -1;
+
 		// 1) 先移动当前位置
 		session.SetCurrentNode(nodeId);
 		currentNodeId = nodeId;
@@ -542,7 +597,7 @@ public partial class MapScene : Control
 		{
 			try { StoryEventCatalog.Load(content.Id); }
 			catch (System.Exception ex) { SetStatus($"事件配置加载失败：{ex.Message}"); return; }
-			session.BeginRunEvent(content.Id, node.NodeId);
+			session.BeginRunEvent(content.Id, node.NodeId, node.Type);
 			SetStatus($"进入事件：{content.Id}。"); QueueRedraw(); if (EmbeddedMode) EventRequested?.Invoke(content.Id); else GetTree().ChangeSceneToFile(RunEventScenePath); return;
 		}
 
@@ -565,7 +620,7 @@ public partial class MapScene : Control
 		if (content?.Type != "Event") return;
 		try { StoryEventCatalog.Load(content.Id); }
 		catch (Exception ex) { SetStatus($"开始事件加载失败：{ex.Message}"); return; }
-		session.BeginRunEvent(content.Id, start.NodeId);
+		session.BeginRunEvent(content.Id, start.NodeId, start.Type);
 		EventRequested?.Invoke(content.Id);
 	}
 
@@ -580,7 +635,7 @@ public partial class MapScene : Control
 		StageDifficulty? rule = null;
 		if (node.Type == MapNodeType.NormalCombat)
 		{
-			rule = StageEncounterPicker.ResolveNormalCombatDifficultyByEncounterCount(session.Current.MapState.NormalEncounterIndex);
+			rule = StageEncounterPicker.ResolveNormalCombatDifficultyByEncounterCount(session.Current.MapState.CurrentNormalEncounterCount);
 		}
 
 		return LoadingSystem.TryPickStageEncounter(layer, node.Type, rule, new Random(session.Current.MapState.Seed + node.NodeId));

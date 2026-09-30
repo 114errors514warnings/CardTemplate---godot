@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cnv5vcoyumx82"
+
+[deps]
+
+files=["res://DataBase/Balance/MonsterValue.IntentValues.translation", "res://DataBase/Balance/MonsterValue.Note.translation"]
+
+source_file="res://DataBase/Balance/MonsterValue.csv"
+dest_files=["res://DataBase/Balance/MonsterValue.IntentValues.translation", "res://DataBase/Balance/MonsterValue.Note.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

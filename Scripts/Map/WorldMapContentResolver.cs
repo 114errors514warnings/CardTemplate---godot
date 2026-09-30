@@ -14,7 +14,8 @@ public static class WorldMapContentResolver
         if (!string.IsNullOrEmpty(key)) return PickFixed(act, key, node.Type, run.MapState.Seed + node.NodeId);
         if (node.Type == MapNodeType.NormalCombat)
         {
-            string difficulty = ResolveDifficulty(act, run.MapState.NormalEncounterIndex + 1);
+            // 本层已打场次 + 1 = 「第几场」（`NormalCombatRule.csv` 的 Min/Max 是 1 基口径）。
+            string difficulty = ResolveDifficulty(act, run.MapState.GetNormalEncounterCount(act) + 1);
             return PickLevel(act, node.Type, difficulty, run.MapState.Seed + node.NodeId);
         }
         if (node.Type == MapNodeType.HighRiskCombat)

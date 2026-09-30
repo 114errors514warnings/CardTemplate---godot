@@ -101,6 +101,42 @@ public sealed class BattleOccupancyService
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// 战后快照还原：按给定「单位 → (坐标, 在场状态)」重建占位索引（交互案 §七 4 改口径「位置落档」）。
+    /// 不在表里的单位保持原位；快照坐标不可走或已被占用时退回该单位原格，原格也不可用再退回第一块空地。
+    /// 表里没有的退场单位不会被放回场上；`Presence` 非法值按该单位当前位置的状态处理。
+    /// </summary>
+    public void RestoreLayout(IReadOnlyDictionary<int, (AxialHex Coord, BattlefieldPresence Presence)> layout)
+    {
+        if (layout == null || layout.Count == 0) return;
+        occupants.Clear();
+        foreach (BattleUnitPlacement placement in placements.Values)
+        {
+            if (!layout.TryGetValue(placement.UnitId, out var entry)) { ReindexIfActive(placement); continue; }
+            BattlefieldPresence presence = Enum.IsDefined(entry.Presence) ? entry.Presence : placement.Presence;
+            AxialHex coord = ResolveRestoreCoord(placement, entry.Coord);
+            placement.Coord = coord; placement.Presence = presence;
+            if (presence == BattlefieldPresence.Active) occupants[coord] = placement.UnitId;
+        }
+        Changed?.Invoke();
+    }
+
+    private void ReindexIfActive(BattleUnitPlacement placement)
+    {
+        if (placement.Presence == BattlefieldPresence.Active) occupants[placement.Coord] = placement.UnitId;
+    }
+
+    private AxialHex ResolveRestoreCoord(BattleUnitPlacement placement, AxialHex wanted)
+    {
+        if (board.IsWalkable(wanted) && !occupants.ContainsKey(wanted)) return wanted;
+        if (board.IsWalkable(placement.Coord) && !occupants.ContainsKey(placement.Coord)) return placement.Coord;
+        foreach (AxialHex coord in board.Cells.Keys)
+        {
+            if (board.IsWalkable(coord) && !occupants.ContainsKey(coord)) return coord;
+        }
+        return placement.Coord;
+    }
+
     public void RemoveFromBoard(int unitId, BattlefieldPresence reason)
     {
         if (reason == BattlefieldPresence.Active) throw new ArgumentException("离场原因无效。");

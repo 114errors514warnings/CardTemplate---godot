@@ -161,12 +161,14 @@ public partial class CharacterSelectScene : Control
 
 	private void RefreshSlots()
 	{
+		// 已进入槽位的角色名统一走取名口（交互案 §3.1）：队伍内同名按出现次序编号（重剑手 / 重剑手2）。
+		List<string> displayNames = CharacterSlotNaming.BuildDisplayNames(selectedIds, LoadingSystem.GetCharacterName);
 		for (int i = 0; i < SlotCount; i++)
 		{
 			int characterId = selectedIds[i];
-			if (characterId > 0 && LoadingSystem.CharacterDictionary.TryGetValue(characterId, out Character character))
+			if (characterId > 0 && i < displayNames.Count)
 			{
-				slotButtons[i].Text = $"槽位 {i + 1}\n{character.Name}";
+				slotButtons[i].Text = $"槽位 {i + 1}\n{displayNames[i]}";
 			}
 			else
 			{

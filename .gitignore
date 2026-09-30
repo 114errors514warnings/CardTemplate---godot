@@ -43,8 +43,21 @@ Scripts/*.js
 *.log
 *.tmp
 
-# 本地跑测产物、截图与测试文件
-/Tests/
+# 本地跑测产物与截图（测试源码 .cs / .csproj 仍入库）
+# 测试工程：源码入库，产物不入库（烟测截图 / 日志按代码约定写在 Tests/ 根与 Tests/ApiCaptures/）
+Tests/**/*.png
+Tests/**/*.txt
+Tests/**/*.err
+Tests/**/*.trx
+Tests/**/*.import
+
+# 工程卫生临时归档（C5）：仓库根残留、历史测试产物、配置目录临时文件
+# 见 README/施工文档/2026/2026.09/9月施工文档.md §46
+_tmp/
+
+# AI 编码助手本地记忆库（.ai-memory/：bugs / conventions / decisions）
+# 仅本机可用的工程记忆，换个机器无意义 → 不入库
+.ai-memory/
 
 # ============================================================
 # 敏感凭证（API Key / Token / 私钥）

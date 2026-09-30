@@ -5,6 +5,8 @@ public partial class RunEventScene : Control
 {
 	public event System.Action ContentFinished;
 	public event System.Action<string> LevelRequested;
+	/// <summary>事件内发卡已落档 InSettlement（交互案 §5.7）：宿主应显示统一结算界面。</summary>
+	public event System.Action SettlementReady;
     public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
     public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
     public override void _Ready()
@@ -19,12 +21,28 @@ public partial class RunEventScene : Control
         scene.UseRunSession = true; scene.StoryEventId = config.EventId; scene.StoryMapId = string.IsNullOrWhiteSpace(config.BattleMapId) ? "M-EVENT-EMPTY" : config.BattleMapId;
         scene.EnableCommandApi = false; scene.EnableDebugPanel = true; scene.ShowBuiltInResult = false;
         scene.StoryCompleted += () => OnStoryCompleted(run, scene);
+        scene.SettlementReady += OnStorySettlementReady;
         AddChild(scene);
+    }
+
+    /// <summary>事件内发卡已落档（§5.7）：统一结算界面由宿主（RunFlowScene）复现，这里只把信号转发出去。</summary>
+    private void OnStorySettlementReady()
+    {
+        if (SettlementReady != null) { SettlementReady.Invoke(); }
     }
 
     /// <summary>事件结束：选项请求进入战斗则转入战斗，否则标记节点并返回地图。</summary>
     private void OnStoryCompleted(RunSession run, HexBattleScene scene)
     {
+        // 事件内发卡（`CardAdd`）已经进入统一结算界面（§5.7）：本事件的节点推进交给结算流程
+        // （领完关闭 / 放弃确认后由宿主推进），这里不能再 CompletePendingEventToMap——
+        // 那样会把 GameMode 拉回 OnMap，待领取态与浮窗全部丢失。
+        if (run?.IsInSettlement == true)
+        {
+            OnStorySettlementReady();
+            return;
+        }
+
         string battleLevelId = scene?.PendingStoryBattleLevelId ?? string.Empty;
         if (string.IsNullOrWhiteSpace(battleLevelId))
         {

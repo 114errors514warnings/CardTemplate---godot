@@ -78,6 +78,10 @@ public static class StoryEventCatalog
         if (config.Timeline.Count == 0 || config.Timeline.Select(x => x.Order).Distinct().Count() != config.Timeline.Count || config.Timeline.Any(x => string.IsNullOrWhiteSpace(x.Text))) throw new ArgumentException("剧情时间线无效。");
         if (config.Choices.Count == 0 || config.Choices.Any(x => string.IsNullOrWhiteSpace(x.ChoiceId) || string.IsNullOrWhiteSpace(x.Text) || string.IsNullOrWhiteSpace(x.EffectPreview))) throw new ArgumentException("剧情选项配置无效。");
         if (config.Choices.Any(x => !IsValidNext(x.Next))) throw new ArgumentException("剧情选项跳转配置无效：只允许 Close 或带关卡 Id 的 Battle。");
+        if (config.Choices.Any(x => x.Effects != null && x.Effects.Any(e => e != null
+            && string.Equals(e.Type, EventCardReward.EffectTypeCardAdd, StringComparison.Ordinal)
+            && !EventCardReward.TryParseEffect(e.Type, e.Target, e.Value, e.ReferenceId, out _, out _))))
+            throw new ArgumentException("剧情选项的发卡效果无效：CardAdd 必须 target = Slot、value = 槽位序（0 起）、referenceId 留空或写卡牌 Id。");
     }
     private static bool IsValidNext(StoryNextConfig next)
     {

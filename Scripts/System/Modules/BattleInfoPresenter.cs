@@ -100,12 +100,11 @@ internal sealed class BattleInfoPresenter
         }
         else
         {
-            foreach (int characterId in configuredCharacterIds)
+            // 战斗内角色列表统一走取名口（交互案 §3.1）：与组队界面 / 结算界面同一套同名编号（重剑手 / 重剑手2）。
+            List<string> displayNames = CharacterSlotNaming.BuildDisplayNames(configuredCharacterIds, LoadingSystem.GetCharacterName);
+            for (int index = 0; index < configuredCharacterIds.Count; index++)
             {
-                string characterName = LoadingSystem.CharacterDictionary.TryGetValue(characterId, out Character character)
-                    ? character.Name
-                    : "未知";
-                builder.AppendLine($"{characterId}({characterName})");
+                builder.AppendLine($"{configuredCharacterIds[index]}({displayNames[index]})");
             }
         }
 

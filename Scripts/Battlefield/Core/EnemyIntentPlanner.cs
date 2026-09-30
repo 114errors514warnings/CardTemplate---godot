@@ -7,11 +7,14 @@ namespace CardSimulator.Battlefield;
 public enum EnemyTargetPolicy { Nearest, ThrustNearestCollinear, ThrowSingleLowestHealth, ThrowAreaDense, AllyRange }
 public enum EnemyActionOrder { MoveThenAttack, AttackThenMove }
 public enum EnemyIntentPreviewCertainty { UnknownNumbers, KnownDamageUnknownRange, KnownDamageKnownRange }
+/// <summary>意图的行为类别：**意图不等于攻击**——逃跑、以及将来的强化自身等都不属于攻击方式。
+/// `Attack` 时才使用 `AttackMode` 的攻击几何；其余行为不索敌、不走攻击管线。</summary>
+public enum EnemyIntentBehavior { Attack = 0, Flee = 1 }
 
 public sealed record EnemyIntentSpec(WeaponAttackMode AttackMode, int AttackRange, int MoveBudget,
 	EnemyActionOrder Order, EnemyTargetPolicy TargetPolicy, int AreaRadius = 0,
 	EnemyIntentPreviewCertainty PreviewCertainty = EnemyIntentPreviewCertainty.KnownDamageUnknownRange,
-	int ActionBudget = 0, AxialHex? PreviewDirection = null);
+	int ActionBudget = 0, AxialHex? PreviewDirection = null, EnemyIntentBehavior Behavior = EnemyIntentBehavior.Attack);
 
 public sealed record EnemyIntentPlan(BattleUnitPlacement Target, AxialHex? LandingCell, IReadOnlyList<AxialHex> Path, AxialHex? AttackDirection = null);
 
@@ -38,15 +41,23 @@ public static class BattleEnemyIntentCatalog
 			string[] f = LoadCsv.ParseCSVFields(line);
 			if (f.Length == 0 || string.Equals(f[0], "MonsterId", StringComparison.OrdinalIgnoreCase)) continue;
 			if (f.Length < 11 || !int.TryParse(f[0], out int monsterId) || !int.TryParse(f[1], out int index) ||
-				!Enum.TryParse(f[2], true, out EnemyIntentPreviewCertainty certainty) || !Enum.TryParse(f[3], true, out WeaponAttackMode mode) ||
+				!Enum.TryParse(f[2], true, out EnemyIntentPreviewCertainty certainty) ||
 				!int.TryParse(f[4], out int range) || !int.TryParse(f[5], out int move) || !int.TryParse(f[6], out int budget) ||
-
 				!Enum.TryParse(f[7], true, out EnemyActionOrder order) || !Enum.TryParse(f[8], true, out EnemyTargetPolicy policy) || !int.TryParse(f[9], out int radius))
+				throw new ArgumentException($"怪物意图 CSV 行无效：{line}");
+			// 第 12 列 `Behavior` 可空（缺列 / 留空 = Attack），与旧行完全兼容。
+			EnemyIntentBehavior behavior = EnemyIntentBehavior.Attack;
+			if (f.Length >= 12 && !string.IsNullOrWhiteSpace(f[11]) &&
+				!Enum.TryParse(f[11].Trim(), true, out behavior))
+				throw new ArgumentException($"怪物意图 CSV 的 Behavior 无效：{line}");
+			// `AttackMode` 只在攻击行为下解析：逃跑（以及将来的强化自身等）不属于攻击方式，不参与该校验。
+			WeaponAttackMode mode = WeaponAttackMode.AdjacentSingle;
+			if (behavior == EnemyIntentBehavior.Attack && !Enum.TryParse(f[3], true, out mode))
 				throw new ArgumentException($"怪物意图 CSV 行无效：{line}");
 			AxialHex? dir = null;
 			string[] dirFields = f[10].Split(';');
 			if (dirFields.Length == 2 && int.TryParse(dirFields[0], out int q) && int.TryParse(dirFields[1], out int r)) dir = new AxialHex(q, r);
-			overrides[(monsterId, index)] = new EnemyIntentSpec(mode, range, move, order, policy, radius, certainty, budget, dir);
+			overrides[(monsterId, index)] = new EnemyIntentSpec(mode, range, move, order, policy, radius, certainty, budget, dir, behavior);
 		}
 		loaded = true;
 	}
@@ -171,4 +182,36 @@ public static class EnemyIntentPlanner
 		return (dir.Q == 0 ? dq == 0 : dq % dir.Q == 0) && (dir.R == 0 ? dr == 0 : dr % dir.R == 0)
 			&& ((dir.Q == 0 ? dr / dir.R : dq / dir.Q) > 0);
 	}
+
+	/// <summary>逃跑行为：不索敌，取"朝最近地图边界格"的路径，最多 `budget` 步。
+	/// 已在边界格（或无可走路径）时返回空路径，由调用方直接结算离场。</summary>
+	public static IReadOnlyList<AxialHex> PlanFleePath(BattleBoard board, BattleOccupancyService occupancy,
+		BattleUnitPlacement enemy, int radius, int budget, out bool onBoundary)
+	{
+		onBoundary = IsOnMapBoundary(enemy.Coord, radius);
+		if (onBoundary || budget <= 0) return Array.Empty<AxialHex>();
+
+		var queue = new Queue<(AxialHex Cell, List<AxialHex> Path)>();
+		var seen = new HashSet<AxialHex> { enemy.Coord };
+		queue.Enqueue((enemy.Coord, new List<AxialHex>()));
+		List<AxialHex> best = null;
+		while (queue.Count > 0)
+		{
+			var current = queue.Dequeue();
+			if (IsOnMapBoundary(current.Cell, radius)) { best = current.Path; break; }
+			foreach (AxialHex next in BattleRangeResolver.Neighbors(current.Cell).OrderBy(x => x.Q).ThenBy(x => x.R))
+			{
+				if (!seen.Add(next) || !board.IsWalkable(next)) continue;
+				if (next != enemy.Coord && occupancy.At(next) != null) continue;
+				queue.Enqueue((next, new List<AxialHex>(current.Path) { next }));
+			}
+		}
+
+		if (best == null || best.Count == 0) return Array.Empty<AxialHex>();
+		return best.Count <= budget ? best : best.Take(budget).ToArray();
+	}
+
+	/// <summary>是否位于地图最外圈格点（按地图半径判定）。</summary>
+	public static bool IsOnMapBoundary(AxialHex coord, int radius) =>
+		AxialHex.Distance(new AxialHex(0, 0), coord) >= Math.Max(1, radius);
 }

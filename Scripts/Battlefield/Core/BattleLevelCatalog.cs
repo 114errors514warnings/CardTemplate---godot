@@ -17,6 +17,8 @@ public sealed class BattleLevelConfig
     public int DropTableId;
     public string LevelType = "";
     public string Difficulty = "";
+    /// <summary>关卡级战斗规则（关卡 CSV 第 13 列 `BattleRule`，全行一致；留空/缺列 = 无额外规则）。</summary>
+    public List<BattleRuleKind> Rules = new();
     public List<BattleLevelObject> Objects = new();
 }
 
@@ -36,6 +38,7 @@ public static class BattleLevelCatalog
     public static BattleLevelConfig Parse(string levelId, IEnumerable<string> csvLines)
     {
         var config = new BattleLevelConfig { LevelId = levelId };
+        bool rulesBound = false;
         foreach (string line in csvLines)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -43,14 +46,25 @@ public static class BattleLevelCatalog
             if (f.Length < 12) throw new ArgumentException($"关卡配置行无效：{line}");
             if (!int.TryParse(f[1], out int drop) || !int.TryParse(f[7], out int q) || !int.TryParse(f[8], out int r))
                 throw new ArgumentException($"关卡配置数值无效：{line}");
-            if (string.IsNullOrEmpty(config.MapId)) { config.MapId = f[0]; config.DropTableId = drop; config.LevelType = f[2]; config.Difficulty = f[3]; }
+            // 第 13 列 `BattleRule`：关卡级变量，可空；写了就必须全行一致。
+            List<BattleRuleKind> rowRules = f.Length >= 13 ? BattleRuleRegistry.Parse(f[12], levelId) : new List<BattleRuleKind>();
+            if (string.IsNullOrEmpty(config.MapId))
+            {
+                config.MapId = f[0]; config.DropTableId = drop; config.LevelType = f[2]; config.Difficulty = f[3];
+                config.Rules = rowRules; rulesBound = true;
+            }
             else if (config.MapId != f[0] || config.DropTableId != drop || config.LevelType != f[2] || config.Difficulty != f[3])
                 throw new ArgumentException($"关卡配置的地图、掉落、类型或难度不一致：{levelId}");
+            else if (rulesBound && !SameRules(config.Rules, rowRules))
+                throw new ArgumentException($"关卡配置的战斗规则不一致：{levelId}");
             config.Objects.Add(new BattleLevelObject(f[4], f[5], f[6], q, r) { InitialValue = f[10].Trim() });
         }
         if (string.IsNullOrEmpty(config.MapId)) throw new ArgumentException($"关卡没有对象配置：{levelId}");
         return config;
     }
+
+    private static bool SameRules(List<BattleRuleKind> left, List<BattleRuleKind> right) =>
+        left.Count == right.Count && left.SequenceEqual(right);
 
     /// <summary>
     /// 把关卡的怪物行写入地图定义：怪物 ID、固定出生点与**逐只初始值**（关卡 CSV 的 `InitialValue`）。
@@ -63,6 +77,10 @@ public static class BattleLevelCatalog
         definition.FixedEnemySpawnCoords = new List<HexCoordinateData>();
         definition.MonsterInitialValues = new List<string>();
         definition.MonsterInstanceIds = new List<string>();
+        // 关卡级战斗规则随关卡一起进入战斗定义（Rule 不绑地图，换关卡即可复用）。
+        definition.Rules = new List<BattleRuleKind>(level.Rules ?? new List<BattleRuleKind>());
+        // 关卡 Id 也带进定义：地图被多个关卡复用，报错时必须能指回具体关卡。
+        definition.LevelId = level.LevelId ?? string.Empty;
         int index = 0;
         foreach (BattleLevelObject monster in level.Objects.Where(x => x.ObjectType == "Monster"))
         {

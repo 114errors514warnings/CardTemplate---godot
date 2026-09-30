@@ -21,6 +21,8 @@ public partial class LoadingSystem : Node
 	public const string DropTableCsvPathKey = "Data.Map.DropTable";
 	/// <summary>角色卡池来源表路径 key（FilePathRegistry）。</summary>
 	public const string CharacterRewardPoolCsvPathKey = "Data.Card.CharacterRewardPool";
+	/// <summary>怪物意图价值表路径 key（FilePathRegistry）；奖励折损口径见 单位数值平衡标准 §2.4。</summary>
+	public const string MonsterValueCsvPathKey = "Data.Balance.MonsterValue";
 	/// <summary>Stage 配置根目录：不逐文件注册，按 <层>/<节点类型>.csv 读取。</summary>
 	public const string StageRootDir = "res://DataBase/Stage/";
 
@@ -55,6 +57,11 @@ public partial class LoadingSystem : Node
 	/// 缓存角色卡池来源行（CharacterRewardPool.csv）
 	/// </summary>
 	private static List<CharacterRewardSource> characterRewardPoolCache = new List<CharacterRewardSource>();
+
+	/// <summary>
+	/// 缓存怪物意图价值表条目（MonsterValue.csv），奖励折损口径用
+	/// </summary>
+	private static List<MonsterValueEntry> monsterValueCache = new List<MonsterValueEntry>();
 
 	/// <summary>
 	/// 缓存 Stage 遭遇配置：key = 层目录名（第一层…），value = 类型 → 行列表
@@ -119,6 +126,12 @@ public partial class LoadingSystem : Node
 	public static List<CharacterRewardSource> CharacterRewardSources
 	{
 		get { return characterRewardPoolCache; }
+	}
+
+	/// <summary>怪物意图价值行（LoadMonsterValueByKey 后可用）。</summary>
+	public static List<MonsterValueEntry> MonsterValueEntries
+	{
+		get { return monsterValueCache; }
 	}
 
 	public override void _Ready()
@@ -664,13 +677,56 @@ public partial class LoadingSystem : Node
 		return characterRewardPoolCache;
 	}
 
+	/// <summary>加载怪物意图价值表（FilePathRegistry: Data.Balance.MonsterValue）。</summary>
+	public static List<MonsterValueEntry> LoadMonsterValueByKey(string pathKey = MonsterValueCsvPathKey, bool useCache = true)
+	{
+		if (useCache && monsterValueCache.Count > 0)
+		{
+			return monsterValueCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		monsterValueCache = string.IsNullOrWhiteSpace(path)
+			? new List<MonsterValueEntry>()
+			: LoadMonsterValueCsv.LoadEntriesFromCSV(path);
+		return monsterValueCache;
+	}
+
+	/// <summary>按怪物 Id 取意图价值行；没有该行返回 null（调用方按「只有面板 HP」兜底）。</summary>
+	public static MonsterValueEntry FindMonsterValueEntry(int monsterId)
+	{
+		if (monsterValueCache.Count == 0)
+		{
+			LoadMonsterValueByKey();
+		}
+
+		foreach (MonsterValueEntry entry in monsterValueCache)
+		{
+			if (entry != null && entry.MonsterId == monsterId)
+			{
+				return entry;
+			}
+		}
+
+		return null;
+	}
+
 	/// <summary>
 	/// 加载 Stage 三层 × 节点类型遭遇配置。文件缺失/仅表头 = 空行表（视为无配置）。
+	/// 旧体系目录已于 2026-09-30 归档到 `_archive/DataBase-Stage-2026-09-30/`（见 9 月施工文档 §46）：
+	/// 目录不存在时直接返回空表，不再逐文件打印「CSV file not found」。
 	/// </summary>
 	public static Dictionary<string, Dictionary<MapNodeType, List<StageEncounterRow>>> LoadStageEncounters(bool useCache = true)
 	{
 		if (useCache && stageEncounterCache.Count > 0)
 		{
+			return stageEncounterCache;
+		}
+		if (!DirAccess.DirExistsAbsolute(StageRootDir))
+		{
+			// 旧体系目录已于 2026-09-30 归档（见 9 月施工文档 §46）：目录不存在 = 无配置，
+			// 不再逐文件打印「CSV file not found」。
+			stageEncounterCache.Clear();
 			return stageEncounterCache;
 		}
 
@@ -729,6 +785,22 @@ public partial class LoadingSystem : Node
 		return StageEncounterPicker.Pick(rows, ruleDifficulty, rng, requireUsable);
 	}
 
+	/// <summary>
+	/// `Character.csv` 的角色显示名（交互案 §3.1 的统一取名口原料）：找不到或名字为空时返回空串，
+	/// 由 `CharacterSlotNaming` 兜底成「角色 {id}」。
+	/// </summary>
+	public static string GetCharacterName(int characterId)
+	{
+		if (CharacterDictionary.TryGetValue(characterId, out Character character)
+			&& character != null
+			&& !string.IsNullOrWhiteSpace(character.Name))
+		{
+			return character.Name;
+		}
+
+		return string.Empty;
+	}
+
 	/// <summary>获取某角色可获得的卡牌模板 id 集合（通用 + 角色专属，来源 CharacterRewardPool.csv）。</summary>
 	public static List<int> GetCharacterRewardCardIds(int characterId)
 	{
@@ -770,6 +842,7 @@ public partial class LoadingSystem : Node
 		LoadStatesByKey();
 		LoadDropTablesByKey();
 		LoadCharacterRewardPoolByKey();
+		LoadMonsterValueByKey();
 		LoadStageEncounters();
 	}
 }

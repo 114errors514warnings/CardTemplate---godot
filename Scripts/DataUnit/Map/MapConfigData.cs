@@ -53,3 +53,12 @@ public sealed class CharacterRewardSource
 	public int CharacterId = 0;
 	public string CardSource = string.Empty; // DataBase/Card/ 下相对路径，如 通用/通用Card.csv
 }
+
+/// <summary>DataBase/Balance/MonsterValue.csv 的一行：某怪各条意图的「意图价值」。
+/// 顺序与 <c>Monster.csv</c> 的 `IntentionN` 一致；口径见 单位数值平衡标准 §2.3 / §2.4。</summary>
+public sealed class MonsterValueEntry
+{
+	public int MonsterId = 0;
+	public int[] IntentValues = System.Array.Empty<int>();
+	public string Note = string.Empty;
+}

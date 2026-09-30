@@ -20,6 +20,9 @@ public static class BattlefieldSceneSmoke
             VerifyNormalCombatPool();
             VerifyAssetPaths();
             VerifyMonsterInitialStates();
+            VerifyLevelConfigs();
+            VerifyMonsterTableColumns();
+            VerifyBattleRules();
             VerifyStateEnumNames();
             VerifyGoldStealLedger();
             VerifyMonsterStealTrigger();
@@ -165,7 +168,7 @@ public static class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster turn, states, victory");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, monster turn, states, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)
@@ -464,6 +467,196 @@ public static class BattlefieldSceneSmoke
         GD.Print("BATTLEFIELD_INITIAL_STATE_PASS: 关卡 InitialValue 的 HP= 与 State=<类型>:<层数> 已在开局写入怪物");
     }
 
+    /// <summary>
+    /// 全关卡配置自检（2026-09-28 新增）：`LevelIndex.csv` 里的**每个**关卡都按运行局真实路径走一遍
+    /// （`BattleLevelCatalog.Load` → `ApplyMonstersTo` → `BattlefieldSession`），保证「地图能开、怪能建、`InitialValue` 能解析」。
+    /// 起因：`F1-H-001`（「危」节点）的 `InitialValue` 列误写成字面量 `None`（表格导出的空值），
+    /// 建怪时抛错 → 战场初始化失败 → 玩家看到的是「只剩 UI 框、没有格子和单位」的空白战场；
+    /// 原烟测只建 `F1-001` 且不走 `ApplyMonstersTo`，所以这类配错漏到了实机。
+    /// </summary>
+    private static void VerifyLevelConfigs()
+    {
+        var indexRows = LoadCsv.LoadCSVDataLines("res://DataBase/Level/LevelIndex.csv")
+            .Select(LoadCsv.ParseCSVFields)
+            .Where(x => x.Length >= 2 && x[1].StartsWith("res://", StringComparison.Ordinal))
+            .ToList();
+        Check(indexRows.Count > 0, "level index lists levels with config paths");
+
+        var builtLevelIds = new List<string>();
+        int monsterTotal = 0;
+        foreach (string[] row in indexRows)
+        {
+            string levelId = row[0];
+            BattleLevelConfig level = BattleLevelCatalog.Load(levelId);
+            Check(level.Objects.Count > 0, $"level {levelId} declares objects");
+
+            // ① 关卡 CSV 的任何字段都不允许出现字面量 `None`：空值必须留空。
+            //    （该字面量来自表格导出；`InitialValue=None` 会在建怪时抛「条目必须是 Key=Value」。）
+            foreach (string raw in LoadCsv.LoadCSVDataLines(row[1]))
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                foreach (string field in LoadCsv.ParseCSVFields(raw))
+                    Check(!string.Equals(field.Trim(), "None", StringComparison.OrdinalIgnoreCase),
+                        $"{levelId} 的字段写成了字面量 None（空值请留空）：{raw}");
+            }
+
+            // ② 按运行局路径建场：怪物 ID / 出生点 / 初始值 / 实例键都走 `ApplyMonstersTo`，
+            //    建会话这一步会真正解析 `InitialValue`（= 玩家点进节点时的同一入口）。
+            string mapPath = BattleLevelCatalog.ResolveMapPath(level.MapId);
+            using (var file = FileAccess.Open(mapPath, FileAccess.ModeFlags.Read))
+            {
+                Check(file != null, $"level {levelId} map opened ({level.MapId})");
+                BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
+                definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+                BattleLevelCatalog.ApplyMonstersTo(definition, level);
+                int monsters = definition.MonsterIds.Count;
+                Check(monsters > 0 && definition.MonsterInitialValues.Count == monsters
+                    && definition.MonsterInstanceIds.Count == monsters,
+                    $"level {levelId} carries one initial value / instance key per monster");
+                using var battle = new BattlefieldSession(definition);
+                Check(battle.Occupancy.Placements.Values.Count(x => x.Role == BattlefieldRole.Enemy) == monsters,
+                    $"level {levelId} deploys {monsters} monsters");
+                monsterTotal += monsters;
+            }
+            builtLevelIds.Add(levelId);
+        }
+        Check(builtLevelIds.Count == indexRows.Count, $"every indexed level builds a battlefield ({builtLevelIds.Count}/{indexRows.Count})");
+        GD.Print($"BATTLEFIELD_LEVEL_CONFIG_PASS: LevelIndex 的 {builtLevelIds.Count} 个关卡按运行局路径建场成功（含 InitialValue 解析），共 {monsterTotal} 只怪物");
+    }
+
+    /// <summary>
+    /// `Monster.csv` 的 `IsMinion`（是否为爪牙）列：真实表按表头定位并整表可解析（意图列不受新列影响），
+    /// 且 `1` 会被解析成 `Monster.IsMinion` 并能被 `MonsterInstance` 继承（折损分流的数据载体，玩法 §7.4 / §7.5）。
+    /// </summary>
+    private static void VerifyMonsterTableColumns()
+    {
+        string path = LoadingSystem.GetFilePathByKey(LoadingSystem.MonsterCsvPathKey);
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        Check(file != null, "monster CSV reachable");
+        string[] lines = file.GetAsText().Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Check(lines.Length > 1, "monster CSV has data rows");
+
+        int isMinionColumn = MonsterCsvSchema.ResolveIsMinionColumnIndex(LoadCsv.ParseCSVFields(lines[0]));
+        Check(isMinionColumn >= 0, "Monster.csv declares the IsMinion column");
+
+        bool everyValueRecognized = true;
+        int minionRows = 0;
+        for (int i = 1; i < lines.Length; i++)
+        {
+            if (!MonsterCsvSchema.TryParseIsMinion(LoadCsv.ParseCSVFields(lines[i]), isMinionColumn, out bool isMinion, out _))
+                everyValueRecognized = false;
+            if (isMinion) minionRows++;
+        }
+        Check(everyValueRecognized, "every Monster.csv IsMinion value is a recognized token");
+
+        Monster[] parsed = LoadMonsterCsv.ParseMonstersFromLines(lines);
+        Check(parsed.Length == lines.Length - 1 && parsed.Length == LoadingSystem.MonsterDictionary.Count,
+            "real monster table parses through the same entry as the loader");
+        Check(parsed.First(x => x.id == 3101).Table.Length == 2 && parsed.First(x => x.id == 3003).Table[0].Length == 3,
+            "appended IsMinion column does not disturb intention parsing");
+
+        Monster[] probe = LoadMonsterCsv.ParseMonstersFromLines(new[]
+        {
+            "id,Name,MAX_HP,Ini_Attack,Ini_Defend,Intention1,Intention2,Intention3,Intention4,Intention5,Intention6,Intention7,Intention8,Intention9,Intention10,IsMinion",
+            "9001,爪牙探针,8,2,1,1,2,,,,,,,,,1",
+        });
+        Check(probe.Length == 1 && probe[0].IsMinion && probe[0].MAX_HP == 8 && probe[0].Table.Length == 2,
+            "IsMinion=1 parses into Monster.IsMinion");
+        Check(new MonsterInstance(probe[0]).IsMinion, "MonsterInstance inherits IsMinion");
+        GD.Print($"BATTLEFIELD_MONSTER_TABLE_PASS: Monster.csv 的 IsMinion 列 = 第 {isMinionColumn + 1} 列，当前标记为爪牙的怪物 {minionRows} 只");
+    }
+
+    /// <summary>关卡级战斗规则（`BattleRule` 列）：枚举解析、规则挂载、意图批次节奏，以及逃跑行为的离场。</summary>
+    private static void VerifyBattleRules()
+    {
+        // ① 关卡 CSV 第 13 列 → 关卡级变量。
+        string[] rows =
+        {
+            "M-F1-001,2001,NormalCombat,Mid,SRB-M01,Monster,3115,-3,0,1;0,State=Steal:1,,BanditEscalation",
+            "M-F1-001,2001,NormalCombat,Mid,SRB-M02,Monster,3115,-3,-1,1;0,State=Steal:1,,BanditEscalation",
+        };
+        BattleLevelConfig ruleLevel = BattleLevelCatalog.Parse("SMOKE-RULE", rows);
+        Check(ruleLevel.Rules.Count == 1 && ruleLevel.Rules[0] == BattleRuleKind.BanditEscalation,
+            "level BattleRule column becomes a level variable");
+        // 真实关卡文件（F1-006 劫匪团伙）走的是同一列，必须能被读到。
+        BattleLevelConfig banditLevel = BattleLevelCatalog.Load("F1-006");
+        Check(banditLevel.Rules.Count == 1 && banditLevel.Rules[0] == BattleRuleKind.BanditEscalation,
+            "F1-006 declares the bandit rule in its own CSV");
+        Check(BattleLevelCatalog.Parse("SMOKE-LEGACY", new[]
+        {
+            "M-F1-001,2001,NormalCombat,Low,SL-M01,Monster,3101,-4,0,,,",
+        }).Rules.Count == 0, "level without BattleRule column stays rule-free");
+
+        // ② 意图批次节奏：第 1–2 个怪物回合低攻列，第 3 个必定高攻列。
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+        using (var file = FileAccess.Open(path, FileAccess.ModeFlags.Read))
+        {
+            var definition = BattleMapDefinition.Parse(file.GetAsText());
+            definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+            BattleLevelCatalog.ApplyMonstersTo(definition, ruleLevel);
+            Check(definition.Rules.Count == 1, "battle definition carries level rules");
+
+            using var battle = new BattlefieldSession(definition);
+            Check(battle.Rules.Count == 1, "session builds the rule implementation");
+            var bandits = battle.Occupancy.Placements.Values
+                .Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active).ToArray();
+            Check(bandits.Length == 2, "fixture deploys the two bandits");
+            Check(bandits.All(x => x.Unit is MonsterInstance m && m.SelectedIntentionIndex == BanditEscalationRule.LowIntentIndex),
+                "batch 1 uses the low-attack intention");
+
+            RunMonsterPhase(battle);
+            Check(bandits.All(x => x.Presence != BattlefieldPresence.Active ||
+                x.Unit is MonsterInstance m && m.SelectedIntentionIndex == BanditEscalationRule.LowIntentIndex),
+                "batch 2 uses the low-attack intention");
+            RunMonsterPhase(battle);
+            var alive = bandits.Where(x => x.Presence == BattlefieldPresence.Active).ToArray();
+            // 第 3 批次不再出低攻：逃跑优先（规格："若非逃跑，必定高攻"），因此允许 High 或 Flee。
+            Check(alive.Length > 0 && alive.All(x => x.Unit is MonsterInstance m &&
+                    m.SelectedIntentionIndex != BanditEscalationRule.LowIntentIndex),
+                "batch 3 leaves the low-attack intention (high attack, or flee when the trigger already fired)");
+            Check(alive.All(x => x.Unit is MonsterInstance m &&
+                    (m.SelectedIntentionIndex == BanditEscalationRule.HighIntentIndex ||
+                     m.SelectedIntentionIndex == BanditEscalationRule.FleeIntentIndex)),
+                "batch 3 uses the high-attack or flee intention only");
+        }
+
+        // ③ 逃跑行为：选中逃跑意图的劫匪站在边界格 → 离场，而不是攻击。
+        using (var file = FileAccess.Open(path, FileAccess.ModeFlags.Read))
+        {
+            var definition = BattleMapDefinition.Parse(file.GetAsText());
+            definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+            BattleLevelCatalog.ApplyMonstersTo(definition, ruleLevel);
+
+            using var battle = new BattlefieldSession(definition);
+            var runner = battle.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy);
+            int radius = Math.Max(1, definition.Radius);
+            AxialHex boundary = battle.Board.Cells.Keys
+                .Where(cell => EnemyIntentPlanner.IsOnMapBoundary(cell, radius) && battle.Occupancy.CanEnter(cell))
+                .OrderBy(cell => cell.Q).ThenBy(cell => cell.R).First();
+            battle.Occupancy.CommitMove(runner, boundary);
+            Check(EnemyIntentPlanner.IsOnMapBoundary(runner.Coord, radius), "runner stands on the map boundary");
+
+            var runnerMonster = (MonsterInstance)runner.Unit;
+            runnerMonster.SetSelectedIntention(BanditEscalationRule.FleeIntentIndex,
+                runnerMonster.Table[BanditEscalationRule.FleeIntentIndex]);
+            Check(BattleEnemyIntentCatalog.Resolve(runnerMonster).Behavior == EnemyIntentBehavior.Flee,
+                "flee intention resolves as the Flee behavior");
+
+            RunMonsterPhase(battle);
+            Check(runner.Presence == BattlefieldPresence.Departed,
+                $"fleeing bandit leaves via Departed (presence {runner.Presence})");
+        }
+
+        GD.Print("BATTLEFIELD_BATTLE_RULE_PASS: 关卡 BattleRule 列挂载规则 → 低攻/门槛高攻节奏 + 逃跑离场（Departed）");
+    }
+
+    /// <summary>跑到怪物阶段结束（含下一轮意图准备）。</summary>
+    private static void RunMonsterPhase(BattlefieldSession battle)
+    {
+        battle.EndCurrentTurn();
+        while (battle.Phase == BattlefieldSession.BattlePhase.Monsters && battle.ExecuteNextMonsterTurnStep()) { }
+    }
+
     /// <summary>图片资源目录自检（2026-09-22 迁移到 `Resources/Images/` 后新增）：
     /// 运行时实际加载的路径必须全部可解析，且旧根目录 `Images/` 不再存在，防止目录再次搬动后静默失效。</summary>
     private static void VerifyAssetPaths()
@@ -483,6 +676,13 @@ public static class BattlefieldSceneSmoke
             "res://Resources/Images/Characters/Pixel/equipment_bow.png",
             "res://Resources/Images/Characters/Pixel/equipment_tome.png",
             "res://Resources/Images/Characters/Pixel/equipment_two_hand_sword.png",
+            "res://Resources/Images/Characters/Pixel/isera_pixel_action_sheet_v3.png",
+            "res://Resources/Images/Characters/Portraits/isera_portrait_v3.png",
+            "res://Resources/Images/Characters/Pixel/swordmaster_bow_action_sheet_v2.png",
+            "res://Resources/Images/Characters/Pixel/swordmaster_tome_action_sheet_v2.png",
+            "res://Resources/Images/Characters/Pixel/swordmaster_death_pose_v2.png",
+            "res://Resources/Images/Characters/Pixel/fx_bow_arrow_trail.png",
+            "res://Resources/Images/Characters/Pixel/fx_tome_cast_rune.png",
         };
         foreach (string path in required) Check(ResourceLoader.Exists(path), $"asset path resolves: {path}");
         Check(!ResourceLoader.Exists("res://Images/UI/IntentIcons/intent_move.png"), "legacy root Images/ folder is gone");
@@ -502,24 +702,24 @@ public static class BattlefieldSceneSmoke
         GD.Print("BATTLEFIELD_STATE_ENUM_PASS: 通用State.csv 的 EnumName 列与 StateType 枚举逐行一致（含 Steal=21）");
     }
 
-    /// <summary>窃取金币账本（按实例）：攻击扣款（不足不扣）、同 ID 多只各自记账、结算只返还被击杀实例。</summary>
+    /// <summary>窃取金币账本（按实例）：攻击扣款（余额不足扣到归零）、同 ID 多只各自记账、结算只返还被击杀实例。</summary>
     private static void VerifyGoldStealLedger()
     {
         var run = new RunSaveData { Gold = 5 };
         Check(RunGoldLedger.Steal(run, "F1-006-M01", 3115, 3) == 3 && run.Gold == 2, "steal deducts the configured amount");
-        Check(RunGoldLedger.Steal(run, "F1-006-M01", 3115, 3) == 0 && run.Gold == 2, "insufficient gold steals nothing (no partial)");
-        Check(RunGoldLedger.Steal(run, "F1-006-M02", 3115, 1) == 1 && run.Gold == 1, "same monster id on another instance records separately");
-        Check(RunGoldLedger.Find(run, "F1-006-M01").Amount == 3 && RunGoldLedger.Find(run, "F1-006-M02").Amount == 1,
-            "ledger keeps one entry per monster instance");
+        // 口径（2026-09-26）：余额不足 → 扣到归零（可部分扣除），记账 = 实扣额。
+        Check(RunGoldLedger.Steal(run, "F1-006-M01", 3115, 3) == 2 && run.Gold == 0, "insufficient gold is deducted down to zero");
+        Check(RunGoldLedger.Steal(run, "F1-006-M02", 3115, 1) == 0 && run.Gold == 0, "an empty purse gives another instance nothing");
+        Check(RunGoldLedger.Find(run, "F1-006-M01").Amount == 5 && RunGoldLedger.Find(run, "F1-006-M02") == null,
+            "ledger keeps one entry per monster instance (partial included)");
 
         int refunded = RunGoldLedger.RefundDefeated(run, new[] { "F1-006-M01" });
-        Check(refunded == 3 && run.Gold == 4, $"defeated instance refunds its own loot (gold {run.Gold})");
-        Check(RunGoldLedger.Find(run, "F1-006-M01") == null && RunGoldLedger.Find(run, "F1-006-M02") != null,
-            "refund clears only the killed instance");
+        Check(refunded == 5 && run.Gold == 5, $"defeated instance refunds its own loot (gold {run.Gold})");
+        Check(RunGoldLedger.Find(run, "F1-006-M01") == null, "refund clears the killed instance");
 
         RunGoldLedger.Clear(run);
-        Check(run.StolenGoldFromMonsters.Count == 0 && run.Gold == 4, "clearing keeps already refunded gold");
-        GD.Print("BATTLEFIELD_GOLD_LEDGER_PASS: 窃取金币账本（按怪物实例分开记账、不足不扣、只返还被击杀实例）");
+        Check(run.StolenGoldFromMonsters.Count == 0 && run.Gold == 5, "clearing keeps already refunded gold");
+        GD.Print("BATTLEFIELD_GOLD_LEDGER_PASS: 窃取金币账本（按怪物实例分开记账、余额不足扣到归零、只返还被击杀实例）");
     }
 
     /// <summary>端到端：带 `Steal` 状态的怪物攻击命中玩家 → 触发窃取钩子并按层数记入金币账本（每次攻击一次）。</summary>
