@@ -6,7 +6,7 @@
   "Shape": "Hexagon",
   "Radius": 10,
   "PlayerSpawnCoords": [{ "Q": 0, "R": 0 }, { "Q": 1, "R": 0 }, { "Q": 0, "R": 1 }],
-  "PlayerCharacterIds": [1001, 1002, 1002],
+  "PlayerCharacterIds": [1001, 1002, 1003],
   "MonsterIds": [3001, 3002, 3003, 3004, 3005, 3006],
   "CellOverrides": [
     { "Q": -3, "R": -1, "Kind": "Obstacle", "BlocksSight": true },

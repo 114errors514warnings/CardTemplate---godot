@@ -319,6 +319,19 @@ internal sealed class MonsterIntentionService
                 targets.AddRange(battle.GetAllUnits());
                 break;
 
+            case EffectTargetType.Auto:
+                // `3;0;<状态类型>;<层数>`：目标类型 0 = Auto = **随机一名敌对单位**（对怪物就是随机一名角色）。
+                // 口径与 `BattleUnitRegistry.ResolveEffectTargets` 的 Auto 分支一致，也与
+                // [怪物配置](../../README/功能说明文档/数据系统/数据配置/怪物.md) 的「对角色施加 1 层易伤」描述一致。
+                // 修复前 Auto 落到本方法的 default（自身），使 3101 / 3107 / 3112 的弱化实际加在怪物自己身上
+                // （= 玩家反而吃到 ×1.5 增伤收益）；2026-10-01 修复，见 10 月施工文档 §1。
+                List<IUnitInstance> autoEnemyTargets = battle.GetEnemyUnits(monster);
+                if (autoEnemyTargets.Count > 0)
+                {
+                    targets.Add(autoEnemyTargets[BattleSytem.RandomGenerator.Next(autoEnemyTargets.Count)]);
+                }
+                break;
+
             default:
                 if (monster != null)
                 {

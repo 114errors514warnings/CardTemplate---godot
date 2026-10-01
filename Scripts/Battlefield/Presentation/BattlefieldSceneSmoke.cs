@@ -26,6 +26,7 @@ public static class BattlefieldSceneSmoke
             VerifyStateEnumNames();
             VerifyGoldStealLedger();
             VerifyMonsterStealTrigger();
+            VerifyMonsterStateIntentTargets();
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-bow-capture"))
                 await CaptureBowRangePreview(scene, scene.Session);
             var session = scene.Session; var view = scene.MapView;
@@ -36,6 +37,7 @@ public static class BattlefieldSceneSmoke
                 Check(initialCapture == Error.Ok, "initial hand capture saved");
             }
             Check(session.PlayerIds.Count == 3 && session.Occupancy.Occupants.Count == 9, "deployment");
+            Check(session.PlayerIds.Skip(1).All(view.HasCharacterRig), "swordmaster and elf rigs bound to battlefield units");
             Check(session.Selected.BaseMovesPerTurn == 3, "CSV MovesPerTurn reaches runtime");
             int firstId = session.SelectedId;
             int hp = session.Selected.Unit.HP;
@@ -168,7 +170,7 @@ public static class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, monster turn, states, victory");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, monster state target, monster turn, states, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)
@@ -393,7 +395,7 @@ public static class BattlefieldSceneSmoke
     {
         HexBoardData board = MapGeometry.Generate(HexBoardData.DefaultRadius, 20260922);
         MapBoardNode node = board.Nodes.First(x => x.Type == MapNodeType.NormalCombat);
-        var run = new RunSaveData { MapState = new RunMapStateSave { Act = 1, NormalEncounterIndex = 0 } };
+        var run = new RunSaveData { MapState = new RunMapStateSave { Act = 1 } };
         // 次数 → 档位：第 1–3 场 Low、4–5 场 Mid、6 场起 High（NormalCombatRule.csv）。
         var bands = new (string Name, int FoughtCount)[] { ("Low", 0), ("Mid", 4), ("High", 5) };
         var pools = new List<(string Name, SortedSet<string> LevelIds)>();
@@ -404,7 +406,10 @@ public static class BattlefieldSceneSmoke
             for (int seed = 0; seed < 120; seed++)
             {
                 run.MapState.Seed = seed;
-                run.MapState.NormalEncounterIndex = foughtCount;
+                // 分档计数按层独立（P2-11）：写 `NormalEncounterCounts[Act]`。
+                // 旧字段 `NormalEncounterIndex` 要经 `MigrateLegacyNormalEncounterCount()` 才会生效，
+                // 直接写它会让三个档位全部解析成 Low（本烟测此前就是这样静默通过的）。
+                run.MapState.NormalEncounterCounts[1] = foughtCount;
                 ResolvedMapContent content = WorldMapContentResolver.Resolve(1, node, board, run);
                 if (content != null) ids.Add(content.Id);
             }
@@ -414,6 +419,19 @@ public static class BattlefieldSceneSmoke
         SortedSet<string> low = pools.First(x => x.Name == "Low").LevelIds;
         Check(low.SetEquals(new[] { "F1-001", "F1-002", "F1-003" }),
             "act1 low pool = F1-001/002/003, actual: " + DescribePools(pools));
+        SortedSet<string> mid = pools.First(x => x.Name == "Mid").LevelIds;
+        Check(mid.SetEquals(new[] { "F1-004", "F1-005", "F1-006" }),
+            "act1 mid pool = F1-004/005/006, actual: " + DescribePools(pools));
+        SortedSet<string> high = pools.First(x => x.Name == "High").LevelIds;
+        Check(high.SetEquals(new[] { "F1-007", "F1-008", "F1-009" }),
+            "act1 high pool = F1-007/008/009, actual: " + DescribePools(pools));
+        // 档位池行必须存在：2026-10 之前 `LevelPool.csv` 没有 `NormalCombat/High` 行，
+        // 第 6 场起的每个普通敌袭格都会解析成 null 并静默通过（高等档普通敌袭是死内容）。
+        foreach ((string name, SortedSet<string> ids) in pools)
+        {
+            Check(ids.Count > 0, $"act1 {name} normal-combat pool has at least one level row: " + DescribePools(pools));
+        }
+
         foreach ((string name, SortedSet<string> ids) in pools)
         {
             foreach (string levelId in ids)
@@ -683,6 +701,7 @@ public static class BattlefieldSceneSmoke
             "res://Resources/Images/Characters/Pixel/swordmaster_death_pose_v2.png",
             "res://Resources/Images/Characters/Pixel/fx_bow_arrow_trail.png",
             "res://Resources/Images/Characters/Pixel/fx_tome_cast_rune.png",
+            "res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png",
         };
         foreach (string path in required) Check(ResourceLoader.Exists(path), $"asset path resolves: {path}");
         Check(!ResourceLoader.Exists("res://Images/UI/IntentIcons/intent_move.png"), "legacy root Images/ folder is gone");
@@ -763,6 +782,40 @@ public static class BattlefieldSceneSmoke
             $"stolen gold recorded under the instance key (gold {run.Gold})");
         battle.Dispose();
         GD.Print("BATTLEFIELD_MONSTER_STEAL_PASS: 带 Steal 的怪物攻击命中玩家 → 按实例键触发窃取并记账");
+    }
+
+    /// <summary>怪物状态意图的目标：`3;&lt;EffectTargetType&gt;;&lt;状态&gt;;&lt;层数&gt;` 必须落在**角色**身上。
+    /// 六边形战场按索敌目标结算（最近角色），旧卡牌战斗（`MonsterIntentionService`）按 `EffectTargetType`
+    /// 结算（`0` = Auto = 随机一名角色）；两条路径都不允许把弱化加回怪物自己。</summary>
+    private static void VerifyMonsterStateIntentTargets()
+    {
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        var definition = BattleMapDefinition.Parse(file.GetAsText());
+        definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        definition.MonsterIds = new List<int> { 3118 };   // 意图① `3;0;2;2` = 对角色施加 2 层虚弱（狂暴压制）
+        var battle = new BattlefieldSession(definition);
+
+        BattleUnitPlacement monster = battle.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy);
+        AxialHex playerCoord = battle.Occupancy.Placements[battle.PlayerIds[0]].Coord;
+        AxialHex adjacent = BattleRangeResolver.Neighbors(playerCoord).First(c => battle.Board.IsWalkable(c) && battle.Occupancy.At(c) == null);
+        battle.Occupancy.CommitMove(monster, adjacent);
+
+        var instance = (MonsterInstance)monster.Unit;
+        Check(instance.Table.Length == 2 && instance.Table[0][0][0] == (int)EffectType.AddState,
+            "3118 declares a state-only intention first");
+        instance.SetSelectedIntention(0, instance.Table[0]);
+        RunMonsterPhase(battle);
+
+        int monsterWeak = StateSystem.TryGetStateStacks(instance, StateType.Weak, out int ownWeak) ? ownWeak : 0;
+        int playerWeak = battle.PlayerIds.Sum(id =>
+            StateSystem.TryGetStateStacks(battle.Occupancy.Placements[id].Unit, StateType.Weak, out int stacks) ? stacks : 0);
+        Check(monsterWeak == 0, $"state intention must not debuff the monster itself (weak {monsterWeak})");
+        // `3;0;2;2` 施加 2 层虚弱；本烟测跑到怪物阶段结束（`RunMonsterPhase` 末尾会开下一轮玩家回合），
+        // 玩家回合开始时虚弱按 OnTurnStart/Flat 1 衰减 1 层 → 剩 1 层即证明「2 层确实加到了角色身上」。
+        Check(playerWeak == 1, $"state intention lands on a player (total weak {playerWeak})");
+        battle.Dispose();
+        GD.Print("BATTLEFIELD_MONSTER_STATE_TARGET_PASS: `3;0;<状态>;<层数>` 的弱化落在角色身上（怪物自身不加状态）");
     }
 
     private static void VerifyFirstFormalLevel()

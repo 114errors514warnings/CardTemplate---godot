@@ -11,6 +11,7 @@ public partial class BattlefieldView : Control
     public Vector2 Pan { get; private set; }
     public bool Moving { get; private set; }
     public bool HasPendingPresentation => hasActiveMove || hasActiveAttack || presentationQueue.Count > 0;
+    public bool HasCharacterRig(int unitId) => characterRigs.TryGetValue(unitId, out var rig) && rig.IsInsideTree();
     private bool dragging;
     private AxialHex? hover;
     public AxialHex? HoveredCell => hover;
@@ -23,11 +24,30 @@ public partial class BattlefieldView : Control
     private bool hasActiveMove;
     private float activeMoveElapsed;
     private readonly Dictionary<int, Vector2> visualUnitPositions = new();
+    private readonly Dictionary<int, CharacterRig2D> characterRigs = new();
+    private readonly Dictionary<int, float> defeatedRigSeconds = new();
     private BattlefieldAttackEvent activeAttack;
     private bool hasActiveAttack;
     private float activeAttackElapsed;
     private bool activeAttackImpactApplied;
     private readonly Dictionary<int, (int Hp, int Shield)> presentationStats = new();
+    /// <summary>受击滞后条：只有生命伤害才登记（护盾吸收不产生滞后）。Started = 已到冲击帧，此后独立走满 AttackPresentationSeconds。</summary>
+    private readonly Dictionary<int, (int FromHp, float Elapsed, bool Started)> damageLag = new();
+    private const float BaseCellRadius = 42f;
+    private const float HealthBarHeight = 8f;
+    private const float HealthBarWidthFactor = 1.10f;
+    private const float HealthBarTopOffset = 16f;
+    private const float ShieldBadgeWidth = 11f;
+    private const float ShieldBadgeHeight = 12f;
+    private const float ShieldBadgeOverlap = 4f;
+    private const float ShieldBadgeMinScale = .70f;
+    private static readonly Color HealthBarBackColor = new("141c24");
+    private static readonly Color HealthBarPlayerColor = new("6ee59c");
+    private static readonly Color HealthBarEnemyColor = new("e0574f");
+    private static readonly Color HealthBarLagColor = new(1f, 1f, 1f, .55f);
+    private static readonly Color ShieldBadgeFillColor = new("c7d0d8");
+    private static readonly Color ShieldBadgeBorderColor = new("5f6f7d");
+    private static readonly Color ShieldBadgeTextColor = new("16202a");
     private Texture2D moveIntentIcon;
     private Texture2D attackIntentIcon;
     public event Action<string, Vector2> HoverDetails;
@@ -47,10 +67,13 @@ public partial class BattlefieldView : Control
     public void Bind(BattlefieldSession session)
     {
         if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
-        visualUnitPositions.Clear(); presentationQueue.Clear();
+        foreach (CharacterRig2D rig in characterRigs.Values) rig.QueueFree();
+        characterRigs.Clear(); defeatedRigSeconds.Clear();
+        visualUnitPositions.Clear(); presentationQueue.Clear(); damageLag.Clear();
         moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/Images/UI/IntentIcons/intent_move.png");
         attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/Images/UI/IntentIcons/intent_attack.png");
         Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
+        SyncCharacterRigs(0);
         CenterSelected();
     }
     public override void _ExitTree()
@@ -66,6 +89,10 @@ public partial class BattlefieldView : Control
                     ? attack.TargetHpBefore : target.Unit.HP,
                     attack.TargetUnitId == unitId && attack.TargetShieldBefore >= 0 ? attack.TargetShieldBefore : target.Unit.Shield);
         }
+        // 只有掉血才留滞后条：护盾吸收（生命不变）不登记，治疗 / 最大生命变化也不经过此事件。
+        if (attack.TargetUnitId.HasValue && attack.TargetHpBefore >= 0 && attack.TargetHpAfter >= 0
+            && attack.TargetHpAfter < attack.TargetHpBefore)
+            damageLag[attack.TargetUnitId.Value] = (attack.TargetHpBefore, 0f, false);
         if (!hasActiveAttack && presentationQueue.Last?.Value.Attack != null && CanMergePresentation(presentationQueue.Last.Value.Attack, attack))
         {
             BattlefieldAttackEvent prior = presentationQueue.Last.Value.Attack;
@@ -98,10 +125,12 @@ public partial class BattlefieldView : Control
             {
                 activeMove = step.Move; hasActiveMove = true; activeMoveElapsed = 0;
                 visualUnitPositions[activeMove.UnitId] = CellPosition(activeMove.From);
+                if (characterRigs.TryGetValue(activeMove.UnitId, out var movingRig)) movingRig.PlayMove();
             }
             else
             {
                 activeAttack = step.Attack; hasActiveAttack = true; activeAttackElapsed = 0; activeAttackImpactApplied = false;
+                if (characterRigs.TryGetValue(activeAttack.SourceUnitId, out var attackingRig)) attackingRig.PlayAttack();
             }
         }
         if (hasActiveMove)
@@ -115,6 +144,7 @@ public partial class BattlefieldView : Control
                 // Logic may already have committed the next cell before that event is rendered.
                 visualUnitPositions[step.UnitId] = CellPosition(step.To);
                 hasActiveMove = false;
+                if (characterRigs.TryGetValue(step.UnitId, out var stoppedRig)) stoppedRig.PlayIdle();
             }
         }
         if (hasActiveAttack)
@@ -124,8 +154,11 @@ public partial class BattlefieldView : Control
             {
                 activeAttackImpactApplied = true;
                 foreach (int unitId in AffectedUnitIds(activeAttack))
+                {
                     if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
                         presentationStats[unitId] = (target.Unit.HP, target.Unit.Shield);
+                    if (characterRigs.TryGetValue(unitId, out var hitRig) && !hitRig.IsDead) hitRig.PlayHurt();
+                }
             }
             if (activeAttackElapsed >= AttackPresentationSeconds)
             {
@@ -133,8 +166,64 @@ public partial class BattlefieldView : Control
                 hasActiveAttack = false;
             }
         }
+        UpdateDamageLag((float)delta);
         if (!hasActiveMove && !hasActiveAttack && presentationQueue.Count == 0) visualUnitPositions.Clear();
+        SyncCharacterRigs((float)delta);
         QueueRedraw();
+    }
+
+    private void SyncCharacterRigs(float delta)
+    {
+        if (Session == null) return;
+        for (int slot = 0; slot < Session.PlayerIds.Count; slot++)
+        {
+            int id = Session.PlayerIds[slot];
+            int characterId = Session.Definition.PlayerCharacterIds[slot];
+            if (characterId is not (1002 or 1003) || !Session.Occupancy.Placements.TryGetValue(id, out var placement)) continue;
+            if (!characterRigs.TryGetValue(id, out CharacterRig2D rig))
+            {
+                string path = characterId == 1003 ? "res://Scenes/Characters/IseraRig.tscn" : "res://Scenes/Characters/SwordmasterRig.tscn";
+                rig = ResourceLoader.Load<PackedScene>(path).Instantiate<CharacterRig2D>();
+                rig.Name = $"CharacterRig_{id}";
+                rig.Scale = Vector2.One * .8f;
+                AddChild(rig);
+                characterRigs.Add(id, rig);
+            }
+            if (placement.Presence != BattlefieldPresence.Active)
+            {
+                if (!defeatedRigSeconds.ContainsKey(id) && delta > 0 && !HasPendingPresentation)
+                { rig.PlayDeath(); defeatedRigSeconds[id] = 0; }
+                if (defeatedRigSeconds.TryGetValue(id, out float seconds))
+                { defeatedRigSeconds[id] = seconds + delta; rig.Visible = seconds < .85f; }
+                continue;
+            }
+            defeatedRigSeconds.Remove(id);
+            rig.Visible = true;
+            CharacterRig2D.RigLoadout nextLoadout = ResolveRigLoadout(Session.GetLoadout(id));
+            if (rig.Loadout != nextLoadout) rig.SetLoadout(nextLoadout);
+            rig.Position = visualUnitPositions.TryGetValue(id, out Vector2 visual) ? visual : CellPosition(placement.Coord);
+        }
+    }
+
+    private static CharacterRig2D.RigLoadout ResolveRigLoadout(BattlefieldSession.PlayerLoadout equipped)
+    {
+        GroundObject left = equipped?.LeftHand;
+        GroundObject right = equipped?.RightHand;
+        GroundObject twoHand = left?.HandsRequired == 2 ? left : right?.HandsRequired == 2 ? right : null;
+        if (twoHand != null)
+        {
+            if (twoHand.DefinitionId.Contains("弓")) return CharacterRig2D.RigLoadout.Bow;
+            if (twoHand.DefinitionId.Contains("典") || twoHand.DefinitionId.Contains("书")) return CharacterRig2D.RigLoadout.Tome;
+            return CharacterRig2D.RigLoadout.TwoHandedWeapon;
+        }
+        bool shield = left?.DefinitionId.Contains("盾") == true;
+        bool leftWeapon = left != null && !shield;
+        bool rightWeapon = right != null;
+        if (shield && rightWeapon) return CharacterRig2D.RigLoadout.SwordAndShield;
+        if (shield) return CharacterRig2D.RigLoadout.LeftShield;
+        if (leftWeapon && rightWeapon) return CharacterRig2D.RigLoadout.DualSwords;
+        if (leftWeapon || rightWeapon) return CharacterRig2D.RigLoadout.RightSword;
+        return CharacterRig2D.RigLoadout.None;
     }
 
     public Vector2 CellPosition(AxialHex coord)
@@ -191,6 +280,7 @@ public partial class BattlefieldView : Control
             visualUnitPositions.Remove(id);
         foreach (int id in presentationStats.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
             presentationStats.Remove(id);
+        SyncCharacterRigs(0);
         QueueRedraw();
     }
 
@@ -254,7 +344,8 @@ public partial class BattlefieldView : Control
         var p = Session.Occupancy.At(coord);
         if (p != null)
         {
-            text += $"\n{p.Name} · {p.Role}\n生命 {p.Unit.HP}/{p.Unit.Max_HP}  护盾 {p.Unit.Shield}\n攻击 {p.Unit.Attack}  防御 {p.Unit.Defend}";
+            var hoverStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
+            text += $"\n{p.Name} · {p.Role}\n生命 {hoverStats.Item1}/{p.Unit.Max_HP}  护盾 {hoverStats.Item2}\n攻击 {p.Unit.Attack}  防御 {p.Unit.Defend}";
             foreach (var state in p.Unit.States)
             {
                 var definition = GetStateDefinition(state.Key);
@@ -312,12 +403,13 @@ public partial class BattlefieldView : Control
             if (!new Rect2(-60, -60, Size.X + 120, Size.Y + 120).HasPoint(center)) continue;
             Color color = p.Role == BattlefieldRole.Player ? new Color("69bec9") : new Color("d88885");
             if (hasActiveAttack && activeAttackImpactApplied && AffectedUnitIds(activeAttack).Contains(p.UnitId)) color = Colors.Red;
-            DrawCircle(center + new Vector2(0, -7), 16, color);
-            CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
+            bool hasRig = characterRigs.TryGetValue(p.UnitId, out var rig) && rig.Visible;
+            if (!hasRig) DrawCircle(center + new Vector2(0, -7), 16, color);
+            if (!hasRig) CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
-            CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
+            if (!hasRig) CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
             var shownStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
-            CenterText(center + new Vector2(0, 15), $"HP {shownStats.Item1}", 12, color);
+            DrawUnitHealthBar(center, p, shownStats, color, (float)Session.Definition.CellRadius / BaseCellRadius);
             if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));
             if (p.Role == BattlefieldRole.Enemy)
             {
@@ -330,7 +422,7 @@ public partial class BattlefieldView : Control
                 else if (attackIntentIcon != null)
                     DrawTextureRect(attackIntentIcon, new Rect2(center + new Vector2(-31, -66), new Vector2(16, 16)), false);
             }
-            CenterText(center + new Vector2(0, 42), p.Unit.States.Count == 0 ? "无状态" :
+            CenterText(center + new Vector2(0, 48), p.Unit.States.Count == 0 ? "无状态" :
                 string.Join(" ", p.Unit.States.Take(3).Select(x => $"{GetStateDefinition(x.Key).Name[..1]}{x.Value.Stacks}")), 12, new Color("b7c5ce"));
         }
         DrawCastPreview();
@@ -472,6 +564,69 @@ public partial class BattlefieldView : Control
     {
         var font = ThemeDB.FallbackFont;
         DrawString(font, baseline - new Vector2(font.GetStringSize(text, fontSize: size).X / 2, 0), text, fontSize: size, modulate: color);
+    }
+
+    /// <summary>滞后条推进：到冲击帧才开始累加，之后独立走满 AttackPresentationSeconds（表现结束也继续走完），不引入独立计时器组件。</summary>
+    private void UpdateDamageLag(float delta)
+    {
+        if (damageLag.Count == 0) return;
+        bool counting = hasActiveAttack && activeAttackImpactApplied;
+        foreach (int unitId in damageLag.Keys.ToArray())
+        {
+            var lag = damageLag[unitId];
+            bool started = lag.Started || (counting && AffectedUnitIds(activeAttack).Contains(unitId));
+            float elapsed = started ? lag.Elapsed + delta : 0f;
+            if (elapsed >= AttackPresentationSeconds || (!started && !hasActiveAttack && presentationQueue.Count == 0)
+                || !Session.Occupancy.Placements.TryGetValue(unitId, out var placement)
+                || placement.Presence != BattlefieldPresence.Active)
+                damageLag.Remove(unitId);
+            else damageLag[unitId] = (lag.FromHp, elapsed, started);
+        }
+    }
+
+    /// <summary>底条 + 生命填充 + 滞后条 + 左端护盾徽标。护盾不占条宽：条只表达生命，护盾另以徽标数值显示。</summary>
+    private void DrawUnitHealthBar(Vector2 center, BattleUnitPlacement unit, (int, int Shield) shownStats, Color textColor, float scale)
+    {
+        if (unit.Unit.Max_HP <= 0) return;
+        float height = HealthBarHeight * scale;
+        float width = BaseCellRadius * HealthBarWidthFactor * scale;
+        float left = center.X - width / 2f;
+        float top = center.Y + HealthBarTopOffset * scale;
+        DrawRect(new Rect2(left, top, width, height), HealthBarBackColor);
+        float liveRatio = Mathf.Clamp((float)unit.Unit.HP / unit.Unit.Max_HP, 0f, 1f);
+        if (damageLag.TryGetValue(unit.UnitId, out var lag))
+        {
+            float fromRatio = Mathf.Clamp((float)lag.FromHp / unit.Unit.Max_HP, 0f, 1f);
+            float ghostRatio = Mathf.Lerp(fromRatio, liveRatio, Mathf.Clamp(lag.Elapsed / AttackPresentationSeconds, 0f, 1f));
+            if (ghostRatio > 0f) DrawRect(new Rect2(left, top, width * ghostRatio, height), HealthBarLagColor);
+        }
+        float shownRatio = Mathf.Clamp((float)shownStats.Item1 / unit.Unit.Max_HP, 0f, 1f);
+        if (shownRatio > 0f)
+            DrawRect(new Rect2(left, top, width * shownRatio, height),
+                unit.Role == BattlefieldRole.Player ? HealthBarPlayerColor : HealthBarEnemyColor);
+        string text = unit.Role == BattlefieldRole.Player ? $"{shownStats.Item1}/{unit.Unit.Max_HP}" : shownStats.Item1.ToString();
+        CenterText(new Vector2(center.X, top + height - scale), text, Mathf.Max(8, Mathf.RoundToInt(11f * scale)), textColor);
+        if (shownStats.Item2 > 0)
+            DrawShieldBadge(new Vector2(left - ShieldBadgeWidth / 2f + ShieldBadgeOverlap * scale, top + height / 2f), shownStats.Item2, scale);
+    }
+
+    /// <summary>护盾徽标：银色纯色盾形（代码绘制，不占图片资源），数值写在盾形内；过小时只保留盾形。</summary>
+    private void DrawShieldBadge(Vector2 center, int shield, float scale)
+    {
+        float w = ShieldBadgeWidth / 2f * scale;
+        float h = ShieldBadgeHeight / 2f * scale;
+        Vector2[] points =
+        {
+            center + new Vector2(-w, -h), center + new Vector2(w, -h), center + new Vector2(w, h * .35f),
+            center + new Vector2(0, h), center + new Vector2(-w, h * .35f),
+        };
+        DrawColoredPolygon(points, ShieldBadgeFillColor);
+        for (int i = 0; i < points.Length; i++)
+            DrawLine(points[i], points[(i + 1) % points.Length], ShieldBadgeBorderColor, Mathf.Max(1f, scale), true);
+        if (scale < ShieldBadgeMinScale) return;
+        string value = shield.ToString();
+        int size = Mathf.Clamp(Mathf.RoundToInt(10f * scale) - (value.Length >= 3 ? 1 : 0), 7, 10);
+        CenterText(center + new Vector2(0, h * .3f), value, size, ShieldBadgeTextColor);
     }
 
     private static StateDefinition GetStateDefinition(CardSimulator.StateType type) =>

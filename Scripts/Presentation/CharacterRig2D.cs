@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// 重剑手局内模块化骨骼角色。身体拆件绑定 Bone2D，装备绑定手部 Socket，
+/// 局内模块化骨骼角色。身体拆件绑定 Bone2D，装备绑定手部 Socket，
 /// 所有动作只改变骨骼，不替换人物整图。
 /// </summary>
 public partial class CharacterRig2D : Node2D
@@ -11,7 +11,18 @@ public partial class CharacterRig2D : Node2D
     public enum RigLoadout { None, RightSword, LeftShield, SwordAndShield, DualSwords, TwoHandedWeapon, Bow, Tome }
 
     private const string PartsRoot = "res://Resources/Images/Characters/Rigs/Swordmaster/PartsV2/";
+    private const string ElfPartsAtlas = "res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png";
     private const string PixelRoot = "res://Resources/Images/Characters/Pixel/";
+    private static readonly Dictionary<string, int> ElfPartCells = new()
+    {
+        ["head"] = 0, ["torso"] = 1, ["pelvis"] = 2, ["cape"] = 3,
+        ["arm_l_upper"] = 4, ["arm_l_lower"] = 5, ["hand_l"] = 6,
+        ["arm_r_upper"] = 7, ["arm_r_lower"] = 8, ["hand_r"] = 9,
+        ["leg_l_upper"] = 10, ["leg_l_lower"] = 11, ["foot_l"] = 12,
+        ["leg_r_upper"] = 13, ["leg_r_lower"] = 14, ["foot_r"] = 15
+    };
+
+    [Export] public bool IsElf { get; set; }
 
     private readonly Dictionary<string, Bone2D> bones = new();
     private Node2D visualRoot;
@@ -30,6 +41,13 @@ public partial class CharacterRig2D : Node2D
         && animationPlayer.CurrentAnimation.ToString().StartsWith("idle", StringComparison.Ordinal);
     public int CurrentFrame => animationPlayer == null ? -1 : (int)Math.Floor(animationPlayer.CurrentAnimationPosition * 20.0);
     public Vector2 RightHandPosition => rightSocket == null ? Vector2.Zero : ToLocal(rightSocket.GlobalPosition);
+    public Vector2 LeftHandPosition => leftSocket == null ? Vector2.Zero : ToLocal(leftSocket.GlobalPosition);
+    public Vector2 LeftFootPosition => bones.TryGetValue("FootL", out var foot) ? ToLocal(foot.GlobalPosition) : Vector2.Zero;
+    public Vector2 RightFootPosition => bones.TryGetValue("FootR", out var foot) ? ToLocal(foot.GlobalPosition) : Vector2.Zero;
+    public Vector2 VisualRootPosition => visualRoot?.Position ?? Vector2.Zero;
+    public bool IsDead => dead;
+    public float MaxGripOffset => Math.Max(leftEquipment?.Visible == true ? leftEquipment.Position.Length() : 0,
+        rightEquipment?.Visible == true ? rightEquipment.Position.Length() : 0);
     public bool IsAttackEffectVisible => effect?.Visible ?? false;
     public bool IsDedicatedDeathVisible => dead && animationPlayer?.CurrentAnimation == "death";
     public int BoneCount => bones.Count;
@@ -39,6 +57,7 @@ public partial class CharacterRig2D : Node2D
     public override void _Ready()
     {
         TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+        if (IsElf) loadout = RigLoadout.Bow;
         BuildRig();
         BuildAnimationLibrary();
         SetLoadout(loadout);
@@ -53,11 +72,16 @@ public partial class CharacterRig2D : Node2D
         string current = animationPlayer.CurrentAnimation;
         double time = animationPlayer.CurrentAnimationPosition;
         effect.Visible = current is "attack_bow" or "attack_tome" && time >= .13 && time <= .36;
+        if (effect.Visible)
+        {
+            Node2D socket = current == "attack_bow" ? leftSocket : rightSocket;
+            effect.Position = visualRoot.ToLocal(socket.GlobalPosition) + (current == "attack_bow" ? new Vector2(20, -7) : new Vector2(22, -16));
+        }
     }
 
     private void BuildRig()
     {
-        visualRoot = new Node2D { Name = "VisualRoot", Scale = Vector2.One * .78f };
+        visualRoot = new Node2D { Name = "VisualRoot", Scale = Vector2.One * (IsElf ? .70f : .78f), Position = FootAnchor };
         AddChild(visualRoot);
         skeleton = new Skeleton2D { Name = "Skeleton2D" };
 
@@ -138,12 +162,37 @@ public partial class CharacterRig2D : Node2D
         Visible = false
     };
 
-    private static void AddPart(Node2D parent, string file, Vector2 position, float scale, int zIndex)
+    private Vector2 FootAnchor => new(0, IsElf ? -56 : -62);
+
+    private void AddPart(Node2D parent, string file, Vector2 position, float scale, int zIndex)
     {
+        Texture2D texture;
+        if (IsElf)
+        {
+            Texture2D atlas = ResourceLoader.Load<Texture2D>(ElfPartsAtlas);
+            int cell = ElfPartCells[file.Replace(".png", "")];
+            int width = atlas.GetWidth() / 4;
+            int height = atlas.GetHeight() / 4;
+            texture = new AtlasTexture
+            {
+                Atlas = atlas,
+                Region = new Rect2((cell % 4) * width, (cell / 4) * height, width, height)
+            };
+            scale = file switch
+            {
+                "pelvis.png" => .23f,
+                "cape.png" => .22f,
+                "head.png" => .15f,
+                "torso.png" => .16f,
+                "foot_l.png" or "foot_r.png" => .10f,
+                _ => .095f
+            };
+        }
+        else texture = ResourceLoader.Load<Texture2D>(PartsRoot + file);
         var sprite = new Sprite2D
         {
             Name = file.Replace(".png", ""),
-            Texture = ResourceLoader.Load<Texture2D>(PartsRoot + file),
+            Texture = texture,
             Position = position,
             Scale = Vector2.One * scale,
             ZIndex = zIndex,
@@ -310,11 +359,13 @@ public partial class CharacterRig2D : Node2D
         return a;
     }
 
-    private static Animation MakeDeath()
+    private Animation MakeDeath()
     {
         Animation a = NewAnimation(.65);
         AddRotation(a, "VisualRoot", (0, 0), (.12, -8), (.48, 90), (.65, 90));
-        AddPosition(a, "VisualRoot", (0, Vector2.Zero), (.12, new Vector2(-2, 1)), (.48, new Vector2(10, 42)), (.65, new Vector2(10, 42)));
+        // Animation tracks are local to the rig. Keep the standing feet at its origin.
+        Vector2 anchor = FootAnchor;
+        AddPosition(a, "VisualRoot", (0, anchor), (.12, anchor + new Vector2(-2, 1)), (.48, anchor + new Vector2(10, 42)), (.65, anchor + new Vector2(10, 42)));
         AddRotation(a, Rig + "Pelvis/Spine/ArmLUpper", (0, 2), (.32, 32), (.65, 42));
         AddRotation(a, Rig + "Pelvis/Spine/ArmRUpper", (0, -2), (.32, -35), (.65, -48));
         return a;
@@ -327,21 +378,21 @@ public partial class CharacterRig2D : Node2D
         switch (next)
         {
             case RigLoadout.RightSword:
-                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), new Vector2(4, 0), -25); break;
+                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), Vector2.Zero, -25); break;
             case RigLoadout.LeftShield:
                 Equip(leftEquipment, "equipment_shield.png", .058f, new Vector2(418, 436), new Vector2(-1, 1), 0); break;
             case RigLoadout.SwordAndShield:
-                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), new Vector2(4, 0), -25);
+                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), Vector2.Zero, -25);
                 Equip(leftEquipment, "equipment_shield.png", .058f, new Vector2(418, 436), new Vector2(-1, 1), 0); break;
             case RigLoadout.DualSwords:
-                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), new Vector2(4, 0), -25);
-                Equip(leftEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), new Vector2(-4, 0), 25, true); break;
+                Equip(rightEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), Vector2.Zero, -25);
+                Equip(leftEquipment, "equipment_sword.png", .064f, new Vector2(280, 820), Vector2.Zero, 25, true); break;
             case RigLoadout.TwoHandedWeapon:
-                Equip(rightEquipment, "equipment_two_hand_sword.png", .071f, new Vector2(278, 1370), new Vector2(6, 0), 10); break;
+                Equip(rightEquipment, "equipment_two_hand_sword.png", .071f, new Vector2(278, 1370), Vector2.Zero, 10); break;
             case RigLoadout.Bow:
                 Equip(leftEquipment, "equipment_bow.png", .058f, new Vector2(372, 650), new Vector2(0, 0), 0); break;
             case RigLoadout.Tome:
-                Equip(leftEquipment, "equipment_tome.png", .051f, new Vector2(514, 382), new Vector2(0, -2), -6); break;
+                Equip(leftEquipment, "equipment_tome.png", .051f, new Vector2(514, 382), Vector2.Zero, -6); break;
         }
         ConfigureEffect();
         if (IsInsideTree()) PlayIdle();
@@ -387,7 +438,7 @@ public partial class CharacterRig2D : Node2D
     public void PlayIdle()
     {
         dead = false;
-        visualRoot.Position = Vector2.Zero; visualRoot.Rotation = 0;
+        visualRoot.Position = FootAnchor; visualRoot.Rotation = 0;
         Modulate = Colors.White;
         string idle = loadout switch
         {
