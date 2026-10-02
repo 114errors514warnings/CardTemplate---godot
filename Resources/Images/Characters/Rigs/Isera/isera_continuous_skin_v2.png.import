@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://uitnofr3bxl3"
-path="res://.godot/imported/isera_continuous_skin_v1.png-b1b1d5155e5f87b4be724330f86d353e.ctex"
+uid="uid://bnvufly5xiwyl"
+path="res://.godot/imported/isera_continuous_skin_v2.png-4d0de7004ee8cb34f4e4666d02208abf.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png"
-dest_files=["res://.godot/imported/isera_continuous_skin_v1.png-b1b1d5155e5f87b4be724330f86d353e.ctex"]
+source_file="res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v2.png"
+dest_files=["res://.godot/imported/isera_continuous_skin_v2.png-4d0de7004ee8cb34f4e4666d02208abf.ctex"]
 
 [params]
 

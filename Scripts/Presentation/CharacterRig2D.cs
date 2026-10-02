@@ -11,7 +11,7 @@ public partial class CharacterRig2D : Node2D
     public enum RigLoadout { None, RightSword, LeftShield, SwordAndShield, DualSwords, TwoHandedWeapon, Bow, Tome }
 
     private const string PartsRoot = "res://Resources/Images/Characters/Rigs/Swordmaster/PartsV2/";
-    private const string ElfSkinPath = "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png";
+    private const string ElfSkinPath = "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v2.png";
     private const string PixelRoot = "res://Resources/Images/Characters/Pixel/";
 
     [Export] public bool IsElf { get; set; }
@@ -135,7 +135,7 @@ public partial class CharacterRig2D : Node2D
 
     private void BuildRig()
     {
-        visualRoot = new Node2D { Name = "VisualRoot", Scale = Vector2.One * (IsElf ? .70f : .78f), Position = FootAnchor };
+        visualRoot = new Node2D { Name = "VisualRoot", Scale = Vector2.One * (IsElf ? .84f : .78f), Position = FootAnchor };
         AddChild(visualRoot);
         skeleton = new Skeleton2D { Name = "Skeleton2D" };
 
@@ -234,7 +234,7 @@ public partial class CharacterRig2D : Node2D
         Visible = false
     };
 
-    private Vector2 FootAnchor => new(0, IsElf ? -56 : -62);
+    private Vector2 FootAnchor => new(0, IsElf ? -61 : -62);
 
     private void AddPart(Node2D parent, string file, Vector2 position, float scale, int zIndex)
     {
@@ -278,7 +278,7 @@ public partial class CharacterRig2D : Node2D
         var skin = new Polygon2D
         {
             Name = "ContinuousElfSkin", Texture = texture, Polygon = vertices,
-            UV = uv, Polygons = polygons, TextureFilter = CanvasItem.TextureFilterEnum.Nearest,
+            UV = uv, Polygons = polygons, TextureFilter = CanvasItem.TextureFilterEnum.NearestWithMipmaps,
             ZIndex = 1
         };
         visualRoot.AddChild(skin);

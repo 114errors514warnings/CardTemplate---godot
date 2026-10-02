@@ -19,6 +19,7 @@ public partial class AnimationMaterialTestScene : Control
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--animation-material-smoke") >= 0 ||
             Array.IndexOf(OS.GetCmdlineUserArgs(), "--character-rig-smoke") >= 0) CallDeferred(nameof(RunSmoke));
         else if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--rig-pose-smoke") >= 0) CallDeferred(nameof(RunPoseSmoke));
+        else if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--animation-review") >= 0) CallDeferred(nameof(RunVisualReview));
     }
 
     private async void RunPoseSmoke()
@@ -38,6 +39,62 @@ public partial class AnimationMaterialTestScene : Control
             GD.PrintErr("RIG_POSE_SMOKE_FAIL: " + ex);
             GetTree().Quit(1);
         }
+    }
+
+    private async void RunVisualReview()
+    {
+        try
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            foreach (float scale in new[] { 1f, 2f })
+            foreach (PixelHeroActor.CharacterKind kind in Enum.GetValues<PixelHeroActor.CharacterKind>())
+            {
+                string character = kind == PixelHeroActor.CharacterKind.Elf ? "elf" : "swordmaster";
+                string size = scale == 1f ? "1x" : "2x";
+                SelectCharacter(kind);
+                hero.SetPreviewScale(scale);
+                hero.SetLoadout(kind == PixelHeroActor.CharacterKind.Elf ? PixelHeroActor.Loadout.Bow : PixelHeroActor.Loadout.TwoHandedWeapon);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                CaptureReviewFrame(character, size, "idle");
+                hero.PlayMove();
+                await ToSignal(GetTree().CreateTimer(.10), SceneTreeTimer.SignalName.Timeout);
+                CaptureReviewFrame(character, size, "move");
+                PositionHero(); hero.ResetActor();
+                hero.PlayAttack(); hero.Rig.PreviewAttackAt(.16);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                CaptureReviewFrame(character, size, "attack-windup");
+                hero.Rig.PreviewAttackAt(.34);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                CaptureReviewFrame(character, size, "attack-impact");
+                hero.PlayHit();
+                await ToSignal(GetTree().CreateTimer(.10), SceneTreeTimer.SignalName.Timeout);
+                CaptureReviewFrame(character, size, "hurt");
+                hero.PlayDeath();
+                await ToSignal(GetTree().CreateTimer(.52), SceneTreeTimer.SignalName.Timeout);
+                CaptureReviewFrame(character, size, "death");
+                hero.ResetActor();
+                if (kind == PixelHeroActor.CharacterKind.Elf) continue;
+                foreach (PixelHeroActor.Loadout loadout in Enum.GetValues<PixelHeroActor.Loadout>())
+                {
+                    hero.SetLoadout(loadout);
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    CaptureReviewFrame(character, size, "equipment-" + loadout);
+                }
+            }
+            GD.Print("ANIMATION_REVIEW_PASS: both characters, 1x/2x, idle/move/attack/hurt/death and swordmaster equipment captured");
+            GetTree().Quit();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr("ANIMATION_REVIEW_FAIL: " + ex);
+            GetTree().Quit(1);
+        }
+    }
+
+    private void CaptureReviewFrame(string character, string size, string state)
+    {
+        if (!CaptureFrame($"res://Tests/animation-review-{character}-{size}-{state}.png", $"{character} {size} {state}"))
+            throw new InvalidOperationException($"无法保存 {character} {size} {state} 动作截图。");
     }
 
     private void BuildUi()
@@ -225,7 +282,7 @@ public partial class AnimationMaterialTestScene : Control
             if (!CaptureFrame("res://Tests/animation-material-smoke.png", "烟测收尾")) throw new InvalidOperationException("无法保存动画素材烟测截图。");
             SelectCharacter(PixelHeroActor.CharacterKind.Elf);
             if (hero.RigBoneCount < 15 || hero.RigSocketCount != 2) throw new InvalidOperationException("精灵骨骼或手部插槽数量不足。");
-            if (!ResourceLoader.Exists("res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png")) throw new InvalidOperationException("缺少精灵连续蒙皮资源。");
+            if (!ResourceLoader.Exists("res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v2.png")) throw new InvalidOperationException("缺少精灵连续蒙皮资源。");
             if (hero.Rig.ContinuousSkinVertexCount < 500) throw new InvalidOperationException($"精灵连续蒙皮网格顶点不足：{hero.Rig.ContinuousSkinVertexCount}。");
             await VerifyRigAnchors("精灵");
             if (!hero.IsIdlePlaying) throw new InvalidOperationException("切换精灵后没有播放待机动画。");
