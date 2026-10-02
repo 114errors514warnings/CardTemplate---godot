@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://d4mifmsmdohrs"
+
+[deps]
+
+files=["res://DataBase/Item/FoodRecipe.ResultFoodId.translation", "res://DataBase/Item/FoodRecipe.ResultCount.translation", "res://DataBase/Item/FoodRecipe.Input1Kind.translation", "res://DataBase/Item/FoodRecipe.Input1Id.translation", "res://DataBase/Item/FoodRecipe.Input1Count.translation", "res://DataBase/Item/FoodRecipe.Input2Kind.translation", "res://DataBase/Item/FoodRecipe.Input2Id.translation", "res://DataBase/Item/FoodRecipe.Input2Count.translation", "res://DataBase/Item/FoodRecipe.Enabled.translation", "res://DataBase/Item/FoodRecipe.Description.translation"]
+
+source_file="res://DataBase/Item/FoodRecipe.csv"
+dest_files=["res://DataBase/Item/FoodRecipe.ResultFoodId.translation", "res://DataBase/Item/FoodRecipe.ResultCount.translation", "res://DataBase/Item/FoodRecipe.Input1Kind.translation", "res://DataBase/Item/FoodRecipe.Input1Id.translation", "res://DataBase/Item/FoodRecipe.Input1Count.translation", "res://DataBase/Item/FoodRecipe.Input2Kind.translation", "res://DataBase/Item/FoodRecipe.Input2Id.translation", "res://DataBase/Item/FoodRecipe.Input2Count.translation", "res://DataBase/Item/FoodRecipe.Enabled.translation", "res://DataBase/Item/FoodRecipe.Description.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

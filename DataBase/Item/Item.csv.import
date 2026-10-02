@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cikrmbxamwsb1"
+
+[deps]
+
+files=["res://DataBase/Item/Item.DefinitionId.translation", "res://DataBase/Item/Item.Rarity.translation", "res://DataBase/Item/Item.UseScope.translation", "res://DataBase/Item/Item.Effect1.translation", "res://DataBase/Item/Item.Effect2.translation", "res://DataBase/Item/Item.Load.translation", "res://DataBase/Item/Item.Description.translation"]
+
+source_file="res://DataBase/Item/Item.csv"
+dest_files=["res://DataBase/Item/Item.DefinitionId.translation", "res://DataBase/Item/Item.Rarity.translation", "res://DataBase/Item/Item.UseScope.translation", "res://DataBase/Item/Item.Effect1.translation", "res://DataBase/Item/Item.Effect2.translation", "res://DataBase/Item/Item.Load.translation", "res://DataBase/Item/Item.Description.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

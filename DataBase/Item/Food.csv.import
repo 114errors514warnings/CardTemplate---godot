@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b0vlobdpb0e2a"
+
+[deps]
+
+files=["res://DataBase/Item/Food.DefinitionId.translation", "res://DataBase/Item/Food.Rarity.translation", "res://DataBase/Item/Food.Satiety.translation", "res://DataBase/Item/Food.ExpireDays.translation", "res://DataBase/Item/Food.Effect1.translation", "res://DataBase/Item/Food.Effect1Duration.translation", "res://DataBase/Item/Food.Effect2.translation", "res://DataBase/Item/Food.Effect2Duration.translation", "res://DataBase/Item/Food.Load.translation", "res://DataBase/Item/Food.Description.translation"]
+
+source_file="res://DataBase/Item/Food.csv"
+dest_files=["res://DataBase/Item/Food.DefinitionId.translation", "res://DataBase/Item/Food.Rarity.translation", "res://DataBase/Item/Food.Satiety.translation", "res://DataBase/Item/Food.ExpireDays.translation", "res://DataBase/Item/Food.Effect1.translation", "res://DataBase/Item/Food.Effect1Duration.translation", "res://DataBase/Item/Food.Effect2.translation", "res://DataBase/Item/Food.Effect2Duration.translation", "res://DataBase/Item/Food.Load.translation", "res://DataBase/Item/Food.Description.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

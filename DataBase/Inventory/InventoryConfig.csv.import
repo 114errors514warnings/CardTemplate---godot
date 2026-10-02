@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cp72qhl6t7df1"
+
+[deps]
+
+files=["res://DataBase/Inventory/InventoryConfig.en.translation", "res://DataBase/Inventory/InventoryConfig.Capacity.translation"]
+
+source_file="res://DataBase/Inventory/InventoryConfig.csv"
+dest_files=["res://DataBase/Inventory/InventoryConfig.en.translation", "res://DataBase/Inventory/InventoryConfig.Capacity.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

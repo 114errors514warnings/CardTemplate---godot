@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://qt7pck0lyov4"
+
+[deps]
+
+files=["res://DataBase/Item/Material.DefinitionId.translation", "res://DataBase/Item/Material.Category.translation", "res://DataBase/Item/Material.SubType.translation", "res://DataBase/Item/Material.Rarity.translation", "res://DataBase/Item/Material.Load.translation", "res://DataBase/Item/Material.Description.translation"]
+
+source_file="res://DataBase/Item/Material.csv"
+dest_files=["res://DataBase/Item/Material.DefinitionId.translation", "res://DataBase/Item/Material.Category.translation", "res://DataBase/Item/Material.SubType.translation", "res://DataBase/Item/Material.Rarity.translation", "res://DataBase/Item/Material.Load.translation", "res://DataBase/Item/Material.Description.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
