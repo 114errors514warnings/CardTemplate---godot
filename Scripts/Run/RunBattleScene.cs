@@ -357,7 +357,14 @@ public partial class RunBattleScene : Control
 
 			session.Current.CharacterSlots[i].CurrentHp = Math.Max(0, player.HP);
 			BattlefieldSession.PlayerLoadout loadout = battlefield.GetLoadout(placement.UnitId);
-			session.Current.CharacterSlots[i].EquippedWeaponDefinitionId = loadout?.LeftHand?.DefinitionId ?? string.Empty;
+			// 胜利当刻把战后手位写回局外（装备系统交互案 §四：范围由「单个左手」扩到左右手）；
+			// `EquippedWeaponDefinitionId` 继续作为左手的兼容镜像（RunCharacterSlotSave.SyncLegacyWeaponField）。
+			RunCharacterSlotSave slot = session.Current.CharacterSlots[i];
+			RunEquipmentSystem.SetHand(slot, RunEquipmentSystem.LeftHand, loadout?.LeftHand?.DefinitionId);
+			RunEquipmentSystem.SetHand(slot, RunEquipmentSystem.RightHand,
+				loadout?.RightHand == null || ReferenceEquals(loadout.RightHand, loadout.LeftHand)
+					? string.Empty
+					: loadout.RightHand.DefinitionId);
 
 			List<RunDeckEntry> deckSnapshot = new List<RunDeckEntry>();
 			foreach (Card card in player.DefaultDeck)

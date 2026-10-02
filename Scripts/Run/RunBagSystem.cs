@@ -135,6 +135,7 @@ public static class RunBagSystem
 	/// <summary>
 	/// 某类别某定义的总件数（跨实例累加）。<paramref name="excludedInstanceIds"/> = 要排除的实例
 	/// （篝火草稿里已规划、本次休息要吃的食物：烹饪不得把它们算作可用输入，见 `RunFoodSystem.TryCook`）。
+	/// **只数背包内条目**：已放进随身 3 格的条目不在背包里（烹饪 / 消耗的输入口径与背包列表一致）。
 	/// </summary>
 	public static int CountOf(RunSaveData run, BagCategory category, int definitionKey,
 		IReadOnlyCollection<string> excludedInstanceIds = null)
@@ -142,6 +143,7 @@ public static class RunBagSystem
 		EnsureCollections(run);
 		HashSet<string> excluded = ToSet(excludedInstanceIds);
 		return run.BagEntries.Where(x => x != null && x.CategoryEnum == category && x.DefinitionKey == definitionKey
+				&& x.IsInBag
 				&& (excluded == null || !excluded.Contains(x.InstanceId)))
 			.Sum(x => x.Count);
 	}
@@ -152,21 +154,31 @@ public static class RunBagSystem
 			? null
 			: new HashSet<string>(instanceIds, StringComparer.Ordinal);
 
-	/// <summary>某类别的全部条目（按加入顺序）。</summary>
+	/// <summary>某类别的**背包内**条目（按加入顺序；不含已放进随身 3 格的条目 —— 那是背包界面的列表口径）。</summary>
 	public static List<RunBagEntrySave> EntriesOf(RunSaveData run, BagCategory category)
+	{
+		EnsureCollections(run);
+		return run.BagEntries.Where(x => x != null && x.CategoryEnum == category && x.IsInBag).ToList();
+	}
+
+	/// <summary>某类别的全部条目（含随身格上的）：结算 / 消耗类逻辑要看见「已被随身格占住」的条目时用它。</summary>
+	public static List<RunBagEntrySave> AllEntriesOf(RunSaveData run, BagCategory category)
 	{
 		EnsureCollections(run);
 		return run.BagEntries.Where(x => x != null && x.CategoryEnum == category).ToList();
 	}
 
-	/// <summary>当前背包总负荷 = `Σ(单件负荷 × 数量)`（背包系统交互案 §四）。</summary>
+	/// <summary>
+	/// 当前背包总负荷 = `Σ(单件负荷 × 数量)`（背包系统交互案 §四）。
+	/// **只统计背包内物品**：已放进随身 3 格的条目不占背包负荷（手位装备根本不在 `BagEntries` 里）。
+	/// </summary>
 	public static float TotalLoad(RunSaveData run)
 	{
 		EnsureCollections(run);
 		float total = 0f;
 		foreach (RunBagEntrySave entry in run.BagEntries)
 		{
-			if (entry == null)
+			if (entry == null || !entry.IsInBag)
 			{
 				continue;
 			}
@@ -176,6 +188,19 @@ public static class RunBagSystem
 
 		return total;
 	}
+
+	/// <summary>队伍负荷上限（背包系统交互案 §四）：来自 `InventoryConfig.csv` 的 `Global` 行（注册进 ItemNameResolver）。</summary>
+	public static float LoadLimit => ItemNameResolver.InventoryCapacity;
+
+	/// <summary>是否已超载：超载时仍允许奖励入账，只阻止新的拖入（背包系统交互案 §四）。</summary>
+	public static bool IsOverloaded(RunSaveData run) => TotalLoad(run) > LoadLimit;
+
+	/// <summary>试算：再放进 <paramref name="extraLoad"/> 负荷的物品会不会超限（拖入 / 卸下的前置校验）。</summary>
+	public static bool WouldExceedLoad(RunSaveData run, float extraLoad) => TotalLoad(run) + extraLoad > LoadLimit;
+
+	/// <summary>负荷不足的原因文案（背包系统交互案 §四 的示例格式：`负荷不足：12.4 + 2.0 &gt; 14.0`）。</summary>
+	public static string DescribeLoadReject(RunSaveData run, float extraLoad) =>
+		$"负荷不足：{TotalLoad(run):0.0} + {extraLoad:0.0} > {LoadLimit:0.0}";
 
 	/// <summary>给定食物实例列表的总饱食度（篝火结算与回复预览用；取值来自配表注册表）。</summary>
 	public static int SatietyOf(RunSaveData run, IReadOnlyList<string> instanceIds)
@@ -225,7 +250,11 @@ public static class RunBagSystem
 
 	// ── 局外随身 3 格（背包系统交互案 §二 / §三）──
 
-	/// <summary>把背包条目放进随身格；该格已有物品时**交换**（原物回背包，不做满栏替换面板）。</summary>
+	/// <summary>
+	/// 把背包条目搬进随身格；该格已有条目时**交换**（原物回背包，不做满栏替换面板）。
+	/// 「条目在哪个格」的唯一真相是 `RunBagEntrySave.CarrySlot`，`RunSaveData.CarryItemSlots` 是同步镜像
+	/// （SchemaVersion 5；旧档由 `RunSaveData.MigrateToSchema5` 双向补齐）。
+	/// </summary>
 	public static bool TrySetCarrySlot(RunSaveData run, int slot, string instanceId, out string error)
 	{
 		EnsureCollections(run);
@@ -236,13 +265,25 @@ public static class RunBagSystem
 			return false;
 		}
 
-		if (!string.IsNullOrWhiteSpace(instanceId) && Find(run, instanceId) == null)
+		RunBagEntrySave moving = Find(run, instanceId);
+		if (!string.IsNullOrWhiteSpace(instanceId) && moving == null)
 		{
 			error = "背包里没有该物品。";
 			return false;
 		}
 
-		run.CarryItemSlots[slot] = instanceId ?? string.Empty;
+		RunBagEntrySave occupant = CarrySlotEntry(run, slot);
+		if (occupant != null && !ReferenceEquals(occupant, moving))
+		{
+			occupant.CarrySlot = -1; // 原物回背包
+		}
+
+		if (moving != null)
+		{
+			moving.CarrySlot = slot;
+		}
+
+		SyncCarrySlotMirror(run);
 		return true;
 	}
 
@@ -256,11 +297,66 @@ public static class RunBagSystem
 			return false;
 		}
 
-		run.CarryItemSlots[slot] = string.Empty;
+		RunBagEntrySave occupant = CarrySlotEntry(run, slot);
+		if (occupant != null)
+		{
+			occupant.CarrySlot = -1; // 收入背包（局外不落地）
+		}
+
+		SyncCarrySlotMirror(run);
 		return true;
 	}
 
-	/// <summary>随身格显示文案：空格 = `空`；实例不存在（已消耗 / 旧档）= `空`。</summary>
+	/// <summary>随身格上的条目（无 = null）。</summary>
+	public static RunBagEntrySave CarrySlotEntry(RunSaveData run, int slot)
+	{
+		EnsureCollections(run);
+		return slot < 0 || slot >= CarryItemSlotCount
+			? null
+			: run.BagEntries.FirstOrDefault(x => x != null && x.CarrySlot == slot);
+	}
+
+	/// <summary>条目的随身格归属 → 兼容镜像列表（每次随身格变动后调用一次）。</summary>
+	public static void SyncCarrySlotMirror(RunSaveData run)
+	{
+		EnsureCollections(run);
+		for (int slot = 0; slot < CarryItemSlotCount; slot++)
+		{
+			RunBagEntrySave occupant = CarrySlotEntry(run, slot);
+			run.CarryItemSlots[slot] = occupant?.InstanceId ?? string.Empty;
+		}
+	}
+
+	/// <summary>
+	/// 按定义取走**一件**（装备搬到手位用）：可叠加类别从合并条目里扣 1（扣完移除该条目），
+	/// 食物 / 带实例的类别整条拿走。返回是否成功；<paramref name="taken"/> = 被拿走的那件。
+	/// </summary>
+	public static bool TakeOneByDefinition(RunSaveData run, BagCategory category, int definitionKey, out RunBagEntrySave taken)
+	{
+		EnsureCollections(run);
+		taken = null;
+		RunBagEntrySave entry = run.BagEntries.FirstOrDefault(
+			x => x != null && x.CategoryEnum == category && x.DefinitionKey == definitionKey && x.IsInBag);
+		if (entry == null)
+		{
+			return false;
+		}
+
+		taken = entry;
+		if (entry.Count > 1)
+		{
+			entry.Count -= 1;
+		}
+		else
+		{
+			run.BagEntries.Remove(entry);
+		}
+
+		SyncCarrySlotMirror(run);
+		return true;
+	}
+
+	/// <summary>随身格显示文案：空格 = `空`；条目不存在（已消耗 / 旧档）= `空`。</summary>
 	public static string CarrySlotText(RunSaveData run, int slot)
 	{
 		EnsureCollections(run);
@@ -269,7 +365,7 @@ public static class RunBagSystem
 			return string.Empty;
 		}
 
-		RunBagEntrySave entry = Find(run, run.CarryItemSlots[slot]);
+		RunBagEntrySave entry = CarrySlotEntry(run, slot);
 		return entry == null ? "空" : entry.DefinitionId;
 	}
 }

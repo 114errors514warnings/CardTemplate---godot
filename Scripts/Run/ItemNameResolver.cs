@@ -18,6 +18,24 @@ public static class ItemNameResolver
 	private static readonly Dictionary<int, float> MaterialLoads = new Dictionary<int, float>();
 	private static readonly Dictionary<int, float> ItemLoads = new Dictionary<int, float>();
 	private static readonly Dictionary<int, float> FoodLoads = new Dictionary<int, float>();
+
+	// ── 装备（Weapon.csv 局外侧视图，2026-10-02 批 E）：手数 / 单件负荷 / 名字反查 ──
+	private static readonly Dictionary<int, float> EquipmentLoads = new Dictionary<int, float>();
+	private static readonly Dictionary<int, int> EquipmentHandsRequired = new Dictionary<int, int>();
+	private static readonly Dictionary<string, int> EquipmentKeysByName = new Dictionary<string, int>(StringComparer.Ordinal);
+
+	// ── 队伍负荷上限（DataBase/Inventory/InventoryConfig.csv 的 `Global` 行）──
+	private static float inventoryCapacity = DefaultInventoryCapacity;
+
+	/// <summary>未配表（或表里没有 `Global` 行）时的队伍负荷上限兜底：背包系统交互案 §四 的默认值。</summary>
+	public const float DefaultInventoryCapacity = 30f;
+
+	/// <summary>队伍负荷上限（背包系统交互案 §四）：`LoadingSystem` 载入 InventoryConfig.csv 后覆盖。</summary>
+	public static float InventoryCapacity => inventoryCapacity;
+
+	/// <summary>写入队伍负荷上限；非正数一律回落到默认值（不让一张坏表把背包锁死）。</summary>
+	public static void SetInventoryCapacity(float capacity) =>
+		inventoryCapacity = capacity > 0f ? capacity : DefaultInventoryCapacity;
 	private static readonly Dictionary<int, int> MaterialRarities = new Dictionary<int, int>();
 	private static readonly Dictionary<int, int> ItemRarities = new Dictionary<int, int>();
 	private static readonly Dictionary<int, int> FoodRarities = new Dictionary<int, int>();
@@ -40,6 +58,7 @@ public static class ItemNameResolver
 		BagCategory.Material => MaterialLoads.TryGetValue(definitionKey, out float materialLoad) ? materialLoad : 0f,
 		BagCategory.Item => ItemLoads.TryGetValue(definitionKey, out float itemLoad) ? itemLoad : 0f,
 		BagCategory.Food => FoodLoads.TryGetValue(definitionKey, out float foodLoad) ? foodLoad : 0f,
+		BagCategory.Equipment => EquipmentLoads.TryGetValue(definitionKey, out float equipmentLoad) ? equipmentLoad : 0f,
 		_ => 0f,
 	};
 
@@ -122,7 +141,7 @@ public static class ItemNameResolver
 		}
 	}
 
-	/// <summary>装备名（按武器 / 防具表的数字 ID）：等 P0-18 装备表落地后再注册，现在只留通道。</summary>
+	/// <summary>装备名（按武器 / 防具表的数字 ID）。手数 / 负荷按「单手」兜底，真实值走 <see cref="RegisterWeapons"/>。</summary>
 	public static void RegisterEquipmentNames(IReadOnlyDictionary<int, string> names)
 	{
 		if (names == null)
@@ -135,9 +154,53 @@ public static class ItemNameResolver
 			if (!string.IsNullOrWhiteSpace(name))
 			{
 				EquipmentNames[id] = name;
+				EquipmentKeysByName[name] = id;
+				EquipmentHandsRequired.TryAdd(id, 1);
+				EquipmentLoads.TryAdd(id, DerivedEquipmentLoad(1));
 			}
 		}
 	}
+
+	/// <summary>
+	/// 注册装备表（Weapon.csv 局外侧视图）：名字 + 名字反查 + 占用手数 + 单件负荷。
+	/// 负荷口径（背包系统交互案 §四）：表里有 `Load` 就用表里的，留空则按手数推导（单手 2.0 / 双手 4.0）。
+	/// </summary>
+	public static void RegisterWeapons(IReadOnlyDictionary<int, WeaponDefinition> definitions)
+	{
+		if (definitions == null)
+		{
+			return;
+		}
+
+		foreach ((int id, WeaponDefinition definition) in definitions)
+		{
+			if (definition == null || string.IsNullOrWhiteSpace(definition.DefinitionId))
+			{
+				continue;
+			}
+
+			int hands = Math.Max(1, definition.HandsRequired);
+			EquipmentNames[id] = definition.DefinitionId;
+			EquipmentKeysByName[definition.DefinitionId] = id;
+			EquipmentHandsRequired[id] = hands;
+			EquipmentLoads[id] = definition.Load >= 0f ? definition.Load : DerivedEquipmentLoad(hands);
+		}
+	}
+
+	/// <summary>装备单件负荷的推导口径（表里没填 `Load` 时）：单手 2.0 / 双手 4.0。</summary>
+	public static float DerivedEquipmentLoad(int handsRequired) => handsRequired >= 2 ? 4f : 2f;
+
+	/// <summary>占用手数（1 = 单手 / 2 = 双手）：未注册按 1 兜底（宁可宽放，不误判成双手）。</summary>
+	public static int HandsRequiredOf(int equipmentKey) =>
+		EquipmentHandsRequired.TryGetValue(equipmentKey, out int hands) ? hands : 1;
+
+	/// <summary>按**装备名**取占用手数（手位字段是名字串，读档校验 / 迁移用）；未注册按 1 兜底。</summary>
+	public static int HandsRequiredOfDefinition(string definitionId) =>
+		TryGetEquipmentKey(definitionId, out int key) ? HandsRequiredOf(key) : 1;
+
+	/// <summary>装备名 → 表内数字 ID（手位卸下回背包时用它建条目）。未注册返回 false。</summary>
+	public static bool TryGetEquipmentKey(string definitionId, out int key) =>
+		EquipmentKeysByName.TryGetValue(definitionId ?? string.Empty, out key);
 
 	public static bool TryGetMaterialName(int id, out string name) => MaterialNames.TryGetValue(id, out name);
 
@@ -180,5 +243,9 @@ public static class ItemNameResolver
 		FoodExpireDays.Clear();
 		FoodSatiety.Clear();
 		FoodEffects.Clear();
+		EquipmentLoads.Clear();
+		EquipmentHandsRequired.Clear();
+		EquipmentKeysByName.Clear();
+		inventoryCapacity = DefaultInventoryCapacity;
 	}
 }

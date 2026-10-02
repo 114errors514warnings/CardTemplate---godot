@@ -29,6 +29,12 @@ public partial class LoadingSystem : Node
 	public const string ItemCsvPathKey = "Data.Item.Item";
 	public const string FoodCsvPathKey = "Data.Item.Food";
 	public const string FoodRecipeCsvPathKey = "Data.Item.FoodRecipe";
+
+	// ── 装备与背包配置（2026-10-02 批 E，P0-17 背包界面 / P0-18 装备链）──
+	/// <summary>武器表路径 key（局外侧视图：名字 / 手数 / 单件负荷）。</summary>
+	public const string WeaponCsvPathKey = "Data.Equipment.Weapon";
+	/// <summary>背包配置表路径 key（队伍负荷上限，背包系统交互案 §四）。</summary>
+	public const string InventoryConfigCsvPathKey = "Data.Inventory.Config";
 	/// <summary>Stage 配置根目录：不逐文件注册，按 <层>/<节点类型>.csv 读取。</summary>
 	public const string StageRootDir = "res://DataBase/Stage/";
 
@@ -81,6 +87,12 @@ public partial class LoadingSystem : Node
 
 	/// <summary>篝火合成配方缓存（食物系统 §四）。</summary>
 	private static Dictionary<int, FoodRecipeDefinition> foodRecipeCache = new Dictionary<int, FoodRecipeDefinition>();
+
+	/// <summary>武器表缓存（局外侧视图，`LoadWeaponsByKey` 后可用）。</summary>
+	private static Dictionary<int, WeaponDefinition> weaponCache = new Dictionary<int, WeaponDefinition>();
+
+	/// <summary>背包配置缓存（队伍负荷上限）；未配表时保持 null，读数走 <see cref="InventoryCapacity"/> 的兜底。</summary>
+	private static InventoryConfigDefinition inventoryConfigCache;
 
 	/// <summary>
 	/// 缓存 Stage 遭遇配置：key = 层目录名（第一层…），value = 类型 → 行列表
@@ -176,6 +188,22 @@ public partial class LoadingSystem : Node
 	{
 		get { return foodRecipeCache; }
 	}
+
+	/// <summary>武器表（LoadWeaponsByKey 后可用）；ID = `Weapon.csv` 的 `WeaponId`。</summary>
+	public static Dictionary<int, WeaponDefinition> WeaponDictionary
+	{
+		get { return weaponCache; }
+	}
+
+	/// <summary>背包配置（LoadInventoryConfigByKey 后可用）；未配表时为 null。</summary>
+	public static InventoryConfigDefinition InventoryConfig
+	{
+		get { return inventoryConfigCache; }
+	}
+
+	/// <summary>队伍负荷上限（背包系统交互案 §四）：表已加载就用表里的 `Global` 行，否则用 `ItemNameResolver` 的兜底。</summary>
+	public static float InventoryCapacity =>
+		inventoryConfigCache?.GlobalCapacity ?? ItemNameResolver.DefaultInventoryCapacity;
 
 	public override void _Ready()
 	{
@@ -1000,6 +1028,53 @@ public partial class LoadingSystem : Node
 		return foodRecipeCache;
 	}
 
+	/// <summary>
+	/// 装备表 + 背包配置表（2026-10-02 批 E）：载入 `Weapon.csv` 的局外侧视图与 `InventoryConfig.csv`，
+	/// 并把「装备名 / 名字反查 / 占用手数 / 单件负荷」与「队伍负荷上限」注册进 <see cref="ItemNameResolver"/> ——
+	/// 背包 / 装备界面与纯逻辑模块（`RunBagSystem` / `RunEquipmentSystem`）只读那份注册表，不各自读配表。
+	/// </summary>
+	public static void LoadEquipmentTablesByKey(bool useCache = true)
+	{
+		LoadWeaponsByKey(WeaponCsvPathKey, useCache);
+		LoadInventoryConfigByKey(InventoryConfigCsvPathKey, useCache);
+		ItemNameResolver.RegisterWeapons(weaponCache);
+		ItemNameResolver.SetInventoryCapacity(InventoryCapacity);
+	}
+
+	/// <summary>加载武器表（FilePathRegistry: Data.Equipment.Weapon）。</summary>
+	public static Dictionary<int, WeaponDefinition> LoadWeaponsByKey(string pathKey = WeaponCsvPathKey, bool useCache = true)
+	{
+		if (useCache && weaponCache.Count > 0)
+		{
+			return weaponCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		weaponCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, WeaponDefinition>()
+			: LoadWeaponCsv.LoadFromCSV(path);
+		return weaponCache;
+	}
+
+	/// <summary>加载背包配置表（FilePathRegistry: Data.Inventory.Config）。</summary>
+	public static InventoryConfigDefinition LoadInventoryConfigByKey(string pathKey = InventoryConfigCsvPathKey, bool useCache = true)
+	{
+		if (useCache && inventoryConfigCache != null)
+		{
+			return inventoryConfigCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		inventoryConfigCache = string.IsNullOrWhiteSpace(path)
+			? null
+			: LoadInventoryCsv.LoadFromCSV(path);
+		return inventoryConfigCache;
+	}
+
+	/// <summary>武器定义（局外侧视图）；未定义返回 null。</summary>
+	public static WeaponDefinition GetWeapon(int weaponId) =>
+		LoadWeaponsByKey().TryGetValue(weaponId, out WeaponDefinition definition) ? definition : null;
+
 	/// <summary>材料定义；未定义返回 null（调用方按「未定义材料(ID)」显示并报错）。</summary>
 	public static MaterialDefinition GetMaterial(int materialId) =>
 		LoadMaterialsByKey().TryGetValue(materialId, out MaterialDefinition definition) ? definition : null;
@@ -1035,5 +1110,6 @@ public partial class LoadingSystem : Node
 		LoadMonsterValueByKey();
 		LoadStageEncounters();
 		LoadItemTablesByKey();
+		LoadEquipmentTablesByKey();
 	}
 }

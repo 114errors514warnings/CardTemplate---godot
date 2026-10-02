@@ -2,6 +2,7 @@
 // 本局进度存档 DTO（纯数据类，无 Godot 依赖，便于 JSON 序列化与 xUnit 单测）。
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 public static class RunGameModes
 {
@@ -13,12 +14,14 @@ public static class RunGameModes
 public sealed class RunSaveData
 {
 	/// <summary>
-	/// **当前**存档结构版本 = 4：背包实例批（P0-17 / P1-19）新增 `BagEntries`（材料 / 道具 / 装备 / 食物的**实例**条目）、
+	/// **当前**存档结构版本 = 5：版本 4 = 背包实例批（P0-17 / P1-19）新增 `BagEntries`（材料 / 道具 / 装备 / 食物的**实例**条目）、
 	/// `CarryItemSlots`（局外随身 3 格）、`ActiveFoodEffects`（食物效果的寿命轴）与 `CookedThisRest`（本次休息已烹饪次数）。
+	/// 版本 5（2026-10-02 批 E，P0-17 背包界面 / P0-18 装备链）新增：`RunCharacterSlotSave` 的左右手位字段
+	/// （旧 `EquippedWeaponDefinitionId` 保留为**左手镜像**）与 `RunBagEntrySave.CarrySlot`（条目的随身格归属）。
 	/// `Materials / Items / Equipment` 三个计数字典保留为**汇总视图**（继续写，旧档读起来不丢数）。
-	/// 版本 3 的旧档由 `MigrateToCurrentSchema()` 就地升级，不弃档。
+	/// 版本 ≤ 4 的旧档由 `MigrateToCurrentSchema()` 就地升级，不弃档。
 	/// </summary>
-	public const int CurrentSchemaVersion = 4;
+	public const int CurrentSchemaVersion = 5;
 
 	public int SchemaVersion = CurrentSchemaVersion;
 	public string SavedAt = string.Empty;
@@ -126,7 +129,80 @@ public sealed class RunSaveData
 		MapState?.MigrateLegacyNormalEncounterCount();
 		MigrateBagEntriesFromLegacyDictionaries();
 		EnsureBagCollections();
+		MigrateHandsToSchema5();
+		MigrateCarrySlotOwnership();
 		SchemaVersion = CurrentSchemaVersion;
+	}
+
+	/// <summary>
+	/// 版本 ≤ 4 → 5 的手位迁移（装备系统交互案 §五）：旧 `EquippedWeaponDefinitionId` → **左手**，
+	/// 双手装备同时占右手；随后该字段一律保持为左手镜像（既有读写点与旧档读者照旧可用）。
+	/// 幂等：左右手字段已有值时不动，只补镜像。
+	/// </summary>
+	private void MigrateHandsToSchema5()
+	{
+		if (CharacterSlots == null)
+		{
+			return;
+		}
+
+		foreach (RunCharacterSlotSave slot in CharacterSlots)
+		{
+			if (slot == null)
+			{
+				continue;
+			}
+
+			if (string.IsNullOrWhiteSpace(slot.LeftHandDefinitionId) && !string.IsNullOrWhiteSpace(slot.EquippedWeaponDefinitionId))
+			{
+				slot.LeftHandDefinitionId = slot.EquippedWeaponDefinitionId;
+				if (string.IsNullOrWhiteSpace(slot.RightHandDefinitionId)
+					&& ItemNameResolver.HandsRequiredOfDefinition(slot.EquippedWeaponDefinitionId) >= 2)
+				{
+					slot.RightHandDefinitionId = slot.EquippedWeaponDefinitionId;
+				}
+			}
+
+			slot.SyncLegacyWeaponField();
+		}
+	}
+
+	/// <summary>
+	/// 版本 ≤ 4 → 5 的随身格迁移：`CarryItemSlots`（v4 只有这份镜像列表）→ 条目的 `CarrySlot` 字段。
+	/// 双向补齐（镜像 → 条目、条目 → 镜像），使「条目的随身位」成为唯一真相、镜像只作兼容视图。
+	/// </summary>
+	private void MigrateCarrySlotOwnership()
+	{
+		BagEntries ??= new List<RunBagEntrySave>();
+		CarryItemSlots ??= new List<string>();
+		while (CarryItemSlots.Count < RunBagSystem.CarryItemSlotCount)
+		{
+			CarryItemSlots.Add(string.Empty);
+		}
+
+		for (int slot = 0; slot < RunBagSystem.CarryItemSlotCount; slot++)
+		{
+			RunBagEntrySave entry = BagEntries.FirstOrDefault(
+				x => x != null && !string.IsNullOrWhiteSpace(x.InstanceId)
+					&& string.Equals(x.InstanceId, CarryItemSlots[slot], StringComparison.Ordinal));
+			if (entry != null && entry.CarrySlot < 0)
+			{
+				entry.CarrySlot = slot;
+			}
+		}
+
+		foreach (RunBagEntrySave entry in BagEntries)
+		{
+			if (entry == null || entry.CarrySlot < 0 || entry.CarrySlot >= RunBagSystem.CarryItemSlotCount)
+			{
+				continue;
+			}
+
+			if (string.IsNullOrWhiteSpace(CarryItemSlots[entry.CarrySlot]))
+			{
+				CarryItemSlots[entry.CarrySlot] = entry.InstanceId;
+			}
+		}
 	}
 
 	/// <summary>
@@ -184,8 +260,24 @@ public sealed class RunCharacterSlotSave
 	public int CharacterId;
 	public int CurrentHp;
 	public int MaxHp;
-	/// <summary>局外装备状态；战斗只还原此值，不在每场战斗创建职业默认武器。</summary>
+
+	/// <summary>
+	/// **左手位**装备的定义名（空串 = 空手位）；双手装备时左右手同名（SchemaVersion 5）。
+	/// 局外手位的唯一真相 = 左右手两字段（装备系统交互案 §五）。
+	/// </summary>
+	public string LeftHandDefinitionId = string.Empty;
+
+	/// <summary>**右手位**装备的定义名（空串 = 空手位）。</summary>
+	public string RightHandDefinitionId = string.Empty;
+
+	/// <summary>
+	/// **保留字段**（背包系统交互案 §五 的旧档口径）：旧的单件装备位，现为 <see cref="LeftHandDefinitionId"/> 的
+	/// **镜像**（每次手位写入同步一次）。保留是为了不动既有读写点与旧档；新代码一律读写左右手字段。
+	/// </summary>
 	public string EquippedWeaponDefinitionId = string.Empty;
+
+	/// <summary>把镜像字段同步为左手（局外手位写入后调用；`RunEquipmentSystem` 是唯一写入口）。</summary>
+	public void SyncLegacyWeaponField() => EquippedWeaponDefinitionId = LeftHandDefinitionId ?? string.Empty;
 }
 
 public sealed class RunDeckEntry
@@ -543,6 +635,16 @@ public sealed class RunBagEntrySave
 
 	/// <summary>食物剩余有效期（天）；非食物为 -1。到 0 即腐坏移除（食物系统 §二）。</summary>
 	public int ExpireDaysRemaining = -1;
+
+	/// <summary>
+	/// 随身格归属（SchemaVersion 5）：`-1` = 在背包里；`0..2` = 已放进局外随身 3 格。
+	/// 放进随身格的条目**不占背包负荷**（背包系统交互案 §四），也不出现在背包列表里；
+	/// `RunSaveData.CarryItemSlots` 是它的兼容镜像（同一次写入一起同步）。
+	/// </summary>
+	public int CarrySlot = -1;
+
+	/// <summary>该条目是否在背包里（不在随身格上）。</summary>
+	public bool IsInBag => CarrySlot < 0;
 
 	public BagCategory CategoryEnum => (BagCategory)Category;
 }

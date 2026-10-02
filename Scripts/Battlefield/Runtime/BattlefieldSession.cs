@@ -850,7 +850,8 @@ public sealed partial class BattlefieldSession : IDisposable
             if (placement.Unit is not CharacterInstance character) continue;
             RunCharacterSlotSave slot = characterSlots[i];
             character.HP = Math.Max(1, Math.Min(character.Max_HP, slot.CurrentHp));
-            RestoreRunWeapon(placement, slot.EquippedWeaponDefinitionId, i);
+            RestoreRunWeapon(placement, ResolveRunHandDefinition(slot, RunEquipmentSystem.LeftHand),
+                ResolveRunHandDefinition(slot, RunEquipmentSystem.RightHand), i);
             character.DefaultDeck.Clear();
             var draw = new List<Card>();
             foreach (RunDeckEntry entry in deckSlots[i] ?? new List<RunDeckEntry>())
@@ -945,16 +946,76 @@ public sealed partial class BattlefieldSession : IDisposable
 
 
 
-    private void RestoreRunWeapon(BattleUnitPlacement placement, string definitionId, int slotIndex)
+    /// <summary>
+    /// 局外手位 → 开场的取值（装备系统交互案 §五）：左右手字段是真相；两者都空时回落到旧字段
+    /// `EquippedWeaponDefinitionId`（只认左手）—— 旧档与只写旧字段的烟测夹具因此照旧可用。
+    /// </summary>
+    private static string ResolveRunHandDefinition(RunCharacterSlotSave slot, int hand)
     {
-        if (string.IsNullOrWhiteSpace(definitionId)) return;
-        WeaponAttackSpec weapon = BattleWeaponCatalog.ForDefinition(definitionId)
-            ?? throw new ArgumentException($"运行局装备不存在：{definitionId}");
-        var item = new GroundObject($"run-equipped-{slotIndex + 1}", definitionId, GroundObjectKind.Equipment,
-            handsRequired: weapon.HandsRequired, attackRange: weapon.AttackRange, moveBonus: weapon.MoveBonus);
+        if (slot == null) return string.Empty;
+        string left = slot.LeftHandDefinitionId ?? string.Empty;
+        string right = slot.RightHandDefinitionId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(left) && string.IsNullOrWhiteSpace(right))
+        {
+            return hand == RunEquipmentSystem.LeftHand ? (slot.EquippedWeaponDefinitionId ?? string.Empty) : string.Empty;
+        }
+
+        return hand == RunEquipmentSystem.LeftHand ? left : right;
+    }
+
+    /// <summary>
+    /// 开场的局外装备还原（装备系统交互案 §四，SchemaVersion 5）：单手各占一槽（两条 `GroundObject`、
+    /// 各自的移动 / 攻防修正分别记账）；双手装备同名占满两槽（**同一条** `GroundObject`，修正只记一次，
+    /// 与既有口径一致）。未知定义照旧抛错（不静默吞掉「装备名写错」）。
+    /// </summary>
+    private void RestoreRunWeapon(BattleUnitPlacement placement, string leftDefinitionId, string rightDefinitionId, int slotIndex)
+    {
+        string left = leftDefinitionId ?? string.Empty;
+        string right = rightDefinitionId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(left) && string.IsNullOrWhiteSpace(right)) return;
+
+        WeaponAttackSpec leftWeapon = string.IsNullOrWhiteSpace(left) ? null : RequireRunWeapon(left);
+        WeaponAttackSpec rightWeapon = string.IsNullOrWhiteSpace(right) ? null : RequireRunWeapon(right);
         PlayerLoadout loadout = loadouts[placement.UnitId];
-        if (weapon.HandsRequired == 2) loadout.LeftHand = loadout.RightHand = item;
-        else loadout.LeftHand = item;
+
+        // 双手装备独占两槽（玩法 §5.2）：任意一手是双手武器都按占满两槽处理；档里另一手还留着别的装备
+        // （写坏的档）时以双手装备为准 —— 界面侧（RunEquipmentSystem）不允许产生这种组合。
+        WeaponAttackSpec twoHanded = leftWeapon?.HandsRequired == 2 ? leftWeapon
+            : rightWeapon?.HandsRequired == 2 ? rightWeapon
+            : null;
+        if (twoHanded != null)
+        {
+            GroundObject twoHandedItem = CreateRunEquipment($"run-equipped-{slotIndex + 1}", twoHanded);
+            loadout.LeftHand = loadout.RightHand = twoHandedItem;
+            ApplyRunEquipmentModifiers(placement, twoHandedItem, twoHanded);
+            return;
+        }
+
+        if (leftWeapon != null)
+        {
+            GroundObject item = CreateRunEquipment($"run-equipped-{slotIndex + 1}", leftWeapon);
+            loadout.LeftHand = item;
+            ApplyRunEquipmentModifiers(placement, item, leftWeapon);
+        }
+
+        if (rightWeapon != null)
+        {
+            GroundObject item = CreateRunEquipment($"run-equipped-{slotIndex + 1}R", rightWeapon);
+            loadout.RightHand = item;
+            ApplyRunEquipmentModifiers(placement, item, rightWeapon);
+        }
+    }
+
+    private static WeaponAttackSpec RequireRunWeapon(string definitionId) =>
+        BattleWeaponCatalog.ForDefinition(definitionId)
+            ?? throw new ArgumentException($"运行局装备不存在：{definitionId}");
+
+    private static GroundObject CreateRunEquipment(string instanceId, WeaponAttackSpec weapon) =>
+        new GroundObject(instanceId, weapon.DefinitionId, GroundObjectKind.Equipment,
+            handsRequired: weapon.HandsRequired, attackRange: weapon.AttackRange, moveBonus: weapon.MoveBonus);
+
+    private static void ApplyRunEquipmentModifiers(BattleUnitPlacement placement, GroundObject item, WeaponAttackSpec weapon)
+    {
         placement.SetEquipmentMoveModifier(item.InstanceId, weapon.MoveBonus);
         placement.SetEquipmentCombatModifiers(item.InstanceId, weapon.DamageBonus, weapon.DefenseValue);
     }

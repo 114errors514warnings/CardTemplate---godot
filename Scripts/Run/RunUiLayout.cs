@@ -34,7 +34,8 @@ public static class RunUiLayout
     /// <summary>按钮间隔。</summary>
     public const float TopButtonSeparation = 8f;
 
-    /// <summary>右侧通用按钮组的左沿：比「现有 4 个按钮」更宽，为 `背包` / `装备` 两个入口预留容量。</summary>
+    /// <summary>右侧通用按钮组的左沿：比「现有 4 个按钮」更宽，为 `装备` 等后续入口预留容量
+    /// （`背包` 已于 2026-10-02 按用户口径落在**时间点行**，右组容量口径保持不变：容量断言是「装备 + 余量」）。</summary>
     public const float GeneralRowLeft = 0.54f;
     /// <summary>右侧按钮组的右沿（与剧情「跳过」行共用同一右缘）。</summary>
     public const float GeneralRowRight = 0.98f;
@@ -45,7 +46,8 @@ public static class RunUiLayout
 
     /// <summary>现有通用按钮：地图 / 定位当前角色 / 调试 / 暂停。</summary>
     public const int TopBarExistingButtons = 4;
-    /// <summary>预留入口：背包 / 装备（交互案已定：排在同一行的 `地图` 之前，见[背包系统交互案]/[装备系统交互案]）。</summary>
+    /// <summary>预留入口：`装备`（交互案已定：排在同一行的 `地图` 之前，见[装备系统交互案]）。
+    /// `背包` 已于 2026-10-02 落在时间点行（用户口径），这里保留的容量不再要求容纳它。</summary>
     public const int TopBarReservedButtons = 2;
     /// <summary>现有按钮里只有「定位当前角色」是宽按钮。</summary>
     public const int TopBarExistingWideButtons = 1;

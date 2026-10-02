@@ -9,8 +9,8 @@ public partial class RunSession : Node
 	/// <summary>本局存档路径（烟测也用它备份 / 还原，见 RunFlowScene 的存档守卫）。</summary>
 	public const string SavePath = "user://run_save_v1.json";
 
-	/// <summary>存档格式版本：与 `RunSaveData.CurrentSchemaVersion` 同步（版本 4 = 背包实例 + 食物效果寿命轴）。</summary>
-	public const string SaveSchemaVersion = "4";
+	/// <summary>存档格式版本：与 `RunSaveData.CurrentSchemaVersion` 同步（版本 5 = 左右手位字段 + 条目的随身格归属）。</summary>
+	public const string SaveSchemaVersion = "5";
 
 	/// <summary>当前局数据（null = 无进行中的局）。</summary>
 	public RunSaveData Current { get; private set; }
@@ -82,13 +82,23 @@ public partial class RunSession : Node
 			int maxHp = LoadingSystem.CharacterDictionary.TryGetValue(characterId, out Character template) && template != null
 				? template.MAX_HP
 				: 0;
-			data.CharacterSlots.Add(new RunCharacterSlotSave
+			RunCharacterSlotSave slot = new RunCharacterSlotSave
 			{
 				CharacterId = characterId,
 				CurrentHp = maxHp,
 				MaxHp = maxHp,
-				EquippedWeaponDefinitionId = GetInitialWeaponDefinition(characterId),
-			});
+			};
+
+			// 初始武器（职业技能默认武器）写进**左右手位**（装备系统交互案 §五：手位 = 左右手两字段，
+			// `EquippedWeaponDefinitionId` 由 SetHand 同步为左手镜像）；双手武器开档即占满两槽。
+			string initialWeapon = GetInitialWeaponDefinition(characterId);
+			RunEquipmentSystem.SetHand(slot, RunEquipmentSystem.LeftHand, initialWeapon);
+			if (RunEquipmentSystem.IsTwoHandedDefinition(initialWeapon))
+			{
+				RunEquipmentSystem.SetHand(slot, RunEquipmentSystem.RightHand, initialWeapon);
+			}
+
+			data.CharacterSlots.Add(slot);
 
 			List<RunDeckEntry> deck = new List<RunDeckEntry>();
 			List<int> defaultCardIds = LoadingSystem.GetCharacterDefaultCardIdListByKey(
@@ -529,6 +539,191 @@ public partial class RunSession : Node
 
 	/// <summary>随身格显示文案（空格 = 「空」）。</summary>
 	public string GetCarrySlotText(int slot) => Current == null ? "空" : RunBagSystem.CarrySlotText(Current, slot);
+
+	/// <summary>手位显示文案（空格 = 「空」；左右手 = 0 / 1，见 `RunEquipmentSystem`）。</summary>
+	public string GetHandText(int slotIndex, int hand) =>
+		Current == null ? RunEquipmentSystem.EmptyHandText : RunEquipmentSystem.HandText(Current, slotIndex, hand);
+
+	// ─────────────────────────────────────────────────────────────
+	// 背包整理（2026-10-02 批 E，P0-17 界面半 / P0-18 装备链）
+	// 拖动落点全部经这里：闸门 → 纯逻辑模块（RunBagSystem / RunEquipmentSystem）→ 立刻落档。
+	// ─────────────────────────────────────────────────────────────
+
+	/// <summary>整理被拒的四种情形（文案与判据见 `BagArrangeGate`，界面只读时提示行给出）。</summary>
+	public const string BagArrangeBlockRest = BagArrangeGate.Rest;
+	public const string BagArrangeBlockBattle = BagArrangeGate.Battle;
+	public const string BagArrangeBlockEvent = BagArrangeGate.Event;
+	public const string BagArrangeBlockSettlement = BagArrangeGate.Settlement;
+
+	/// <summary>队伍负荷上限（背包系统交互案 §四；来自 InventoryConfig.csv 的 `Global` 行）。</summary>
+	public float BagLoadLimit => RunBagSystem.LoadLimit;
+
+	/// <summary>当前背包负荷（只算背包内物品：手位与随身格不计，背包系统交互案 §四）。</summary>
+	public float BagLoad => CurrentBagLoad;
+
+	/// <summary>是否已超载（奖励入账不受限，只是阻止新的拖入）。</summary>
+	public bool IsBagOverloaded => Current != null && RunBagSystem.IsOverloaded(Current);
+
+	/// <summary>
+	/// 背包整理（拖动）的**运行时**阻断原因（空串 = 可拖动）。**不入档**：由 `RunFlowScene` 在每次
+	/// 内容 / 界面状态变化时按 <see cref="DescribeBagArrangeBlock"/> 重算 —— 存档里不该有界面状态。
+	/// </summary>
+	public string BagArrangeBlockReason { get; set; } = string.Empty;
+
+	/// <summary>能不能拖动整理（背包界面的唯一判据）。</summary>
+	public bool CanArrangeBag => Current != null && string.IsNullOrEmpty(BagArrangeBlockReason);
+
+	/// <summary>
+	/// 「无内容进行中」判据（背包系统交互案 §三）：规则与文案住在纯逻辑模块 `BagArrangeGate`，
+	/// 这里只做转发（`RunSession` 是 Godot `Node`，单测不能直接引用它）。
+	/// </summary>
+	public static string DescribeBagArrangeBlock(bool campActive, bool settlementPanelOpen,
+		bool battleContentActive, bool eventContentActive) =>
+		BagArrangeGate.Describe(campActive, settlementPanelOpen, battleContentActive, eventContentActive);
+
+	/// <summary>闸门：没有本局 / 有阻断原因时给出原因并拒绝（所有整理入口的第一步）。</summary>
+	private bool RequireBagArrange(out string error)
+	{
+		error = BagArrangeBlockReason ?? string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		return error.Length == 0;
+	}
+
+	/// <summary>
+	/// 背包 → 随身道具格（背包系统交互案 §三）：该格已有条目则**交换**（原物回背包）。
+	/// 放进随身格的条目不再占背包负荷（§四）。成功立刻落档。
+	/// </summary>
+	public bool TryMoveBagEntryToCarrySlot(string instanceId, int slot, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunBagSystem.TrySetCarrySlot(Current, slot, instanceId, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>随身格 → 背包（收入背包、局外不落地）：进包后超限则整笔拒绝并给出具体数字（§四）。</summary>
+	public bool TryMoveCarrySlotToBag(int slot, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		RunBagEntrySave entry = RunBagSystem.CarrySlotEntry(Current, slot);
+		if (entry == null)
+		{
+			error = "该随身格是空的。";
+			return false;
+		}
+
+		float load = ItemNameResolver.LoadOf(entry.CategoryEnum, entry.DefinitionKey) * entry.Count;
+		if (RunBagSystem.WouldExceedLoad(Current, load))
+		{
+			error = RunBagSystem.DescribeLoadReject(Current, load);
+			return false;
+		}
+
+		if (!RunBagSystem.TryClearCarrySlot(Current, slot, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>
+	/// 背包 → 手位（左手 = `RunEquipmentSystem.LeftHand` / 右手 = `RightHand`）：
+	/// 只接装备；双手装备要求两槽同时让位；被换下的单手装备回背包。成功立刻落档。
+	/// </summary>
+	public bool TryEquipBagEntryToHand(string instanceId, int slotIndex, int hand, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryEquipFromBag(Current, instanceId, slotIndex, hand, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>手位 → 背包（卸下、局外不落地丢弃）；双手装备一次卸下两槽。成功立刻落档。</summary>
+	public bool TryUnequipHandToBag(int slotIndex, int hand, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryUnequipHand(Current, slotIndex, hand, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>手位 → 另一手位（交换；双手装备不参与互换）。成功立刻落档。</summary>
+	public bool TryMoveHandToHand(int slotIndex, int fromHand, int toHand, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryMoveHandToHand(Current, slotIndex, fromHand, toHand, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>
+	/// 手位 → 随身道具格：**默认拒绝**（许可通道未开放）；`AllowsWeaponInItemSlots` 为真时才合法。
+	/// 失败也走闸门 → 原因文案由 `RunEquipmentSystem` 给出（界面只做展示）。
+	/// </summary>
+	public bool TryMoveHandToCarrySlot(int slotIndex, int hand, int carrySlot, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryMoveHandToCarrySlot(Current, slotIndex, hand, carrySlot, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
 
 
 	// ── P0#9 存档状态机（OnMap / InBattleStart / InSettlement） ──

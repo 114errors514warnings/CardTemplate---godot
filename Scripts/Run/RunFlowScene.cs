@@ -34,6 +34,9 @@ public partial class RunFlowScene : Control
     private HBoxContainer generalRow;
     private Label timePointLabel;
     private Button endDayButton;
+    // 背包入口（用户口径 2026-10-02：上边栏**时间点 UI 的右边**）与背包界面实例（挂 Modal 层，单实例）。
+    private Button bagButton;
+    private BagUi bagUi;
     // 每帧只做一次廉价比较，文案真的变了才写 Label（与剧情按钮行同一收敛口径）。
     private string shownTimePointText = string.Empty;
     // 结算界面（结算面板 + 卡牌三选一 + 待领取浮窗 + 放弃确认弹窗）常驻在本场景：
@@ -90,6 +93,10 @@ public partial class RunFlowScene : Control
         settlementUi.PanelClosed += OnSettlementPanelClosed;
         settlementUi.StateChanged += OnSettlementStateChanged;
         settlementUi.AbandonCommitted += OnSettlementAbandonCommitted;
+        // 背包界面（P0-17 界面半）：常驻本场景、挂模态层，内容重建不丢；开关由顶栏「背包」按钮驱动。
+        bagUi = new BagUi();
+        AddChild(bagUi);
+        bagUi.Bind(modalLayer);
         var run = RunSession.Instance;
         // 结算态优先：非战斗来源（事件 / 商人）发卡同样落 InSettlement，读档重进必须复现结算界面 / 浮窗，
         // 不能重播事件（§5.7 / §6.5）。
@@ -286,6 +293,14 @@ public partial class RunFlowScene : Control
     /// </summary>
     private bool HandleEscapeLayers()
     {
+        // 背包界面在最上层模态里最晚打开：先关它，再走结算界面自己的分层（§九）。
+        if (bagUi?.IsOpen == true)
+        {
+            bagUi.Close();
+            SetMapInputForModal(false);
+            return true;
+        }
+
         if (settlementUi != null && settlementUi.HandleEscape())
         {
             return true;
@@ -516,6 +531,8 @@ public partial class RunFlowScene : Control
         timePointLabel.AddThemeFontSizeOverride("font_size", 17);
         timePointLabel.AddThemeColorOverride("font_color", new Color("f5d98c"));
         timeRow.AddChild(timePointLabel);
+        // 背包入口：排在时间点文案的**右边**（用户口径 2026-10-02），在「结束当天」之前。
+        bagButton = AddTopButton(timeRow, "背包", ToggleBag);
         endDayButton = AddTopButton(timeRow, "结束当天", OpenCamp);
 
         // 剧情专属按钮：左侧 Log / 隐藏 / Auto，右侧 跳过；都在通用行下方同一带内。
@@ -566,6 +583,10 @@ public partial class RunFlowScene : Control
         // 选点态保留调试入口；暂停只在存在可暂停的内容时显示。
         debugButton.Visible = true;
         pauseButton.Visible = hasContent;
+        // 背包常驻可用（选点态也能整理）：没有进行中的本局时禁用；只读原因每帧由 RefreshBagArrangeGate 重算。
+        bagButton.Visible = true;
+        bagButton.Disabled = RunSession.Instance?.Current == null;
+        RefreshBagArrangeGate();
         // 地图打开时剧情 UI 必须处于让位状态：无论剧情是“按地图前”还是“地图打开后”才打开的，都统一在这里对齐。
         story?.SetWorldMapOpen(map.Visible);
         ApplyStoryRowVisibility();
@@ -591,6 +612,8 @@ public partial class RunFlowScene : Control
     {
         // 时间点显示与「结束当天」可用性：每帧只做一次廉价比较（文案变了才写 Label）。
         RefreshTimePointText();
+        // 背包整理闸门（§三）：内容 / 结算 / 营地状态变了才重算（不入档，只有界面读它）。
+        RefreshBagArrangeGate();
         if (storyRow == null) return;
         EventStoryOverlay story = activeBattle?.ActiveStoryOverlay;
         bool show = story != null && !map.Visible;
@@ -651,6 +674,72 @@ public partial class RunFlowScene : Control
             map.MouseFilter = modalOpen ? MouseFilterEnum.Ignore : MouseFilterEnum.Stop;
     }
 
+    /// <summary>
+    /// 背包界面的开关（顶栏「背包」按钮，用户口径 2026-10-02）：与调试窗一样走 `RunUiLayers.Modal`；
+    /// 结算面板 / 放弃确认 / 营地期间不开（避免两层模态抢输入，那些状态的只读口径见 §三）。
+    /// 开合本身不改任何游戏状态：背包、手位、随身格的当前值原样保留。
+    /// </summary>
+    private void ToggleBag()
+    {
+        if (bagUi == null)
+        {
+            return;
+        }
+
+        if (bagUi.IsOpen)
+        {
+            bagUi.Close();
+            SetMapInputForModal(false);
+            return;
+        }
+
+        if (settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen)) return;
+        if (camp != null) return;
+        bagUi.Open();
+        if (!bagUi.IsOpen) return;
+        SetMapInputForModal(true);
+        GD.Print($"[RunFlow] 背包界面打开：负荷 {RunSession.Instance?.BagLoad:0.0} / {RunSession.Instance?.BagLoadLimit:0.0}"
+            + $"（{(RunSession.Instance?.CanArrangeBag == true ? "可整理" : RunSession.Instance?.BagArrangeBlockReason)}）。");
+    }
+
+    /// <summary>
+    /// 背包整理的「无内容进行中」闸门（背包系统交互案 §三）：把当刻场景状态翻译成
+    /// `RunSession.BagArrangeBlockReason`（**运行时**字段，不入档）。每帧比对一次，变了才写 + 重画已打开的界面。
+    /// 「战后待领取态」按 `mapSelectable`（面板已关闭 → 地图可选）放行，与 §三 的清单一致。
+    ///
+    /// 2026-10-02 修复：**战斗已结束的战场不再是「内容进行中」**。之前只看 `!mapSelectable`，于是
+    /// 「读档重进结算界面（面板已关）」这类形态里战场已经是战后操作态、却仍被判成战斗中，背包被一直标成只读。
+    /// 现在把「战场已进战后操作态」也算作内容已完成（与 `EnterPostBattleStateForSettlement` 同一判据）。
+    /// </summary>
+    private void RefreshBagArrangeGate()
+    {
+        RunSession run = RunSession.Instance;
+        if (run == null)
+        {
+            return;
+        }
+
+        // 战场进了战后操作态 = 这场仗已经打完（战斗途中被事件插结算时 HexBattleScene 会拒绝进入，见 SetPostSettlementMode）。
+        bool battleFinished = activeBattle != null && GodotObject.IsInstanceValid(activeBattle) && activeBattle.IsPostSettlementMode;
+        bool contentInProgress = host != null && host.GetChildCount() > 0 && !mapSelectable && !battleFinished;
+        bool settlementPanelOpen = settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen);
+        string reason = RunSession.DescribeBagArrangeBlock(
+            campActive: camp != null,
+            settlementPanelOpen: settlementPanelOpen,
+            battleContentActive: contentInProgress && activeBattle != null,
+            eventContentActive: contentInProgress && activeBattle == null);
+        if (string.Equals(run.BagArrangeBlockReason, reason, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        run.BagArrangeBlockReason = reason;
+        if (bagUi?.IsOpen == true)
+        {
+            bagUi.Refresh();
+        }
+    }
+
     /// <summary>运行局 UI 回归烟测：验证世界地图上方的 ModalLayer 能接收调试窗关闭按钮的真实鼠标输入。</summary>
     private async void RunUiSmoke()
     {
@@ -662,8 +751,9 @@ public partial class RunFlowScene : Control
             Require(contentLayer.Layer < worldMapLayer.Layer && worldMapLayer.Layer < modalLayer.Layer && modalLayer.Layer < globalButtonLayer.Layer,
                 "运行局 CanvasLayer 顺序错误。");
 
-            // 常驻栏几何（§49.1）：右组必须容得下「现有 4 + 预留 2（背包 / 装备）」——
-            // 这是「给装备系统 / 背包系统留位置」的机器判据；左右两组不得相交；战场 HUD 必须让开顶栏两行。
+            // 常驻栏几何（§49.1）：右组必须容得下「现有 4 + 预留 2（装备等后续入口）」——
+            // 这是「给后续局外入口留位置」的机器判据（`背包` 自 2026-10-02 起落在时间点行，见下方背包段）；
+            // 左右两组不得相交；战场 HUD 必须让开顶栏两行。
             float viewportWidth = GetViewport().GetVisibleRect().Size.X;
             Require(RunUiLayout.FitsReservedCluster(viewportWidth),
                 $"常驻栏右组容不下预留的「背包 / 装备」两个入口：需要 {RunUiLayout.ReservedClusterWidth:0} px，可用 {RunUiLayout.ClusterBandWidth(viewportWidth):0} px。");
@@ -675,6 +765,140 @@ public partial class RunFlowScene : Control
                 $"常驻按钮行左沿必须取自 RunUiLayout（期望 {RunUiLayout.GeneralRowLeft * viewportWidth:0} px，实际 {generalRow.GetGlobalRect().Position.X:0} px）。");
             Require(generalRow.GetGlobalRect().Position.X >= timeRow.GetGlobalRect().End.X - 1f,
                 "常驻栏左右两组不得重叠：通用按钮行必须整体位于时间点行之右。");
+
+            // ── 背包界面（P0-17 界面半，2026-10-02 批 E）：入口位置 → 打开 → 拖动落档 → 只读原因 → 关闭 ──
+            // 入口位置是用户口径：必须排在**时间点 UI 的右边**，且仍在时间点行带内（不压右侧通用按钮行）。
+            Require(bagButton != null && bagButton.Visible, "常驻顶栏应提供「背包」入口。");
+            Require(bagButton.GetGlobalRect().Position.X >= timePointLabel.GetGlobalRect().End.X - 1f,
+                $"「背包」入口必须排在时间点文案的右边（时间点 {timePointLabel.GetGlobalRect()}/ 背包 {bagButton.GetGlobalRect()}）。");
+            Require(bagButton.GetGlobalRect().End.X <= RunUiLayout.TimeRowRight * viewportWidth + 1f,
+                $"「背包」入口必须落在时间点行带内（右沿 {bagButton.GetGlobalRect().End.X:0} ≤ 带右沿 {RunUiLayout.TimeRowRight * viewportWidth:0}）。");
+
+            RunSession bagRun = RunSession.Instance;
+            Require(bagRun.CanArrangeBag,
+                $"地图可选态应允许整理背包，实际阻断原因「{bagRun.BagArrangeBlockReason}」。");
+            RunBagEntrySave smokeSword = RunBagSystem.Add(bagRun.Current, BagCategory.Equipment, 10001, 1); // 行军短剑（单手）
+            RunBagEntrySave smokePotion = RunBagSystem.Add(bagRun.Current, BagCategory.Item, 301, 1);        // 治疗药水
+            ToggleBag();
+            await WaitFrames(2);
+            Require(bagUi.IsOpen, "点「背包」应打开背包界面。");
+            Require(bagUi.BagCellCount >= 2, $"背包列表应显示刚加入的两件物品，实际 {bagUi.BagCellCount} 格。");
+            Require(bagUi.LoadText.Contains("/"), $"负荷条应显示「当前 / 上限」，实际「{bagUi.LoadText}」。");
+            // 均匀网格 + 页数 / 翻页（用户指令 2026-10-02 第 2 条）：固定 5 × 5 个等宽等高格，空格也画；
+            // 网格下方一行给出「第 x / y 页」与 `上一页` / `下一页`（只有一页时两边都禁用）。
+            Require(bagUi.BagSlotCellCount == BagUi.PageCapacity,
+                $"背包格区必须是均匀网格：每页固定 {BagUi.PageCapacity} 格（空位也画格），实际 {bagUi.BagSlotCellCount} 格。");
+            Require(bagUi.PageText == "第 1 / 1 页",
+                $"第 1 页文案应为「第 1 / 1 页」，实际「{bagUi.PageText}」。");
+            Require(bagUi.PageCount == 1 && !bagUi.CanGoPreviousPage && !bagUi.CanGoNextPage,
+                $"只有一页时翻页按钮必须都禁用，实际 页数 {bagUi.PageCount} / 上页 {bagUi.CanGoPreviousPage} / 下页 {bagUi.CanGoNextPage}。");
+            Require(bagUi.BannerText.Length == 0, $"可整理态不应显示横幅，实际「{bagUi.BannerText}」。");
+            await CaptureSmoke("res://Tests/run-flow-ui-smoke-bag.png");
+            int smokeBagGridCells = bagUi.BagSlotCellCount;
+            string smokeBagPageText = bagUi.PageText;
+
+            // 开局武器（槽 0 = 重剑手，「双手剑」）占满两槽 → 单手装备必须被拒（玩法 §5.2 合法组合表）。
+            Require(!bagUi.SimulateDrop(BagUi.BagPayload(smokeSword.InstanceId), BagUi.HandCellName(0, RunEquipmentSystem.LeftHand)),
+                "初始双手装备占满两槽时，单手装备应被拒绝。");
+            Require(bagUi.HintText.Contains("双手装备"), $"拒绝原因应说明双手装备冲突，实际「{bagUi.HintText}」。");
+            // 规则拒绝也要有横幅（用户指令 2026-10-02 第 1 条：「应当显示横幅提示」）。
+            Require(bagUi.BannerText.Contains(BagUi.DropRejectedPrefix) && bagUi.BannerText.Contains("双手装备"),
+                $"落点被规则拒绝时必须给横幅提示，实际「{bagUi.BannerText}」。");
+            // 腾出手位（卸下双手开局武器 → 回背包），再走正向拖动。
+            Require(bagRun.TryUnequipHandToBag(0, RunEquipmentSystem.LeftHand, out string handUnequipError), handUnequipError);
+            Require(RunEquipmentSystem.HandDefinition(bagRun.Current, 0, RunEquipmentSystem.LeftHand) == string.Empty
+                    && RunEquipmentSystem.HandDefinition(bagRun.Current, 0, RunEquipmentSystem.RightHand) == string.Empty,
+                "卸下双手开局武器应一次清空两槽。");
+            float bagLoadBefore = RunBagSystem.TotalLoad(bagRun.Current);
+
+            // 拖动 ①：背包装备 → 左手位（落档 + 从背包消失 + 负荷下降）
+            Require(bagUi.SimulateDrop(BagUi.BagPayload(smokeSword.InstanceId), BagUi.HandCellName(0, RunEquipmentSystem.LeftHand)),
+                $"背包 → 左手位应成功，实际提示「{bagUi.HintText}」。");
+            Require(RunEquipmentSystem.HandDefinition(bagRun.Current, 0, RunEquipmentSystem.LeftHand) == smokeSword.DefinitionId,
+                "左手位应写上被拖入的装备名。");
+            Require(bagRun.Current.CharacterSlots[0].EquippedWeaponDefinitionId == smokeSword.DefinitionId,
+                "旧字段 `EquippedWeaponDefinitionId` 必须同步为左手镜像。");
+            Require(RunBagSystem.Find(bagRun.Current, smokeSword.InstanceId) == null, "装备装上手位后应从背包里消失。");
+            Require(RunBagSystem.TotalLoad(bagRun.Current) < bagLoadBefore,
+                "装到手位后背包负荷必须下降（背包系统交互案 §四：手位不占背包负荷）。");
+            Require(RunBagSystem.TotalLoad(bagRun.Current)
+                    == Math.Abs(bagRun.CurrentBagLoad - RunBagSystem.TotalLoad(bagRun.Current)) + RunBagSystem.TotalLoad(bagRun.Current),
+                "会话层负荷读数应与 RunBagSystem 一致。");
+
+            // 拖动 ②：背包道具 → 道具栏（条目的 CarrySlot 与兼容镜像同步）
+            Require(bagUi.SimulateDrop(BagUi.BagPayload(smokePotion.InstanceId), BagUi.CarryCellName(0)),
+                $"背包 → 道具栏应成功，实际提示「{bagUi.HintText}」。");
+            Require(RunBagSystem.CarrySlotEntry(bagRun.Current, 0)?.InstanceId == smokePotion.InstanceId
+                    && bagRun.Current.CarryItemSlots[0] == smokePotion.InstanceId,
+                "道具栏第 1 格必须同时写「条目的 CarrySlot」与兼容镜像 CarryItemSlots。");
+            Require(bagRun.GetCarrySlotText(0) == smokePotion.DefinitionId,
+                $"道具栏文案应是刚放进去的道具名，实际「{bagRun.GetCarrySlotText(0)}」。");
+
+            // 拖动 ③：内容进行中（战斗中）—— 口径改判 2026-10-02 用户指令第 1 条：
+            // **能拿起**（拖动载荷照样给），但**放进道具栏 / 装备栏被拒**，并且必须有横幅提示。
+            bagRun.BagArrangeBlockReason = RunSession.BagArrangeBlockBattle;
+            bagUi.Refresh(); // 宿主每帧会重算闸门并重画；烟测直接写字段，这里补一次重画
+            Require(bagUi.PayloadOfCell(BagUi.BagCellName(0)).StartsWith("bag|", System.StringComparison.Ordinal),
+                $"内容进行中仍应能拿起背包格里的物品，实际载荷「{bagUi.PayloadOfCell(BagUi.BagCellName(0))}」。");
+            Require(bagUi.BannerText.Contains("战斗中不可整理背包") && bagUi.BannerText.Contains("不能放进道具栏"),
+                $"内容进行中必须常驻横幅并说明「能拿起 / 不能放进槽位」，实际「{bagUi.BannerText}」。");
+            Require(!bagUi.SimulateDrop(BagUi.CarryPayload(0), BagUi.BagCellName(0)), "内容进行中拖动落点必须被拒绝。");
+            Require(bagUi.HintText.Contains("战斗中不可整理背包"),
+                $"落点被拒应给出原因，实际「{bagUi.HintText}」。");
+
+            // 分页（用户指令 2026-10-02 第 2 条）：30 件食物（食物按实例存续 ⇒ 30 个独立格）撑出第 2 页。
+            bagRun.Current.BagEntries.AddRange(Enumerable.Range(0, 30)
+                .Select(_ => RunBagSystem.CreateEntry(bagRun.Current, BagCategory.Food, 401)));
+            bagUi.Refresh();
+            Require(bagUi.PageCount == 2 && bagUi.PageNumber == 1,
+                $"31 件以上应分成 2 页且停在第 1 页，实际 页数 {bagUi.PageCount} / 第 {bagUi.PageNumber} 页。");
+            Require(bagUi.PageText == "第 1 / 2 页", $"第 1 页文案应为「第 1 / 2 页」，实际「{bagUi.PageText}」。");
+            Require(bagUi.BagCellCount == BagUi.PageCapacity && !bagUi.CanGoPreviousPage && bagUi.CanGoNextPage,
+                $"第 1 页应满 {BagUi.PageCapacity} 格且只能往后翻，实际 格数 {bagUi.BagCellCount} / 上页 {bagUi.CanGoPreviousPage} / 下页 {bagUi.CanGoNextPage}。");
+            bagUi.NextPage();
+            await CaptureSmoke("res://Tests/run-flow-ui-smoke-bag-page2.png");
+            Require(bagUi.PageText == "第 2 / 2 页" && bagUi.CanGoPreviousPage && !bagUi.CanGoNextPage,
+                $"翻到末页应显示「第 2 / 2 页」且只能往前翻，实际「{bagUi.PageText}」/ 上页 {bagUi.CanGoPreviousPage} / 下页 {bagUi.CanGoNextPage}。");
+            Require(bagUi.BagCellCount > 0 && bagUi.BagCellCount < BagUi.PageCapacity,
+                $"末页应只显示剩余件数（0 < 格数 < {BagUi.PageCapacity}），实际 {bagUi.BagCellCount}。");
+            bagUi.PreviousPage();
+            Require(bagUi.PageText == "第 1 / 2 页", $"翻回上一页应显示「第 1 / 2 页」，实际「{bagUi.PageText}」。");
+            bagRun.Current.BagEntries.RemoveAll(x => x != null && x.CategoryEnum == BagCategory.Food);
+            bagUi.Refresh();
+            Require(bagUi.PageCount == 1 && bagUi.PageText == "第 1 / 1 页",
+                $"清掉分页夹具后应回到单页，实际 页数 {bagUi.PageCount} /「{bagUi.PageText}」。");
+
+            bagRun.BagArrangeBlockReason = string.Empty;
+            bagUi.Refresh();
+            Require(bagUi.BannerText.Length == 0, $"闸门解除后横幅必须消失，实际「{bagUi.BannerText}」。");
+            Require(bagUi.SimulateDrop(BagUi.CarryPayload(0), BagUi.BagCellName(0)) || bagUi.BagCellCount == 0,
+                $"恢复可整理后「道具栏 → 背包」应成功（或背包列表当时为空），实际提示「{bagUi.HintText}」。");
+
+            // 关闭：`关闭` 按钮与 `Esc` 都能退出，且不留状态
+            bagUi.Close();
+            Require(!bagUi.IsOpen, "关闭后背包界面必须隐藏。");
+            ToggleBag();
+            await WaitFrames(2);
+            Require(bagUi.IsOpen, "再次点「背包」应能重新打开（单实例）。");
+            Require(HandleEscapeLayers() && !bagUi.IsOpen, "`Esc` 应关闭背包界面。");
+
+            // 收尾：把夹具还原成开局形态（烟测随后要跑结算 / 营地流程，不留脏状态）——
+            // 卸下刚拖入的装备 → 清掉本段加的两件 → 把开局武器「双手剑」装回左手（双手 → 两槽）。
+            RunEquipmentSystem.TryUnequipHand(bagRun.Current, 0, RunEquipmentSystem.LeftHand, out _);
+            RunBagSystem.TakeOneByDefinition(bagRun.Current, BagCategory.Item, 301, out _);
+            RunBagSystem.TakeOneByDefinition(bagRun.Current, BagCategory.Equipment, 10001, out _);
+            RunBagEntrySave initialWeapon = RunBagSystem.AllEntriesOf(bagRun.Current, BagCategory.Equipment)
+                .FirstOrDefault(x => x.DefinitionId == "双手剑");
+            if (initialWeapon != null)
+            {
+                bagRun.TryEquipBagEntryToHand(initialWeapon.InstanceId, 0, RunEquipmentSystem.LeftHand, out _);
+            }
+
+            bagRun.Save();
+            GD.Print($"RUN_FLOW_UI_SMOKE_BAG: 入口 x={bagButton.GetGlobalRect().Position.X:0}（时间点右沿 {timePointLabel.GetGlobalRect().End.X:0}）"
+                + $" / 格数 {bagUi.BagCellCount} / 网格 {smokeBagGridCells} 格 {smokeBagPageText} / 关闭后 IsOpen={bagUi.IsOpen}"
+                + $" / 横幅「{bagUi.BannerText}」 / 负荷 {bagRun.BagLoad:0.0}/{bagRun.BagLoadLimit:0.0}"
+                + $" / 槽 0 左手 {RunEquipmentSystem.HandText(bagRun.Current, 0, RunEquipmentSystem.LeftHand)}");
 
             // 顶栏底板（`RunUiLayers.TopBarBackdrop = 32`）：不透明地铺满第一行那一带、遮住战斗地图，
             // 但层号低于结算浮标与一切模态；按钮纵向居中于该带。
@@ -1001,6 +1225,23 @@ public partial class RunFlowScene : Control
             Require(!realBattle.MapView.HasPendingPresentation, "战后移动的逐格表现未在限定帧内播完。");
             Require(realBattle.Session.Occupancy.Placements[postMover].Coord == postTarget,
                 $"战后点可达格应立即移动到位，实际 {realBattle.Session.Occupancy.Placements[postMover].Coord}。");
+            // 位置落档（§七 4 改口径）：移动表现播完即写档 —— 这里**有界等待**该次写档真的落地
+            // （写点在表现的收尾帧，排空表现后再等 1~2 帧才读才稳定；直接读会随机读到移动前的那一份快照）。
+            int moverSlot = Math.Max(0, realBattle.Session.PlayerIds.IndexOf(postMover));
+            RunUnitPlacementSave moverInSave = null;
+            for (int waitFrame = 0; waitFrame < 120; waitFrame++)
+            {
+                moverInSave = run.Current.PostBattleBattlefield?.Units.FirstOrDefault(u => u.SlotIndex == moverSlot);
+                if (moverInSave != null && moverInSave.Q == postTarget.Q && moverInSave.R == postTarget.R)
+                {
+                    break;
+                }
+
+                await WaitFrames(1);
+            }
+
+            Require(moverInSave != null && moverInSave.Q == postTarget.Q && moverInSave.R == postTarget.R,
+                $"战后移动后应把新坐标落档（期望 {postTarget.Q},{postTarget.R}，落档 {moverInSave?.Q},{moverInSave?.R}）。");
             Require(realBattle.Session.Occupancy.Placements[postMover].Unit.Energy == postEnergy &&
                 realBattle.Session.Occupancy.Placements[postMover].MovesUsedThisTurn == postMovesUsed,
                 "战后移动不得消耗能量与移动次数。");
@@ -1058,11 +1299,16 @@ public partial class RunFlowScene : Control
             Require(!string.IsNullOrEmpty(postSave.MapId), "战后落档应带重建战场用的地图 ID。");
             Require(postSave.Round == postRound, $"战后落档应记录当前回合 {postRound}，实际 {postSave.Round}。");
             Require(postSave.Loadouts.Count == run.Current.CharacterSlots.Count, "战后落档应含每个角色槽的随身与手位。");
-            RunUnitPlacementSave selectedInSave = postSave.Units.FirstOrDefault(u => u.SlotIndex == postSave.SelectedSlotIndex);
+            // 选中槽取**当刻选中的角色**：快照里的 `SelectedSlotIndex` 是写档那刻的选中态（点人切换选中不再写档），
+            // 拿写档时的槽位去比当刻坐标会随机踩到「选中已切换」的竞态。
+            int selectedSlotNow = Math.Max(0, realBattle.Session.PlayerIds.IndexOf(realBattle.Session.SelectedId));
+            RunUnitPlacementSave selectedInSave = postSave.Units.FirstOrDefault(u => u.SlotIndex == selectedSlotNow);
             Require(selectedInSave != null, "战后落档应含选中角色槽的位置。");
+            Require(postSave.SelectedSlotIndex >= 0 && postSave.SelectedSlotIndex < run.Current.CharacterSlots.Count,
+                $"战后落档的选中槽应落在角色槽范围内，实际 {postSave.SelectedSlotIndex}。");
             AxialHex selectedNow = realBattle.Session.Occupancy.Placements[realBattle.Session.SelectedId].Coord;
             Require(selectedInSave.Q == selectedNow.Q && selectedInSave.R == selectedNow.R,
-                $"战后移动后应把新坐标落档，落档 {selectedInSave.Q},{selectedInSave.R} / 实际 {selectedNow}。");
+                $"当刻选中角色的坐标应与落档一致（槽 {selectedSlotNow}），落档 {selectedInSave.Q},{selectedInSave.R} / 实际 {selectedNow}。");
             Require(RunSaveJson.Deserialize(RunSaveJson.Serialize(run.Current)).PostBattleBattlefield != null,
                 "战后落档必须能通过存档 JSON 往返。");
             Require(FileAccess.FileExists(RunSession.SavePath) &&
@@ -1692,7 +1938,10 @@ public partial class RunFlowScene : Control
             data.Keys = 2;
             data.MapState.TimePoints = 1.7f;
             data.BagEntries.Add(RunBagSystem.CreateEntry(data, BagCategory.Food, 402, 2, "smoke-food-a"));
-            data.CarryItemSlots[0] = "smoke-food-a";
+            // 随身格的真相是条目的 `CarrySlot`（SchemaVersion 5）：走 API 而不是直接改镜像列表，
+            // 否则「落档 → 读档迁移 → 再序列化」会因迁移补齐而不再逐字一致。
+            Require(RunBagSystem.TrySetCarrySlot(data, 0, "smoke-food-a", out string carryError),
+                $"随身格夹具应接受该实例键：{carryError}");
             ItemEffectSpec spec = ItemNameResolver.FoodEffectsOf(402).FirstOrDefault();
             Require(spec != null, "自检需要一条可落档的食物效果（Food.csv 402 应带效果）。");
             RunFoodEffectSave effect = RunFoodSystem.BuildEffectSave(spec, "香草炖菜");
@@ -1711,11 +1960,13 @@ public partial class RunFlowScene : Control
                 "读档后的序列化必须与落档内容逐字一致（任何字段在重建时丢语义都会在这里暴露）。");
             Require(run.Current.Gold == 17 && run.Current.Keys == 2 && Math.Abs(run.Current.MapState.TimePoints - 1.7f) < 1e-4f,
                 "读档后金币 / 钥匙 / 时间点必须原样恢复。");
-            Require(RunBagSystem.CountOf(run.Current, BagCategory.Food, 402) == 2
+            Require(RunBagSystem.AllEntriesOf(run.Current, BagCategory.Food).Sum(x => x.Count) == 2
+                    && RunBagSystem.CountOf(run.Current, BagCategory.Food, 402) == 0
                     && run.Current.CarryItemSlots[0] == "smoke-food-a"
+                    && RunBagSystem.CarrySlotEntry(run.Current, 0)?.InstanceId == "smoke-food-a"
                     && run.Current.ActiveFoodEffects.Count == 1
                     && Math.Abs(run.Current.ActiveFoodEffects[0].Remaining - 0.3f) < 1e-4f,
-                "读档后背包实例 / 随身格 / 食物效果寿命轴必须原样恢复。");
+                "读档后背包实例 / 随身格归属 / 食物效果寿命轴必须原样恢复（随身格上的食物只算整包件数，不计背包内可用件数）。");
 
             // ③ 角色槽 / 卡组 API 边界
             Require(run.GetSlot(-1) == null && run.GetSlot(99) == null, "越界的角色槽必须返回 null。");
