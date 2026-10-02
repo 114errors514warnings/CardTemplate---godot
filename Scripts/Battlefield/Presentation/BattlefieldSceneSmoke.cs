@@ -760,6 +760,7 @@ public static class BattlefieldSceneSmoke
             "res://Resources/Images/Characters/Pixel/fx_tome_cast_rune.png",
             "res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png",
             "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png",
+            "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v2.png",
         };
         foreach (string path in required) Check(ResourceLoader.Exists(path), $"asset path resolves: {path}");
         Check(!ResourceLoader.Exists("res://Images/UI/IntentIcons/intent_move.png"), "legacy root Images/ folder is gone");
