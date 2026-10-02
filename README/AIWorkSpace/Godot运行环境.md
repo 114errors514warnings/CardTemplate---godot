@@ -20,6 +20,37 @@
 - 弓箭范围高亮出图：`-- --battlefield-smoke --battlefield-bow-capture`（**图形版** exe，headless 无法出图），产物 `Tests/battlefield-bow-range.png`；黄=六方向完整直线，红=被首个阻挡截断的弹道段。
 - 血条文本出图：`-- --battlefield-smoke --battlefield-health-capture`（**图形版** exe），产物 `Tests/battlefield-health-bars.png` —— 先临时把一只怪打到 60%（截完立刻还原，不影响后续断言）再出图，用于人工核对「`当前/上限` + 纯黑字 + 浅色描边」在满血 / 部分填充 / 深色底条三种底色上的可读性（口径本身由 `BATTLEFIELD_HEALTH_TEXT_PASS` 断言）。
 
+## AI 接口驱动验证（2026-10-02 起，改界面 / 运行局时的首选）
+
+> 口径见[编译验证规则](../Skill/编译验证规则.md) §六：日常用**定向 API 点打**，全量烟测只在收尾 / 提交前跑一次。
+> 指令表与配方见[跑测使用说明](../功能说明文档/AI接口/跑测使用说明.md) / [调试API](../功能说明文档/AI接口/调试API.md)。
+
+```powershell
+$exe = 'D:\MY\Godot\Godot_v4.6.2-stable_mono_win64\Godot_v4.6.2-stable_mono_win64_console.exe'
+$save = Join-Path $env:APPDATA 'Godot\app_userdata\卡牌模拟器\run_save_v1.json'
+if (Test-Path $save) { Copy-Item -LiteralPath $save -Destination ($save + '.apibak') -Force }   # 先备份本局存档
+
+$p = Start-Process -FilePath $exe -PassThru -ArgumentList @(
+  '--path','"D:\MY\My Game\卡牌模拟器"','--position','3000,3000') `
+  -RedirectStandardOutput 'Tests\api-smoke-out.txt' -RedirectStandardError 'Tests\api-smoke-err.txt'
+Start-Sleep -Seconds 15
+(Invoke-RestMethod 'http://127.0.0.1:17880/api/game/').Data   # domains / port / 摘要
+(Invoke-RestMethod -Uri 'http://127.0.0.1:17880/api/game/' -Method Post `
+  -Body ([Text.Encoding]::UTF8.GetBytes('{"type":"debug.game.new_run"}')) `
+  -ContentType 'application/json; charset=utf-8').Message     # 开局（任意场景可用）
+# …按模块点打（配方见跑测使用说明）…
+(Invoke-RestMethod -Uri 'http://127.0.0.1:17880/api/game/' -Method Post `
+  -Body ([Text.Encoding]::UTF8.GetBytes('{"type":"debug.game.quit"}')) `
+  -ContentType 'application/json; charset=utf-8').Message     # 干净退出
+
+if (Test-Path ($save + '.apibak')) { Copy-Item -LiteralPath ($save + '.apibak') -Destination $save -Force }  # 还原存档
+```
+
+- 服务是 autoload：**游戏一启动就在监听**（不必先进战斗）。`--headless` 下接口可用，但截图与 GUI 命中类断言要图形版。
+- 两条通道**不许混**：`debug.` 前缀 = 越权（只用来摆场景，如选关 / 一键跳关 / 塞物品 / 改时间点）；
+  判断走玩家通道（`battle.*` / `run.*`）。响应里的 `permission` 字段自证。
+- 收尾用 `debug.game.quit`（退出码 0）；确实要强杀时只 `Stop-Process -Id <自己启动的 PID>`，**不要**按名字批量杀 Godot（会连带杀掉用户开着的窗口）。
+
 ## 烟测进程管理（2026-09-22，硬规则）
 
 - **只关自己启动的那个进程**：烟测用 `Start-Process -PassThru` 拿 PID，等它自己退出（烟测末尾 `GetTree().Quit()`）。

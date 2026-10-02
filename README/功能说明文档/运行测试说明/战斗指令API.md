@@ -1,11 +1,19 @@
 # 六边形战场指令 API
 
-开发环境打开六边形战斗场景后，默认监听 `http://127.0.0.1:17880/api/game/`。服务仅绑定本机，所有请求都会排入 Godot 主线程并复用 `BattlefieldSession` 的正式规则入口。
+> 2026-10-02 起：本页的 `battle.*` 指令并入**玩家通道**，服务由 autoload 统一提供（端口不变）。
+> 新增的 `run.*`（背包 / 时间点 / 营地）与 `debug.*`（越权）见
+> [AI接口](../AI接口/README.md) 与 [调试API](../AI接口/调试API.md)；
+> 跑测流程见 [跑测使用说明](../AI接口/跑测使用说明.md)。
+
+开发环境启动游戏（任意场景）后即监听 `http://127.0.0.1:17880/api/game/`。服务仅绑定本机，
+所有请求都会排入 Godot 主线程并复用 `BattlefieldSession` 的正式规则入口。
+`EnableDebugApi=false` 可关掉调试通道（只剩玩家通道）。
 
 ## 请求
 
-- `GET /api/game/`：读取当前战斗状态，包含全部单位（敌方意图、HP、护盾、坐标、Presence）、各角色手牌、当前角色的左右手/随身栏，以及全图地面物品与触发物件实例 ID。
-- `POST /api/game/`：提交 JSON 指令。
+- `GET /api/game/`：读取进程级摘要（端口 / 已注册域 / 战斗摘要 / 本局摘要）。
+- `POST /api/game/`：提交 JSON 指令；`{"type":"api.catalog"}` 可列出全部指令与所属通道。
+
 
 通用字段：`type` 为指令名；仅 `battle.select_unit` 使用 `unitId` 切换当前角色；其他玩家操作均使用当前角色。格点使用 `q`、`r` 与 `hasTarget:true`；手位 `hand` 为 `left` 或 `right`。
 
