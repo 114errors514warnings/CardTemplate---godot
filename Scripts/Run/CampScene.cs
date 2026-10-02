@@ -52,6 +52,8 @@ public partial class CampScene : Control
 	private Label previewLabel, resultLabel, hintLabel;
 	private OptionButton watcherPicker;
 	private readonly List<Label> partyRows = new List<Label>();
+	/// <summary>守夜选项（模式 → 勾选框）：AI 接口按模式选择时同步勾选状态，与点选同一条通路。</summary>
+	private readonly List<(RunWatchMode Mode, CheckBox Box)> watchOptions = new List<(RunWatchMode, CheckBox)>();
 	private Button foodButton, cookButton, restButton, watchButton;
 	private Control foodPanel, cookPanel, watchPanel, partyPanel;
 	private Label foodProgressLabel, foodHintLabel, cookProgressLabel, cookHintLabel;
@@ -189,6 +191,7 @@ public partial class CampScene : Control
 			if (watcherPicker != null) watcherPicker.Disabled = mode != RunWatchMode.Single;
 			RefreshPreview();
 		};
+		watchOptions.Add((mode, box));
 		parent.AddChild(box);
 	}
 
@@ -439,6 +442,79 @@ public partial class CampScene : Control
 
 	/// <summary>烹饪入口按钮是否被禁用。</summary>
 	public bool CookButtonDisabled => cookButton == null || cookButton.Disabled;
+
+	/// <summary>守夜面板（`守夜` 按钮）是否显示。</summary>
+	public bool WatchPanelVisible => watchPanel != null && watchPanel.Visible;
+
+	// ── AI 接口访问面（2026-10-02）：夜间（营地）UI 的可驱动窄口 ─────────────────
+	// 口径：全部等同「把界面上那一次点击写出来」，不新增规则；结算中的锁定（`resolving`）照旧生效。
+
+	/// <summary>当前守夜模式。</summary>
+	public RunWatchMode WatchMode => watchMode;
+
+	/// <summary>单人守夜时承担守夜的角色槽位（其余模式返回夹取后的值，只作回读用）。</summary>
+	public int WatcherSlot => WatcherIndex(RunSession.Instance);
+
+	/// <summary>预览文案（基础回复 + 守夜口径），供 API 断言。</summary>
+	public string PreviewText => previewLabel?.Text ?? string.Empty;
+
+	/// <summary>休息结算结果文案（结算后才有内容）。</summary>
+	public string ResultText => resultLabel?.Text ?? string.Empty;
+
+	/// <summary>是否正在结算（结算期间四个按钮锁定）。</summary>
+	public bool IsResolving => resolving;
+
+	/// <summary>切到指定守夜模式（与点勾选框同一条通路：同步勾选状态 + 刷新预览）。</summary>
+	public bool SetWatchMode(RunWatchMode mode)
+	{
+		if (resolving) return false;
+		bool found = false;
+		foreach ((RunWatchMode option, CheckBox box) in watchOptions)
+		{
+			if (option != mode) continue;
+			found = true;
+			box.ButtonPressed = true; // Toggled 回调负责写 watchMode / 启用下拉 / 刷新预览
+			break;
+		}
+
+		if (!found)
+		{
+			// 界面还没建（无勾选框）时仍允许设定，保持口径可用。
+			watchMode = mode;
+			if (watcherPicker != null) watcherPicker.Disabled = mode != RunWatchMode.Single;
+			RefreshPreview();
+		}
+
+		return true;
+	}
+
+	/// <summary>选择单人守夜的角色槽位（与下拉框选择同一条通路）。</summary>
+	public bool SetWatcherSlot(int slotIndex)
+	{
+		RunSession run = RunSession.Instance;
+		if (resolving || run?.Current == null || slotIndex < 0 || slotIndex >= run.Current.CharacterSlots.Count) return false;
+		watcherSlotIndex = slotIndex;
+		if (watcherPicker != null) watcherPicker.Selected = slotIndex;
+		RefreshPreview();
+		return true;
+	}
+
+	/// <summary>点「休息」（走完整结算：应用回复 → 推进新一天 → 淡出回地图）。返回是否真的开始结算。</summary>
+	public bool RequestRest()
+	{
+		if (resolving) return false;
+		OnRestPressed();
+		return true;
+	}
+
+	/// <summary>点「添加食物」（开 / 关篝火食物面板）。</summary>
+	public void ToggleFoodPanel() => OnFoodPressed();
+
+	/// <summary>点「烹饪」（开 / 关配方面板）。</summary>
+	public void ToggleCookPanel() => OnCookPressed();
+
+	/// <summary>点「守夜」（开 / 关守夜面板）。</summary>
+	public void ToggleWatchPanel() => ShowPanel(watchPanel != null && watchPanel.Visible ? null : watchPanel);
 
 	/// <summary>饱食度进度行文案（烟测断言「X / 10」与「计入效果」）。</summary>
 	public string SatietyProgressText => foodProgressLabel?.Text ?? string.Empty;

@@ -207,6 +207,35 @@ public sealed partial class BattlefieldSession
     // ---- 阶段 ----
     public void DebugEndTurn() => EndCurrentTurn();
 
+    /// <summary>
+    /// 调试通道用的全景摘要（`debug.*` 写指令的默认回包）：含玩家界面上看不到的隐藏信息
+    /// —— 状态层数、手牌 / 抽牌堆 / 弃牌堆 / 消耗堆张数。玩家通道（`battle.state`）不返回这些。
+    /// </summary>
+    public object DebugSummary() => new
+    {
+        phase = Phase.ToString(),
+        round = Round,
+        selectedUnitId = SelectedId,
+        units = Occupancy.Placements.Values.Select(p => new
+        {
+            id = p.UnitId,
+            name = p.Name,
+            role = p.Role.ToString(),
+            presence = p.Presence.ToString(),
+            hp = p.Unit.HP,
+            maxHp = p.Unit.Max_HP,
+            shield = p.Unit.Shield,
+            energy = p.Unit.Energy,
+            q = p.Coord.Q,
+            r = p.Coord.R,
+            states = p.Unit.States.Select(s => new { type = s.Key.ToString(), stacks = s.Value.Stacks }),
+            handCount = hands.TryGetValue(p.UnitId, out var hand) ? hand.Count : 0,
+            drawPileCount = drawPiles.TryGetValue(p.UnitId, out var draw) ? draw.Count : 0,
+            discardPileCount = discardPiles.TryGetValue(p.UnitId, out var discard) ? discard.Count : 0,
+            exhaustPileCount = p.Unit.ExhaustPile.Count,
+        }),
+    };
+
     private bool TryGetActiveUnit(int unitId, out IUnitInstance unit)
     {
         unit = null;

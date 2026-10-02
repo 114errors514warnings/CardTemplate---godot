@@ -39,9 +39,12 @@ public partial class BagUi : Node
 	public const string PreviousPageText = "上一页";
 	public const string NextPageText = "下一页";
 
-	/// <summary>网格格的统一尺寸（用户口径 2026-10-02：格区是**均匀网格**，每格等宽等高）。</summary>
-	public const int BagCellWidth = 172;
-	public const int BagCellHeight = 56;
+	/// <summary>
+	/// 网格格的统一尺寸（用户口径 2026-10-02：格区是**均匀网格**、**物品格用正方形**）。
+	/// 宽高必须相等；5 行 × 96 + 4 × 8 行距 = 512，加标题 / 页签 / 翻页 / 提示行后在 1600 × 900 基准分辨率下不滚动。
+	/// </summary>
+	public const int BagCellWidth = 96;
+	public const int BagCellHeight = BagCellWidth;
 
 	/// <summary>页签（`null` = 全部；其余 = 单个类别，背包系统交互案 §二）。</summary>
 	private static readonly (string Label, BagCategory? Category)[] TabDefinitions =
@@ -109,6 +112,7 @@ public partial class BagUi : Node
 	/// <summary>`IsArrangeBlocked` 的旧名（只读→落点受限的改名过渡，语义同上）。</summary>
 	public bool IsReadOnly => IsArrangeBlocked;
 
+
 	/// <summary>负荷行文案（烟测断言「数值随拖动变化」用）。</summary>
 	public string LoadText => loadLabel?.Text ?? string.Empty;
 
@@ -142,6 +146,21 @@ public partial class BagUi : Node
 	/// <summary>页码文案（`第 x / y 页`）。</summary>
 	public string PageText => pageLabel?.Text ?? string.Empty;
 
+	/// <summary>网格第 `index` 格的主文案（空格子 = 空串；烟测断言「空格不写「空」」用）。</summary>
+	public string BagSlotText(int index)
+	{
+		BagCell cell = SlotCellAt(index);
+		return cell?.TitleText ?? string.Empty;
+	}
+
+	/// <summary>网格第 `index` 格的实际布出尺寸（烟测断言「物品格是正方形」用；界面没开 = 零向量）。</summary>
+	public Vector2 BagSlotSize(int index) => SlotCellAt(index)?.Size ?? Vector2.Zero;
+
+	private BagCell SlotCellAt(int index) =>
+		index >= 0 && index < bagSlotCells.Length && GodotObject.IsInstanceValid(bagSlotCells[index])
+			? bagSlotCells[index]
+			: null;
+
 	/// <summary>当前页（1 基，界面口径）。</summary>
 	public int PageNumber => bagPage + 1;
 
@@ -151,6 +170,92 @@ public partial class BagUi : Node
 	/// <summary>是否还能翻页（烟测断言按钮可用性）。</summary>
 	public bool CanGoPreviousPage => BagPageMath.HasPrevious(bagPage, bagTotalEntries);
 	public bool CanGoNextPage => BagPageMath.HasNext(bagPage, bagTotalEntries);
+
+	// ── AI 接口访问面（2026-10-02）：给 `PlayerApiRun` 一个与鼠标操作等价的窄口 ──────────
+	// 口径：这里的方法都只是「把界面上的那一次点击写出来」，不新增任何规则。
+
+	/// <summary>当前页签（null = 全部）。</summary>
+	public BagCategory? ActiveTab => activeTab;
+
+	/// <summary>当前页签的显示名（`全部` / `材料` / …），供 API 回读。</summary>
+	public string ActiveTabLabel => TabLabelOf(activeTab);
+
+	/// <summary>当前正在看的角色槽位（装备栏归属）。</summary>
+	public int ActiveSlotIndex => activeSlotIndex;
+
+	/// <summary>页签显示名（`null` → `全部`）。</summary>
+	public static string TabLabelOf(BagCategory? category)
+	{
+		foreach ((string label, BagCategory? value) in TabDefinitions)
+		{
+			if (value == category)
+			{
+				return label;
+			}
+		}
+
+		return category?.ToString() ?? AllTabText;
+	}
+
+	/// <summary>解析页签参数：接受显示名（`全部` / `材料` / `道具` / `装备` / `食物`）或枚举名（`all` / `material` / …）。</summary>
+	public static bool TryParseTab(string text, out BagCategory? category)
+	{
+		category = null;
+		if (string.IsNullOrWhiteSpace(text) || string.Equals(text, AllTabText, StringComparison.Ordinal)
+			|| string.Equals(text, "all", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		foreach ((string label, BagCategory? value) in TabDefinitions)
+		{
+			if (value != null && (string.Equals(text, label, StringComparison.Ordinal)
+				|| string.Equals(text, value.Value.ToString(), StringComparison.OrdinalIgnoreCase)))
+			{
+				category = value;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/// <summary>切换页签（与点页签按钮同一条通路：换页签回到第 1 页）。界面未打开返回 false。</summary>
+	public bool SelectTab(string text)
+	{
+		if (!IsOpen || !TryParseTab(text, out BagCategory? category))
+		{
+			return false;
+		}
+
+		activeTab = category;
+		bagPage = 0;
+		Refresh();
+		return true;
+	}
+
+	/// <summary>切换装备栏归属的角色页签（与点角色 Tab 同一条通路）。</summary>
+	public bool SelectCharacterTab(int slotIndex)
+	{
+		if (!IsOpen || slotIndex < 0 || slotIndex >= SlotCount)
+		{
+			return false;
+		}
+
+		activeSlotIndex = slotIndex;
+		Refresh();
+		return true;
+	}
+
+	/// <summary>
+	/// AI 接口：按「格名」取一次拖动（`fromCell` 的画面内容 → `toCell`）——
+	/// 与鼠标拖动共用 `ApplyDrop`，所以 API 能覆盖到的规则就是玩家真能动到的规则。
+	/// </summary>
+	public bool DragCell(string fromCell, string toCell)
+	{
+		string payload = PayloadOfCell(fromCell);
+		return payload.Length > 0 && SimulateDrop(payload, toCell);
+	}
 
 	public void Bind(CanvasLayer modal)
 	{
@@ -286,8 +391,9 @@ public partial class BagUi : Node
 		center.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		root.AddChild(center);
 
-		// 面板要容下 5 列 × 172 + 4 × 8 的均匀网格 + 右侧槽位列（330），并在 1600 × 900 基准分辨率下四周留白。
-		PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(1300, 600) };
+		// 面板要容下 5 列 × 96 的正方形网格 + 右侧槽位列（330），并在 1600 × 900 基准分辨率下四周留白；
+		// 高度交给内容决定（0 = 不设下限），格区改成正方形后纵向需求变了，写死高度会留大片空白。
+		PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(920, 0) };
 		// 底板用与常驻顶栏同一套深色料（`RunFlowScene.BuildTopBarBackdrop`）：模态要能盖住世界地图 / 战场，
 		// 不能沿用默认主题的半透明面板 —— 否则「均匀网格」会与背后的地图格纠缠在一起。
 		StyleBoxFlat panelStyle = new StyleBoxFlat
@@ -576,8 +682,10 @@ public partial class BagUi : Node
 			RunBagEntrySave entry = i < bagFilledCount ? entries[firstIndex + i] : null;
 			cell.InstanceId = entry?.InstanceId ?? string.Empty;
 			cell.SetFilled(entry != null);
+			// 空格子**不写文案**（用户口径 2026-10-02：没有物品时中间不显示「空」）——
+			// 只留一个暗色空框表达「这是第几格」，位置感由格底承担。
 			cell.SetContent(
-				entry == null ? EmptyCellText : DescribeEntry(entry),
+				entry == null ? string.Empty : DescribeEntry(entry),
 				entry == null ? string.Empty : DescribeEntryDetail(entry),
 				entry == null ? EmptyCellColor : RarityColor(entry.Rarity));
 		}
@@ -703,9 +811,10 @@ public partial class BagUi : Node
 			return;
 		}
 
+		// 颜色按**结果**分：无操作 = 灰（默认说明）、刚被拒 = 红、刚成功 = 绿。
 		hintLabel.Text = string.IsNullOrEmpty(lastHint) ? DefaultHintText : lastHint;
 		hintLabel.AddThemeColorOverride("font_color",
-			string.IsNullOrEmpty(lastHint) ? new Color("8fa1ad") : new Color("a8e6a1"));
+			string.IsNullOrEmpty(lastHint) ? new Color("8fa1ad") : lastRejected ? new Color("ff8a80") : new Color("a8e6a1"));
 	}
 
 	/// <summary>
@@ -1032,7 +1141,7 @@ public partial class BagCell : PanelContainer
 		SlotIndex = slotIndex;
 		Name = name;
 		CustomMinimumSize = kind == BagCellKind.BagEntry
-			? new Vector2(BagUi.BagCellWidth, BagUi.BagCellHeight)   // 均匀网格：每格等宽等高（用户口径 2026-10-02）
+			? new Vector2(BagUi.BagCellWidth, BagUi.BagCellHeight)   // 均匀网格 + 正方形（用户口径 2026-10-02）
 			: new Vector2(104, 62);                                    // 右侧道具栏 / 手位：保持原来的窄格
 		MouseFilter = MouseFilterEnum.Stop;
 
@@ -1042,7 +1151,7 @@ public partial class BagCell : PanelContainer
 
 		nameLabel = new Label
 		{
-			Text = BagUi.EmptyCellText,
+			Text = string.Empty,   // 空格子不写文案（用户口径 2026-10-02），初值也留空
 			HorizontalAlignment = HorizontalAlignment.Center,
 			ClipText = true,
 			TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
@@ -1055,14 +1164,17 @@ public partial class BagCell : PanelContainer
 		{
 			Text = string.Empty,
 			HorizontalAlignment = HorizontalAlignment.Center,
-			ClipText = true,
-			TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+			// 正方形格只有 96 px 宽：副行（`类别 · 负荷` / 食物剩余天数）必须能折行，不能裁成省略号。
+			AutowrapMode = TextServer.AutowrapMode.WordSmart,
 			MouseFilter = MouseFilterEnum.Ignore,
 		};
-		detailLabel.AddThemeFontSizeOverride("font_size", 12);
+		detailLabel.AddThemeFontSizeOverride("font_size", 11);
 		detailLabel.AddThemeColorOverride("font_color", new Color("8fa1ad"));
 		column.AddChild(detailLabel);
 	}
+
+	/// <summary>格内主文案（烟测断言「空格没有字 / 有格有字」用）。</summary>
+	public string TitleText => nameLabel?.Text ?? string.Empty;
 
 	/// <summary>写格内文案（名字 + 副行 + 名字颜色）。</summary>
 	public void SetContent(string name, string detail, Color? nameColor)

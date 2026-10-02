@@ -675,6 +675,125 @@ public partial class MapScene : Control
 		return false;
 	}
 
+	// ── AI 接口访问面（2026-10-02）────────────────────────────────────────
+	// 边界：`TryEnterReachableNode` = 玩家口径（点可达格）；`TryForceEnterNode` / `TryJumpToNextCombat`
+	// 属**调试通道**（无视可达 / 只读闸门），只有 `DebugApiRun` 会调。
+
+	/// <summary>当前可达格点（玩家这一回合点得到的格）。</summary>
+	public IReadOnlyCollection<int> ReachableNodeIds => currentReachable;
+
+	/// <summary>当前所在格点 Id。</summary>
+	public int CurrentNodeId => currentNodeId;
+
+	/// <summary>起点格 Id。</summary>
+	public int StartNodeId => board?.StartNodeId ?? -1;
+
+	/// <summary>按玩家口径进入一个可达格（走 `OnNodeClicked` → 前置闸门 → `EnterNode`）。</summary>
+	public bool TryEnterReachableNode(int nodeId)
+	{
+		if (!currentReachable.Contains(nodeId))
+		{
+			return false;
+		}
+
+		OnNodeClicked(nodeId);
+		return true;
+	}
+
+	/// <summary>点第一个可达格（= 玩家鼠标点击的同一入口）。</summary>
+	public bool TryEnterFirstReachableNode() => SimulateClickReachableNode();
+
+	/// <summary>
+	/// **调试通道**：无视可达判定与只读闸门直接进入指定格（位置 / 访问标记 / 时间点照常结算；
+	/// 时间点不足或当天耗尽仍会按规则转入营地）。
+	/// </summary>
+	public bool TryForceEnterNode(int nodeId)
+	{
+		if (board?.GetNode(nodeId) == null)
+		{
+			return false;
+		}
+
+		bool previousReadOnly = readOnlyMode;
+		readOnlyMode = false;
+		try { EnterNode(nodeId); }
+		finally { readOnlyMode = previousReadOnly; }
+		return true;
+	}
+
+	/// <summary>
+	/// **调试通道**：一键跳到最近的**未访问战斗格**（普通敌袭 / 高危敌袭 / 精英 / Boss）。
+	/// 无视可达判定与只读闸门，但**不改**时间点（不足时按规则转营地；要完全绕过先设时间点）。
+	/// </summary>
+	public bool TryJumpToNextCombat(out int nodeId, out string error)
+	{
+		nodeId = -1;
+		error = string.Empty;
+		if (board == null || RunSession.Instance?.Current == null)
+		{
+			error = "地图未就绪。";
+			return false;
+		}
+
+		MapBoardNode current = board.GetNode(currentNodeId);
+		int bestDistance = int.MaxValue;
+		foreach (MapBoardNode node in board.Nodes)
+		{
+			if (node.Visited || !IsCombatNode(node.Type)) continue;
+			int distance = current == null ? 0 : AxialHex.Distance(node.Position, current.Position);
+			if (distance >= bestDistance) continue;
+			bestDistance = distance;
+			nodeId = node.NodeId;
+		}
+
+		if (nodeId < 0)
+		{
+			error = "全图没有未访问的战斗格。";
+			return false;
+		}
+
+		return TryForceEnterNode(nodeId);
+	}
+
+	/// <summary>调试：地图全景（节点 / 类型 / 是否已访问 / 是否可达 / 当前位置）。</summary>
+	public object ApiMapState() => new
+	{
+		act = RunSession.Instance?.Current?.MapState.Act ?? 0,
+		board = board == null ? null : new
+		{
+			radius = board.Radius,
+			startNodeId = board.StartNodeId,
+			bossNodeId = board.BossNodeId,
+			currentNodeId,
+		},
+		nodes = BuildNodeStates(),
+	};
+
+	private List<object> BuildNodeStates()
+	{
+		var list = new List<object>();
+		if (board == null) return list;
+		foreach (MapBoardNode node in board.Nodes)
+		{
+			list.Add(new
+			{
+				nodeId = node.NodeId,
+				q = node.Position.Q,
+				r = node.Position.R,
+				type = node.Type.ToString(),
+				visited = node.Visited,
+				reachable = currentReachable.Contains(node.NodeId),
+				current = node.NodeId == currentNodeId,
+			});
+		}
+
+		return list;
+	}
+
+	private static bool IsCombatNode(MapNodeType type) =>
+		type == MapNodeType.NormalCombat || type == MapNodeType.HighRiskCombat
+		|| type == MapNodeType.Elite || type == MapNodeType.Boss;
+
 	/// <summary>转入营地休息（时间点不足 / 主动结束当天）：嵌入模式交给宿主 `RunFlowScene`，独立场景模式直接切营地场景。</summary>
 	private void RequestRest()
 	{

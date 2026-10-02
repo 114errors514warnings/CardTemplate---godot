@@ -570,6 +570,12 @@ public partial class RunSession : Node
 	/// </summary>
 	public string BagArrangeBlockReason { get; set; } = string.Empty;
 
+	/// <summary>
+	/// **调试通道**的强制放行开关（运行时、不入档，只由 `DebugApiRun` 的 `debug.run.force_bag_gate` 写）：
+	/// 为真时宿主每帧重算闸门也必须算成「可整理」—— 让「内容进行中」也能验证拖动规则本身（不必打完一场）。
+	/// </summary>
+	public bool BagArrangeOverride { get; set; }
+
 	/// <summary>能不能拖动整理（背包界面的唯一判据）。</summary>
 	public bool CanArrangeBag => Current != null && string.IsNullOrEmpty(BagArrangeBlockReason);
 

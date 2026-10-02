@@ -5,6 +5,15 @@ using System.Linq;
 
 public partial class RunFlowScene : Control
 {
+    /// <summary>
+    /// 是否把本场景登记进本机 AI 接口（默认开，与 `HexBattleScene.EnableCommandApi` 同一口径）。
+    /// 登记后 `run.*`（玩家通道）与 `debug.run.*`（调试通道）可用；端口首次登记时才真正占用。
+    /// </summary>
+    [Export] public bool EnableCommandApi = true;
+
+    /// <summary>接口端口（默认 17880；同一进程只监听一个端口，后到的值会被忽略并打日志）。</summary>
+    [Export] public int ApiPort = ApiService.DefaultPort;
+
     // CanvasLayer 是运行局唯一的跨子树层级边界；层号统一定义在 RunUiLayers，禁止用 ZIndex 跨层抢占。
     private MapScene map;
     private Control host;
@@ -97,6 +106,9 @@ public partial class RunFlowScene : Control
         bagUi = new BagUi();
         AddChild(bagUi);
         bagUi.Bind(modalLayer);
+        // 本机 AI 接口（2026-10-02）：把本场景登记进唯一服务 —— `run.*`（玩家通道，含背包 / 时间点 / 营地 UI）
+        // 与 `debug.run.*`（调试通道，选关 / 跳关等）。懒启动：第一个登记的域决定端口。
+        if (EnableCommandApi) ApiService.RegisterRun(new ApiRunContext { Scene = this }, ApiPort);
         var run = RunSession.Instance;
         // 结算态优先：非战斗来源（事件 / 商人）发卡同样落 InSettlement，读档重进必须复现结算界面 / 浮窗，
         // 不能重播事件（§5.7 / §6.5）。
@@ -107,6 +119,133 @@ public partial class RunFlowScene : Control
         else { map.SetReadOnly(false); CallDeferred(nameof(TriggerStartEvent)); }
     }
     private void TriggerStartEvent() => map.TriggerStartEventIfNeeded();
+
+    public override void _ExitTree()
+    {
+        // 场景销毁（回主菜单 / 换场景）：摘掉运行局域（只摘自己那份，见 ApiService 的 owner 记账）。
+        ApiService.UnregisterRun(this);
+    }
+
+    // ── AI 接口访问面（2026-10-02）────────────────────────────────────────────
+    // 口径：这里暴露的都是「界面上真能点的那一下」；调试通道专用口（绕过闸门 / 选关 / 跳关）
+    // 一律带 `Debug` 前缀并在注释里写明越权点，只有 `DebugApiRun` 会调用。
+
+    public BagUi Bag => bagUi;
+    public CampScene Camp => camp;
+    public MapScene Map => map;
+    public SettlementUi Settlement => settlementUi;
+    public HexBattleScene ActiveBattle => activeBattle;
+
+    /// <summary>营地（夜间 UI）是否开着。</summary>
+    public bool IsCampOpen => camp != null && GodotObject.IsInstanceValid(camp);
+
+    /// <summary>世界地图是否可见（顶栏「地图」的开合状态）。</summary>
+    public bool IsMapVisible => map != null && GodotObject.IsInstanceValid(map) && map.Visible;
+
+    /// <summary>地图是否可选（false = 有内容进行中）。</summary>
+    public bool IsMapSelectable => mapSelectable;
+
+    /// <summary>当前内容形态（`battle` / `event` / `none`），供 `run.state` 回读。</summary>
+    public string ContentKind
+    {
+        get
+        {
+            if (host == null || host.GetChildCount() == 0) return "none";
+            return host.GetChild(0) is RunBattleScene ? "battle" : "event";
+        }
+    }
+
+    /// <summary>结算面板 / 放弃确认弹窗是否正开着（此时多数玩家入口被拦）。</summary>
+    public bool IsSettlementBlocking => settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen);
+
+    /// <summary>顶栏「背包」按钮：已开 → 关闭并返回 false；未开 → 打开并返回 true。</summary>
+    public bool ToggleBagUi()
+    {
+        if (bagUi == null) return false;
+        ToggleBag();
+        return bagUi.IsOpen;
+    }
+
+    /// <summary>顶栏「结束当天」：进营地（内容进行中 / 结算面板打开 / 已在营地时返回 false，与按钮禁用口径一致）。</summary>
+    public bool TryEndDay()
+    {
+        if (IsSettlementBlocking || !mapSelectable || IsCampOpen) return false;
+        OpenCamp();
+        return IsCampOpen;
+    }
+
+    /// <summary>顶栏「地图」按钮（开 / 关；结算面板与放弃弹窗打开时按钮本身不动作）。</summary>
+    public void ToggleMapUi() => ToggleMap();
+
+    /// <summary>玩家口径：点一个可达格进入（= 鼠标点击的同一入口，只认可达格）。</summary>
+    public bool TryEnterReachableNode(int nodeId) => map != null && GodotObject.IsInstanceValid(map) && map.TryEnterReachableNode(nodeId);
+
+    /// <summary>玩家口径：点第一个可达格。</summary>
+    public bool TryEnterNextNode() => map != null && GodotObject.IsInstanceValid(map) && map.TryEnterFirstReachableNode();
+
+    /// <summary>**调试通道**：直接以指定关卡开战（绕过地图、池档位、时间点与可达判定）。</summary>
+    public bool DebugSelectLevel(string levelId, out string error)
+    {
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(levelId)) { error = "请给出关卡 Id。"; return false; }
+        try { CardSimulator.Battlefield.BattleLevelCatalog.Load(levelId); }
+        catch (Exception ex) { error = $"关卡 {levelId} 加载失败：{ex.Message}"; return false; }
+        StartLevel(levelId);
+        return true;
+    }
+
+    /// <summary>**调试通道**：直接以指定事件开始（绕过地图与节点类型）。</summary>
+    public bool DebugSelectEvent(string eventId, out string error)
+    {
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(eventId)) { error = "请给出事件 Id。"; return false; }
+        try { StoryEventCatalog.Load(eventId); }
+        catch (Exception ex) { error = $"事件 {eventId} 加载失败：{ex.Message}"; return false; }
+        StartEvent(eventId);
+        return true;
+    }
+
+    /// <summary>**调试通道**：一键跳到最近的未访问战斗格（无视可达与只读闸门，时间点照常结算）。</summary>
+    public bool DebugNextCombat(out int nodeId, out string error)
+    {
+        nodeId = -1;
+        error = "地图未就绪。";
+        return map != null && GodotObject.IsInstanceValid(map) && map.TryJumpToNextCombat(out nodeId, out error);
+    }
+
+    /// <summary>
+    /// **调试通道**：放弃当前内容并回到**可选地图**（不结算、不领取战利品）。
+    /// 用途：模块级验证要一条「随时回到地图」的捷径（例如直接测背包 / 时间点 / 营地，不必先打完一场）。
+    /// </summary>
+    public void ApiBackToMap()
+    {
+        activeBattle = null;
+        activeContent = null;
+        attachMapRetries = 0;
+        ClearHost();
+        mapSelectable = true;
+        ReturnToSelectableMap();
+        GD.Print("[API] 调试：已放弃当前内容并回到可选地图。");
+    }
+
+    /// <summary>
+    /// **调试通道**：截图到 `res://Tests/ApiCaptures/`（无窗口 / headless 时返回 null）。
+    /// 运行局随时可用，不必真有战斗场（与 `HexBattleScene.CaptureApiScreenshot` 同一命名口径）。
+    /// </summary>
+    public string CaptureApiScreenshot(string requestedName, string captureMode)
+    {
+        string safeName = string.IsNullOrWhiteSpace(requestedName) ? "run-ui" : string.Concat(requestedName.Where(char.IsLetterOrDigit));
+        if (safeName.Length == 0) safeName = "run-ui";
+        string relative = $"res://Tests/ApiCaptures/{safeName}-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+        string absolute = ProjectSettings.GlobalizePath(relative);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(absolute));
+        Image image = GetViewport().GetTexture().GetImage();
+        if (image == null) return null;
+        if (string.Equals(captureMode, "compressed", StringComparison.OrdinalIgnoreCase))
+            image.Resize(1280, 720, Image.Interpolation.Lanczos);
+        return image.SavePng(absolute) == Error.Ok ? relative : null;
+    }
+
     private void StartLevel(string id)
     {
         mapSelectable = false;
@@ -728,6 +867,11 @@ public partial class RunFlowScene : Control
             settlementPanelOpen: settlementPanelOpen,
             battleContentActive: contentInProgress && activeBattle != null,
             eventContentActive: contentInProgress && activeBattle == null);
+        // 调试通道的强制放行（`debug.run.force_bag_gate` 空理由）：内容进行中也要能验证拖动规则本身。
+        if (run.BagArrangeOverride)
+        {
+            reason = string.Empty;
+        }
         if (string.Equals(run.BagArrangeBlockReason, reason, StringComparison.Ordinal))
         {
             return;
@@ -788,6 +932,14 @@ public partial class RunFlowScene : Control
             // 网格下方一行给出「第 x / y 页」与 `上一页` / `下一页`（只有一页时两边都禁用）。
             Require(bagUi.BagSlotCellCount == BagUi.PageCapacity,
                 $"背包格区必须是均匀网格：每页固定 {BagUi.PageCapacity} 格（空位也画格），实际 {bagUi.BagSlotCellCount} 格。");
+            // 物品格必须是**正方形**（用户口径 2026-10-02 第 2 条），空位**不写「空」**（同一条）。
+            Vector2 smokeSlotSize = bagUi.BagSlotSize(0);
+            Require(Math.Abs(smokeSlotSize.X - smokeSlotSize.Y) < 1f && smokeSlotSize.X > 0f,
+                $"背包物品格必须是正方形，实际 {smokeSlotSize.X:0} × {smokeSlotSize.Y:0}。");
+            Require(bagUi.BagSlotSize(BagUi.PageCapacity - 1) == smokeSlotSize,
+                "背包网格里每一格必须同尺寸（均匀网格）。");
+            Require(bagUi.BagSlotText(0).Length > 0 && bagUi.BagSlotText(BagUi.PageCapacity - 1).Length == 0,
+                $"有物品的格要写名字、空格子不得写「空」（实际首格「{bagUi.BagSlotText(0)}」/ 末格「{bagUi.BagSlotText(BagUi.PageCapacity - 1)}」）。");
             Require(bagUi.PageText == "第 1 / 1 页",
                 $"第 1 页文案应为「第 1 / 1 页」，实际「{bagUi.PageText}」。");
             Require(bagUi.PageCount == 1 && !bagUi.CanGoPreviousPage && !bagUi.CanGoNextPage,

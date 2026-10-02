@@ -160,7 +160,8 @@ public partial class HexBattleScene : Control
     /// <summary>当前关卡的关卡 Id（`LevelIndex.csv` 键 = 关卡 CSV 文件名）：初始化失败时用于定位是哪一关；非关卡路径为空串。</summary>
     public string LevelId { get; private set; } = string.Empty;
 
-    private BattleApiHost commandApi;
+    /// <summary>本场景交给本机 AI 接口的句柄（`battle.*` 玩家通道 + `debug.battle.*` 调试通道）。</summary>
+    private ApiBattleContext commandApiContext;
 
     public override void _Ready()
     {
@@ -212,16 +213,22 @@ public partial class HexBattleScene : Control
             {
                 try
                 {
-                    commandApi = new BattleApiHost(Session, RunMonsterQueue,
-                        () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
-                        CaptureApiScreenshot, CommandApiPort);
-                    commandApi.Start();
-                    ShowMessage($"战斗指令 API 已启动：http://127.0.0.1:{CommandApiPort}/api/game/");
+                    commandApiContext = new ApiBattleContext
+                    {
+                        Session = Session,
+                        RunMonsterQueue = RunMonsterQueue,
+                        IsIdle = () => Session.Phase != BattlefieldSession.BattlePhase.Monsters && !MapView.HasPendingPresentation,
+                        Capture = CaptureApiScreenshot,
+                        JumpLevel = DebugJumpLevel,
+                        JumpEvent = DebugJumpEvent,
+                    };
+                    ApiService.RegisterBattle(commandApiContext, CommandApiPort, this);
+                    ShowMessage($"本机 AI 接口已就绪：http://127.0.0.1:{ApiService.Instance?.Port ?? 0}/api/game/（指令清单见 api.catalog）。");
                 }
                 catch (Exception apiException)
                 {
-                    commandApi?.Dispose(); commandApi = null;
-                    GD.PrintErr("[战场] 战斗指令 API 未启动：" + apiException.Message);
+                    commandApiContext = null;
+                    GD.PrintErr("[战场] 本机 AI 接口登记失败：" + apiException.Message);
                 }
             }
             RefreshHud();
@@ -1152,7 +1159,6 @@ public partial class HexBattleScene : Control
 
     public override void _Process(double delta)
     {
-        commandApi?.ProcessPending();
         if (Session == null) return;
         if (IsPostSettlementMode)
         {
@@ -2194,7 +2200,9 @@ public partial class HexBattleScene : Control
         MapView.PointerPressed -= OnMovePointerPressed;
         MapView.PointerDragged -= OnMovePointerDragged;
         MapView.PointerReleased -= OnMovePointerReleased;
-        commandApi?.Dispose(); commandApi = null;
+        // 摘掉战斗域（只摘自己那份，见 ApiService 的 owner 记账）；服务本身是 autoload，跨场景存活。
+        ApiService.UnregisterBattle(this);
+        commandApiContext = null;
         Session.Dispose();
     }
 
