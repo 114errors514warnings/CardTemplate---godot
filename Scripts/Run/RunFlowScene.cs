@@ -46,6 +46,9 @@ public partial class RunFlowScene : Control
     // 背包入口（用户口径 2026-10-02：上边栏**时间点 UI 的右边**）与背包界面实例（挂 Modal 层，单实例）。
     private Button bagButton;
     private BagUi bagUi;
+    // 装备入口（用户口径 2026-10-02：「入口放在背包入口的右边」）与装备界面实例（挂 Modal 层，与背包互斥）。
+    private Button equipButton;
+    private EquipmentUi equipmentUi;
     // 每帧只做一次廉价比较，文案真的变了才写 Label（与剧情按钮行同一收敛口径）。
     private string shownTimePointText = string.Empty;
     // 结算界面（结算面板 + 卡牌三选一 + 待领取浮窗 + 放弃确认弹窗）常驻在本场景：
@@ -106,6 +109,10 @@ public partial class RunFlowScene : Control
         bagUi = new BagUi();
         AddChild(bagUi);
         bagUi.Bind(modalLayer);
+        // 装备界面（P0-18 界面半）：同样常驻本场景、挂模态层；与背包互斥（开关都在顶栏入口里处理）。
+        equipmentUi = new EquipmentUi();
+        AddChild(equipmentUi);
+        equipmentUi.Bind(modalLayer);
         // 本机 AI 接口（2026-10-02）：把本场景登记进唯一服务 —— `run.*`（玩家通道，含背包 / 时间点 / 营地 UI）
         // 与 `debug.run.*`（调试通道，选关 / 跳关等）。懒启动：第一个登记的域决定端口。
         if (EnableCommandApi) ApiService.RegisterRun(new ApiRunContext { Scene = this }, ApiPort);
@@ -131,6 +138,7 @@ public partial class RunFlowScene : Control
     // 一律带 `Debug` 前缀并在注释里写明越权点，只有 `DebugApiRun` 会调用。
 
     public BagUi Bag => bagUi;
+    public EquipmentUi Equipment => equipmentUi;
     public CampScene Camp => camp;
     public MapScene Map => map;
     public SettlementUi Settlement => settlementUi;
@@ -164,6 +172,14 @@ public partial class RunFlowScene : Control
         if (bagUi == null) return false;
         ToggleBag();
         return bagUi.IsOpen;
+    }
+
+    /// <summary>顶栏「装备」按钮：已开 → 关闭并返回 false；未开 → 打开并返回 true（与背包互斥）。</summary>
+    public bool ToggleEquipUi()
+    {
+        if (equipmentUi == null) return false;
+        ToggleEquip();
+        return equipmentUi.IsOpen;
     }
 
     /// <summary>顶栏「结束当天」：进营地（内容进行中 / 结算面板打开 / 已在营地时返回 false，与按钮禁用口径一致）。</summary>
@@ -432,10 +448,18 @@ public partial class RunFlowScene : Control
     /// </summary>
     private bool HandleEscapeLayers()
     {
-        // 背包界面在最上层模态里最晚打开：先关它，再走结算界面自己的分层（§九）。
+        // 背包 / 装备界面在最上层模态里最晚打开：先关它（两者互斥，不可能同时开着），
+        // 再走结算界面自己的分层（§九）。
         if (bagUi?.IsOpen == true)
         {
             bagUi.Close();
+            SetMapInputForModal(false);
+            return true;
+        }
+
+        if (equipmentUi?.IsOpen == true)
+        {
+            equipmentUi.Close();
             SetMapInputForModal(false);
             return true;
         }
@@ -672,6 +696,8 @@ public partial class RunFlowScene : Control
         timeRow.AddChild(timePointLabel);
         // 背包入口：排在时间点文案的**右边**（用户口径 2026-10-02），在「结束当天」之前。
         bagButton = AddTopButton(timeRow, "背包", ToggleBag);
+        // 装备入口：紧排 `背包` 之后（用户口径 2026-10-02：「入口放在背包入口的右边」）。
+        equipButton = AddTopButton(timeRow, "装备", ToggleEquip);
         endDayButton = AddTopButton(timeRow, "结束当天", OpenCamp);
 
         // 剧情专属按钮：左侧 Log / 隐藏 / Auto，右侧 跳过；都在通用行下方同一带内。
@@ -725,6 +751,9 @@ public partial class RunFlowScene : Control
         // 背包常驻可用（选点态也能整理）：没有进行中的本局时禁用；只读原因每帧由 RefreshBagArrangeGate 重算。
         bagButton.Visible = true;
         bagButton.Disabled = RunSession.Instance?.Current == null;
+        // 装备入口同口径：常驻可用，没有本局时禁用；部位格的落点受限原因与背包共用同一份闸门。
+        equipButton.Visible = true;
+        equipButton.Disabled = RunSession.Instance?.Current == null;
         RefreshBagArrangeGate();
         // 地图打开时剧情 UI 必须处于让位状态：无论剧情是“按地图前”还是“地图打开后”才打开的，都统一在这里对齐。
         story?.SetWorldMapOpen(map.Visible);
@@ -817,6 +846,7 @@ public partial class RunFlowScene : Control
     /// 背包界面的开关（顶栏「背包」按钮，用户口径 2026-10-02）：与调试窗一样走 `RunUiLayers.Modal`；
     /// 结算面板 / 放弃确认 / 营地期间不开（避免两层模态抢输入，那些状态的只读口径见 §三）。
     /// 开合本身不改任何游戏状态：背包、手位、随身格的当前值原样保留。
+    /// **与装备界面互斥**（装备系统交互案 §一）：打开背包就关掉装备。
     /// </summary>
     private void ToggleBag()
     {
@@ -834,11 +864,41 @@ public partial class RunFlowScene : Control
 
         if (settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen)) return;
         if (camp != null) return;
+        equipmentUi?.Close(); // 互斥：两个模态不叠着开
         bagUi.Open();
         if (!bagUi.IsOpen) return;
         SetMapInputForModal(true);
         GD.Print($"[RunFlow] 背包界面打开：负荷 {RunSession.Instance?.BagLoad:0.0} / {RunSession.Instance?.BagLoadLimit:0.0}"
             + $"（{(RunSession.Instance?.CanArrangeBag == true ? "可整理" : RunSession.Instance?.BagArrangeBlockReason)}）。");
+    }
+
+    /// <summary>
+    /// 装备界面的开关（顶栏「装备」按钮，用户口径 2026-10-02「入口放在背包入口的右边」）：
+    /// 与背包界面同一套层级 / 互斥 / 只读口径 —— 打开时先关背包，反之亦然；`Esc` 与 `关闭` 都能退出。
+    /// 开合本身不改任何游戏状态：部位格、手位、背包的当前值原样保留。
+    /// </summary>
+    private void ToggleEquip()
+    {
+        if (equipmentUi == null)
+        {
+            return;
+        }
+
+        if (equipmentUi.IsOpen)
+        {
+            equipmentUi.Close();
+            SetMapInputForModal(false);
+            return;
+        }
+
+        if (settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen)) return;
+        if (camp != null) return;
+        bagUi?.Close(); // 互斥：两个模态不叠着开
+        equipmentUi.Open();
+        if (!equipmentUi.IsOpen) return;
+        SetMapInputForModal(true);
+        GD.Print($"[RunFlow] 装备界面打开：角色槽 {equipmentUi.ActiveSlotIndex} / 饰品格 {RunSession.Instance?.AccessorySlotCount}"
+            + $"（{(RunSession.Instance?.CanArrangeBag == true ? "可换装" : RunSession.Instance?.BagArrangeBlockReason)}）。");
     }
 
     /// <summary>
@@ -881,6 +941,12 @@ public partial class RunFlowScene : Control
         if (bagUi?.IsOpen == true)
         {
             bagUi.Refresh();
+        }
+
+        // 装备界面与背包共用同一份闸门原因：界面开着时同步重画（横幅与落点判定都读它）。
+        if (equipmentUi?.IsOpen == true)
+        {
+            equipmentUi.Refresh();
         }
     }
 
@@ -1051,6 +1117,92 @@ public partial class RunFlowScene : Control
                 + $" / 格数 {bagUi.BagCellCount} / 网格 {smokeBagGridCells} 格 {smokeBagPageText} / 关闭后 IsOpen={bagUi.IsOpen}"
                 + $" / 横幅「{bagUi.BannerText}」 / 负荷 {bagRun.BagLoad:0.0}/{bagRun.BagLoadLimit:0.0}"
                 + $" / 槽 0 左手 {RunEquipmentSystem.HandText(bagRun.Current, 0, RunEquipmentSystem.LeftHand)}");
+
+            // ── 装备界面（P0-18 界面半，2026-10-02 装备界面批）：入口在背包右侧 → 互斥 → 拖装部位格 → 拒绝原因 → 关闭 ──
+            int smokeHead = (int)EquipmentSlotKind.Head;
+            int smokeBody = (int)EquipmentSlotKind.Body;
+            int smokeAccessoryKind = (int)EquipmentSlotKind.Accessory;
+
+            Require(equipButton != null && equipButton.Visible, "常驻顶栏应提供「装备」入口。");
+            Require(equipButton.GetGlobalRect().Position.X >= bagButton.GetGlobalRect().End.X - 1f,
+                $"「装备」入口必须排在「背包」入口的右边（背包 {bagButton.GetGlobalRect()} / 装备 {equipButton.GetGlobalRect()}）。");
+            Require(equipButton.GetGlobalRect().End.X <= RunUiLayout.TimeRowRight * viewportWidth + 1f,
+                $"「装备」入口必须落在时间点行带内（右沿 {equipButton.GetGlobalRect().End.X:0} ≤ 带右沿 {RunUiLayout.TimeRowRight * viewportWidth:0}）。");
+
+            ToggleBag();
+            await WaitFrames(2);
+            Require(bagUi.IsOpen, "打开背包以验证与装备界面的互斥。");
+            ToggleEquip();
+            await WaitFrames(2);
+            Require(equipmentUi.IsOpen && !bagUi.IsOpen, "打开装备界面必须同时关闭背包（互斥，案 §一）。");
+            int smokeEquipSlots = equipmentUi.BodySlotCount;
+            Require(smokeEquipSlots == RunEquipmentSystem.BodySlotTotalCount,
+                $"部位格数应为 3 + 饰品格数 {RunEquipmentSystem.AccessorySlotCount}，实际 {smokeEquipSlots}。");
+            Require(equipmentUi.ActiveSlotIndex == 0 && equipmentUi.CharacterTabText(0).Length > 0,
+                "装备界面应默认显示 0 号角色的 Tab（文案取自 CharacterSlotNaming）。");
+
+            // 夹具：一件头部装备 + 一件饰品，都从左侧背包装备列表拖到部位格
+            RunBagEntrySave smokeHelmet = RunBagSystem.Add(bagRun.Current, BagCategory.Equipment, 20001, 1);   // 布头巾（头部）
+            RunBagEntrySave smokeAccessory = RunBagSystem.Add(bagRun.Current, BagCategory.Equipment, 20004, 1); // 护身符（饰品）
+            equipmentUi.Refresh();
+            Require(equipmentUi.BagCellCount >= 2, $"背包装备列表应显示刚加入的两件装备，实际 {equipmentUi.BagCellCount} 格。");
+            float equipLoadBefore = bagRun.BagLoad;
+
+            Require(equipmentUi.SimulateDrop(EquipmentUi.BagPayload(smokeHelmet.InstanceId), EquipmentUi.BodySlotName(smokeHead, 0)),
+                $"背包 → 头部格应成功，实际提示「{equipmentUi.HintText}」。");
+            Require(equipmentUi.BodySlotText(smokeHead, 0) == "布头巾",
+                $"头部格应装上布头巾，实际「{equipmentUi.BodySlotText(smokeHead, 0)}」。");
+            Require(bagRun.BagLoad < equipLoadBefore, "装上部位装备后背包负荷必须下降（装备已不在背包内）。");
+            Require(equipmentUi.SimulateDrop(EquipmentUi.BagPayload(smokeAccessory.InstanceId), EquipmentUi.BodySlotName(smokeAccessoryKind, 0)),
+                $"背包 → 饰品1 格应成功，实际提示「{equipmentUi.HintText}」。");
+
+            // 部位不符：饰品 → 身体格；以及部位装备 ↔ 手位互不放行（案 §三 的第 4 行）
+            Require(!equipmentUi.SimulateDrop(EquipmentUi.BodySlotPayload(smokeAccessoryKind, 0), EquipmentUi.BodySlotName(smokeBody, 0)),
+                "饰品不得装到身体格。");
+            Require(equipmentUi.HintText == RunEquipmentSystem.BodySlotMismatchError,
+                $"部位不符必须给固定文案，实际「{equipmentUi.HintText}」。");
+            Require(!equipmentUi.SimulateDrop(EquipmentUi.BodySlotPayload(smokeHead, 0), EquipmentUi.HandCellName(0, RunEquipmentSystem.LeftHand)),
+                "部位装备不得放进手位。");
+
+            // 卸下：饰品格 → 背包
+            Require(equipmentUi.SimulateDrop(EquipmentUi.BodySlotPayload(smokeAccessoryKind, 0), EquipmentUi.BagCellName(0)),
+                $"饰品格 → 背包应成功，实际提示「{equipmentUi.HintText}」。");
+            Require(equipmentUi.BodySlotText(smokeAccessoryKind, 0).Length == 0, "卸下后饰品格必须为空。");
+
+            // 只读（内容进行中）：落点被拒 + 横幅给原因（与背包同一份闸门）
+            bagRun.BagArrangeBlockReason = BagArrangeGate.Battle;
+            equipmentUi.Refresh();
+            Require(equipmentUi.IsArrangeBlocked && equipmentUi.BannerText.Length > 0,
+                $"内容进行中时装备界面必须给出横幅，实际「{equipmentUi.BannerText}」。");
+            Require(!equipmentUi.SimulateDrop(EquipmentUi.BagPayload(smokeHelmet.InstanceId), EquipmentUi.BodySlotName(smokeBody, 0)),
+                "只读态下不得换装。");
+            bagRun.BagArrangeBlockReason = string.Empty;
+            equipmentUi.Refresh();
+            Require(equipmentUi.BannerText.Length == 0, $"闸门解除后横幅必须消失，实际「{equipmentUi.BannerText}」。");
+
+            // 关闭：`关闭` 与 `Esc` 都能退出，且不留状态
+            equipmentUi.Close();
+            Require(!equipmentUi.IsOpen, "关闭后装备界面必须隐藏。");
+            ToggleEquip();
+            await WaitFrames(2);
+            Require(equipmentUi.IsOpen, "再次点「装备」应能重新打开（单实例）。");
+            Require(HandleEscapeLayers() && !equipmentUi.IsOpen, "`Esc` 应关闭装备界面。");
+
+            // 收尾：卸下夹具并把两件装备移出背包（不留脏状态给后面的结算 / 营地断言）
+            if (!RunEquipmentSystem.TryUnequipSlot(bagRun.Current, 0, smokeHead, 0, out string equipUnequipError))
+            {
+                // 负荷拒绝时直接清格：烟测只为还原夹具，不替代规则口径
+                RunEquipmentSystem.SetBodySlot(bagRun.Current.CharacterSlots[0], smokeHead, 0, string.Empty);
+                GD.Print($"[RunFlow] 装备烟测还原：卸下被拒（{equipUnequipError}），已直接清格。");
+            }
+
+            RunBagSystem.TakeOneByDefinition(bagRun.Current, BagCategory.Equipment, 20001, out _);
+            RunBagSystem.TakeOneByDefinition(bagRun.Current, BagCategory.Equipment, 20004, out _);
+            bagRun.Save();
+            GD.Print($"RUN_FLOW_UI_SMOKE_EQUIP: 入口 x={equipButton.GetGlobalRect().Position.X:0}（背包右沿 {bagButton.GetGlobalRect().End.X:0}）"
+                + $" / 部位格 {smokeEquipSlots}（饰品 {RunEquipmentSystem.AccessorySlotCount}）"
+                + $" / 头部格 {RunEquipmentSystem.BodySlotDefinition(bagRun.Current, 0, smokeHead, 0).Length}（清空）"
+                + $" / 关闭后 IsOpen={equipmentUi.IsOpen} / 负荷 {bagRun.BagLoad:0.0}/{bagRun.BagLoadLimit:0.0}");
 
             // 顶栏底板（`RunUiLayers.TopBarBackdrop = 32`）：不透明地铺满第一行那一带、遮住战斗地图，
             // 但层号低于结算浮标与一切模态；按钮纵向居中于该带。

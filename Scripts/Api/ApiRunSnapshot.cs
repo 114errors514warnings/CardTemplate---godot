@@ -163,6 +163,90 @@ public static class ApiRunSnapshot
         }
     }
 
+    /// <summary>装备界面状态（P0-18 界面半）：角色 Tab / 部位格（含部位与格序）/ 手位 / 横幅与提示。</summary>
+    public static object Equip(RunFlowScene scene)
+    {
+        RunSession session = RunSession.Instance;
+        if (session?.Current == null) return new { hasRun = false };
+        EquipmentUi ui = scene?.Equipment;
+        if (ui == null || !ui.IsOpen)
+            return new { hasRun = true, open = false, arrangeBlockReason = session.BagArrangeBlockReason, canArrange = session.CanArrangeBag };
+
+        return new
+        {
+            hasRun = true,
+            open = true,
+            arrangeBlocked = ui.IsArrangeBlocked,
+            arrangeBlockReason = session.BagArrangeBlockReason,
+            load = ui.LoadText,
+            activeSlotIndex = ui.ActiveSlotIndex,
+            accessorySlotCount = session.AccessorySlotCount,
+            bodySlotCount = ui.BodySlotCount,
+            banner = ui.BannerText,
+            hint = ui.HintText,
+            bagCells = EquipBagCells(ui).ToArray(),
+            bodyCells = BodyCells(ui).ToArray(),
+            handCells = EquipHandCells(ui).ToArray(),
+        };
+    }
+
+    /// <summary>装备界面的背包装备列表（固定 25 格，空格 `title` 为空）。</summary>
+    private static IEnumerable<object> EquipBagCells(EquipmentUi ui)
+    {
+        for (int index = 0; index < EquipmentUi.PageCapacity; index++)
+        {
+            string name = EquipmentUi.BagCellName(index);
+            yield return new
+            {
+                cell = name,
+                title = ui.BagSlotText(index),
+                payload = ui.PayloadOfCell(name),
+            };
+        }
+    }
+
+    /// <summary>部位格（部位 × 格序；`kind` = `EquipmentSlotKind` 数值，`caption` = 界面格标题）。</summary>
+    private static IEnumerable<object> BodyCells(EquipmentUi ui)
+    {
+        RunSession session = RunSession.Instance;
+        for (int kind = 0; kind < RunEquipmentSystem.BodySlotKindCount; kind++)
+        {
+            for (int index = 0; index < RunEquipmentSystem.SlotCountOf(kind); index++)
+            {
+                string name = EquipmentUi.BodySlotName(kind, index);
+                yield return new
+                {
+                    cell = name,
+                    kind,
+                    kindName = ((EquipmentSlotKind)kind).ToString(),
+                    index,
+                    caption = EquipmentUi.SlotCaption(kind, index),
+                    title = session.GetBodySlotText(ui.ActiveSlotIndex, kind, index),
+                    payload = ui.PayloadOfCell(name),
+                };
+            }
+        }
+    }
+
+    /// <summary>手位格（左手 / 右手；与 `run.bag.state` 的 handCells 同形）。</summary>
+    private static IEnumerable<object> EquipHandCells(EquipmentUi ui)
+    {
+        RunSession session = RunSession.Instance;
+        int slotIndex = ui.ActiveSlotIndex;
+        for (int hand = 0; hand < RunEquipmentSystem.HandCount; hand++)
+        {
+            string name = EquipmentUi.HandCellName(slotIndex, hand);
+            yield return new
+            {
+                cell = name,
+                slotIndex,
+                hand = hand == RunEquipmentSystem.LeftHand ? "left" : "right",
+                title = session.GetHandText(slotIndex, hand),
+                payload = ui.PayloadOfCell(name),
+            };
+        }
+    }
+
     /// <summary>营地（夜间 UI）状态。</summary>
     public static object Camp(RunFlowScene scene)
     {

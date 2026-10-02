@@ -14,14 +14,16 @@ public static class RunGameModes
 public sealed class RunSaveData
 {
 	/// <summary>
-	/// **当前**存档结构版本 = 5：版本 4 = 背包实例批（P0-17 / P1-19）新增 `BagEntries`（材料 / 道具 / 装备 / 食物的**实例**条目）、
+	/// **当前**存档结构版本 = 6：版本 4 = 背包实例批（P0-17 / P1-19）新增 `BagEntries`（材料 / 道具 / 装备 / 食物的**实例**条目）、
 	/// `CarryItemSlots`（局外随身 3 格）、`ActiveFoodEffects`（食物效果的寿命轴）与 `CookedThisRest`（本次休息已烹饪次数）。
 	/// 版本 5（2026-10-02 批 E，P0-17 背包界面 / P0-18 装备链）新增：`RunCharacterSlotSave` 的左右手位字段
 	/// （旧 `EquippedWeaponDefinitionId` 保留为**左手镜像**）与 `RunBagEntrySave.CarrySlot`（条目的随身格归属）。
+	/// 版本 6（2026-10-02 装备界面批，P0-18 界面半）新增：`RunCharacterSlotSave` 的**部位格**字段
+	/// （头部 / 身体 / 脚部各一格 + 饰品列表，长度 = 饰品格数配置；装备系统交互案 §五）。
 	/// `Materials / Items / Equipment` 三个计数字典保留为**汇总视图**（继续写，旧档读起来不丢数）。
-	/// 版本 ≤ 4 的旧档由 `MigrateToCurrentSchema()` 就地升级，不弃档。
+	/// 版本 ≤ 5 的旧档由 `MigrateToCurrentSchema()` 就地升级，不弃档。
 	/// </summary>
-	public const int CurrentSchemaVersion = 5;
+	public const int CurrentSchemaVersion = 6;
 
 	public int SchemaVersion = CurrentSchemaVersion;
 	public string SavedAt = string.Empty;
@@ -131,7 +133,31 @@ public sealed class RunSaveData
 		EnsureBagCollections();
 		MigrateHandsToSchema5();
 		MigrateCarrySlotOwnership();
+		MigrateBodySlotsToSchema6();
 		SchemaVersion = CurrentSchemaVersion;
+	}
+
+	/// <summary>
+	/// 版本 ≤ 5 → 6 的部位格迁移（装备系统交互案 §五）：补齐饰品列表到**配置格数**（当前 3，`EquipmentConfig.csv`），
+	/// 旧档没有部位字段时一律空位。幂等：已有值不动、多余的格保留（配置改小再改大时装备不丢）。
+	/// </summary>
+	private void MigrateBodySlotsToSchema6()
+	{
+		if (CharacterSlots == null)
+		{
+			return;
+		}
+
+		foreach (RunCharacterSlotSave slot in CharacterSlots)
+		{
+			if (slot == null)
+			{
+				continue;
+			}
+
+			// 与建档（`RunSession.StartNewRun`）同一口径：新局与旧档迁移后形状一致，逐字往返自检才成立。
+			RunEquipmentSystem.EnsureBodySlots(slot);
+		}
 	}
 
 	/// <summary>
@@ -278,6 +304,22 @@ public sealed class RunCharacterSlotSave
 
 	/// <summary>把镜像字段同步为左手（局外手位写入后调用；`RunEquipmentSystem` 是唯一写入口）。</summary>
 	public void SyncLegacyWeaponField() => EquippedWeaponDefinitionId = LeftHandDefinitionId ?? string.Empty;
+
+	// ── 部位格（装备系统交互案 §五；SchemaVersion 6，2026-10-02 装备界面批）──
+	// 头 / 身 / 脚各一格（空串 = 空位）；饰品是**列表**，长度 = 饰品格数配置（当前 3）。
+	// 唯一写入口 = `RunEquipmentSystem.SetBodySlot`（它负责按需补齐列表长度）。
+
+	/// <summary>**头部**（玩法文档：头盔）装备的定义名；空串 = 空位。</summary>
+	public string EquippedHelmetDefinitionId = string.Empty;
+
+	/// <summary>**身体**（护甲）装备的定义名；空串 = 空位。</summary>
+	public string EquippedArmorDefinitionId = string.Empty;
+
+	/// <summary>**脚部**（鞋）装备的定义名；空串 = 空位。</summary>
+	public string EquippedBootsDefinitionId = string.Empty;
+
+	/// <summary>**饰品**定义名列表（长度 = 配置格数，空串 = 空位）。</summary>
+	public List<string> EquippedAccessoryDefinitionIds { get; set; } = new List<string>();
 }
 
 public sealed class RunDeckEntry

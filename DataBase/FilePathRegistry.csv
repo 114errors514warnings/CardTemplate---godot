@@ -15,4 +15,6 @@ Data.Item.Item,res://DataBase/Item/Item.csv
 Data.Item.Food,res://DataBase/Item/Food.csv
 Data.Item.FoodRecipe,res://DataBase/Item/FoodRecipe.csv
 Data.Inventory.Config,res://DataBase/Inventory/InventoryConfig.csv
+Data.Equipment.Armor,res://DataBase/Equipment/Armor.csv
+Data.Equipment.Config,res://DataBase/Equipment/EquipmentConfig.csv
 

@@ -231,6 +231,74 @@ public class ItemTableFileTests
 		Assert.Equal(7, disabledMaterialChannel);
 	}
 
+	// ── 装备表（2026-10-02 装备界面批，P0-18 界面半）──
+
+	[Fact]
+	public void ArmorTable_HeaderIsStable_AndRowsParse()
+	{
+		string[] rows = ReadTable(Path.Combine("Equipment", "Armor.csv"));
+		AssertHeader(Cells(rows[0]), "ArmorId", "DefinitionId", "Slot", "HandsRequired", "DefenseValue", "DamageBonus",
+			"MoveBonus", "ResourceCost", "Load");
+
+		List<int> ids = new List<int>();
+		List<string> names = new List<string>();
+		int accessoryRows = 0;
+		foreach (string row in rows.Skip(1))
+		{
+			string[] cells = Cells(row);
+			int id = ItemCsvSchema.ParseId(Cell(cells, 0), row);
+			names.Add(ItemCsvSchema.ParseName(Cell(cells, 1), row));
+			string slot = Cell(cells, 2);
+			Assert.Contains(slot, new[] { "Head", "Body", "Feet", "Accessory" });
+			if (slot == "Accessory")
+			{
+				accessoryRows++;
+			}
+
+			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 3), row);
+			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 4), row);
+			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 5), row);
+			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 6), row);
+			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 7), row);
+			Assert.True(ItemCsvSchema.ParseNonNegativeFloat(Cell(cells, 8), row) > 0f, $"Armor 表的 Load 必填：{row}");
+
+			Assert.DoesNotContain(id, ids);
+			ids.Add(id);
+		}
+
+		Assert.Equal(6, ids.Count);
+		Assert.Equal(3, accessoryRows); // 饰品可选件数与配置格数一致（当前各 3）
+		Assert.Equal(names.Count, names.Distinct().Count());
+		Assert.Contains("布头巾", names);
+	}
+
+	[Fact]
+	public void ArmorTable_NamesDoNotCollideWithWeaponTable()
+	{
+		// 两张装备表共用一个「装备」命名空间（名字反查 EquipmentKeysByName）：重名会让反查失真。
+		HashSet<string> weaponNames = ReadTable("Weapon.csv").Skip(1)
+			.Select(row => Cell(Cells(row), 1)).ToHashSet(StringComparer.Ordinal);
+
+		foreach (string row in ReadTable(Path.Combine("Equipment", "Armor.csv")).Skip(1))
+		{
+			Assert.DoesNotContain(Cell(Cells(row), 1), weaponNames);
+		}
+	}
+
+	[Fact]
+	public void EquipmentConfigTable_HasSingleGlobalRow_MatchingDefaultAccessorySlots()
+	{
+		string[] rows = ReadTable(Path.Combine("Equipment", "EquipmentConfig.csv"));
+		AssertHeader(Cells(rows[0]), "Scope", "CharacterId", "AccessorySlots");
+
+		List<string[]> dataRows = rows.Skip(1).Select(Cells).ToList();
+		string[] global = Assert.Single(dataRows.Where(cells => Cell(cells, 0) == "Global"));
+		Assert.Equal(EquipmentConfigDefinition.DefaultAccessorySlotCount,
+			int.Parse(Cell(global, 2), CultureInfo.InvariantCulture));
+		// 界面 6 格（3 部位 + 饰品 ×3）依赖这个值：改成别的数字必须同时改案文与验收。
+		Assert.Equal(3, EquipmentConfigDefinition.DefaultAccessorySlotCount);
+	}
+
 	// ── 纯逻辑：效果文本与寿命轴解析 ──
 
 	[Theory]

@@ -35,6 +35,10 @@ public partial class LoadingSystem : Node
 	public const string WeaponCsvPathKey = "Data.Equipment.Weapon";
 	/// <summary>背包配置表路径 key（队伍负荷上限，背包系统交互案 §四）。</summary>
 	public const string InventoryConfigCsvPathKey = "Data.Inventory.Config";
+	/// <summary>部位装备表路径 key（头部 / 身体 / 脚部 / 饰品，装备系统交互案 §六）。</summary>
+	public const string ArmorCsvPathKey = "Data.Equipment.Armor";
+	/// <summary>装备配置表路径 key（饰品格数等，装备系统交互案 §九 第 5 条）。</summary>
+	public const string EquipmentConfigCsvPathKey = "Data.Equipment.Config";
 	/// <summary>Stage 配置根目录：不逐文件注册，按 <层>/<节点类型>.csv 读取。</summary>
 	public const string StageRootDir = "res://DataBase/Stage/";
 
@@ -93,6 +97,12 @@ public partial class LoadingSystem : Node
 
 	/// <summary>背包配置缓存（队伍负荷上限）；未配表时保持 null，读数走 <see cref="InventoryCapacity"/> 的兜底。</summary>
 	private static InventoryConfigDefinition inventoryConfigCache;
+
+	/// <summary>部位装备表缓存（Armor.csv；`LoadArmorsByKey` 后可用）。</summary>
+	private static Dictionary<int, ArmorDefinition> armorCache = new Dictionary<int, ArmorDefinition>();
+
+	/// <summary>装备配置缓存（饰品格数）；未配表时保持 null，读数走默认 3。</summary>
+	private static EquipmentConfigDefinition equipmentConfigCache;
 
 	/// <summary>
 	/// 缓存 Stage 遭遇配置：key = 层目录名（第一层…），value = 类型 → 行列表
@@ -199,6 +209,18 @@ public partial class LoadingSystem : Node
 	public static InventoryConfigDefinition InventoryConfig
 	{
 		get { return inventoryConfigCache; }
+	}
+
+	/// <summary>部位装备表（LoadArmorsByKey 后可用）；ID = `Armor.csv` 的 `ArmorId`。</summary>
+	public static Dictionary<int, ArmorDefinition> ArmorDictionary
+	{
+		get { return armorCache; }
+	}
+
+	/// <summary>装备配置（LoadEquipmentConfigByKey 后可用）；未配表时为 null。</summary>
+	public static EquipmentConfigDefinition EquipmentConfig
+	{
+		get { return equipmentConfigCache; }
 	}
 
 	/// <summary>队伍负荷上限（背包系统交互案 §四）：表已加载就用表里的 `Global` 行，否则用 `ItemNameResolver` 的兜底。</summary>
@@ -1032,13 +1054,33 @@ public partial class LoadingSystem : Node
 	/// 装备表 + 背包配置表（2026-10-02 批 E）：载入 `Weapon.csv` 的局外侧视图与 `InventoryConfig.csv`，
 	/// 并把「装备名 / 名字反查 / 占用手数 / 单件负荷」与「队伍负荷上限」注册进 <see cref="ItemNameResolver"/> ——
 	/// 背包 / 装备界面与纯逻辑模块（`RunBagSystem` / `RunEquipmentSystem`）只读那份注册表，不各自读配表。
+	/// 2026-10-02 装备界面批追加：`Armor.csv`（部位装备）与 `EquipmentConfig.csv`（饰品格数）。
 	/// </summary>
 	public static void LoadEquipmentTablesByKey(bool useCache = true)
 	{
 		LoadWeaponsByKey(WeaponCsvPathKey, useCache);
+		LoadArmorsByKey(ArmorCsvPathKey, useCache);
 		LoadInventoryConfigByKey(InventoryConfigCsvPathKey, useCache);
+		LoadEquipmentConfigByKey(EquipmentConfigCsvPathKey, useCache);
+
+		// 两张装备表共用一个「装备」命名空间（名字反查 `EquipmentKeysByName`）：重名在这里就断掉，
+		// 不留给界面出「两件装备同名、拖谁都装到同一件」的怪现象。
+		Dictionary<int, string> weaponNames = new Dictionary<int, string>();
+		foreach (KeyValuePair<int, WeaponDefinition> pair in weaponCache)
+		{
+			if (pair.Value != null)
+			{
+				weaponNames[pair.Key] = pair.Value.DefinitionId ?? string.Empty;
+			}
+		}
+
+		LoadArmorCsv.ValidateDistinctNames(armorCache, weaponNames);
+
 		ItemNameResolver.RegisterWeapons(weaponCache);
+		ItemNameResolver.RegisterArmors(armorCache);
 		ItemNameResolver.SetInventoryCapacity(InventoryCapacity);
+		ItemNameResolver.SetAccessorySlotCount(
+			equipmentConfigCache?.AccessorySlots ?? EquipmentConfigDefinition.DefaultAccessorySlotCount);
 	}
 
 	/// <summary>加载武器表（FilePathRegistry: Data.Equipment.Weapon）。</summary>
@@ -1074,6 +1116,40 @@ public partial class LoadingSystem : Node
 	/// <summary>武器定义（局外侧视图）；未定义返回 null。</summary>
 	public static WeaponDefinition GetWeapon(int weaponId) =>
 		LoadWeaponsByKey().TryGetValue(weaponId, out WeaponDefinition definition) ? definition : null;
+
+	/// <summary>加载部位装备表（FilePathRegistry: Data.Equipment.Armor）。</summary>
+	public static Dictionary<int, ArmorDefinition> LoadArmorsByKey(string pathKey = ArmorCsvPathKey, bool useCache = true)
+	{
+		if (useCache && armorCache.Count > 0)
+		{
+			return armorCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		armorCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, ArmorDefinition>()
+			: LoadArmorCsv.LoadFromCSV(path);
+		return armorCache;
+	}
+
+	/// <summary>加载装备配置表（FilePathRegistry: Data.Equipment.Config）。</summary>
+	public static EquipmentConfigDefinition LoadEquipmentConfigByKey(string pathKey = EquipmentConfigCsvPathKey, bool useCache = true)
+	{
+		if (useCache && equipmentConfigCache != null)
+		{
+			return equipmentConfigCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		equipmentConfigCache = string.IsNullOrWhiteSpace(path)
+			? null
+			: LoadEquipmentConfigCsv.LoadFromCSV(path);
+		return equipmentConfigCache;
+	}
+
+	/// <summary>部位装备定义；未定义返回 null。</summary>
+	public static ArmorDefinition GetArmor(int armorId) =>
+		LoadArmorsByKey().TryGetValue(armorId, out ArmorDefinition definition) ? definition : null;
 
 	/// <summary>材料定义；未定义返回 null（调用方按「未定义材料(ID)」显示并报错）。</summary>
 	public static MaterialDefinition GetMaterial(int materialId) =>

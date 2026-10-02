@@ -852,6 +852,7 @@ public sealed partial class BattlefieldSession : IDisposable
             character.HP = Math.Max(1, Math.Min(character.Max_HP, slot.CurrentHp));
             RestoreRunWeapon(placement, ResolveRunHandDefinition(slot, RunEquipmentSystem.LeftHand),
                 ResolveRunHandDefinition(slot, RunEquipmentSystem.RightHand), i);
+            ApplyRunBodyEquipmentModifiers(placement, slot, i);
             character.DefaultDeck.Clear();
             var draw = new List<Card>();
             foreach (RunDeckEntry entry in deckSlots[i] ?? new List<RunDeckEntry>())
@@ -1018,6 +1019,35 @@ public sealed partial class BattlefieldSession : IDisposable
     {
         placement.SetEquipmentMoveModifier(item.InstanceId, weapon.MoveBonus);
         placement.SetEquipmentCombatModifiers(item.InstanceId, weapon.DamageBonus, weapon.DefenseValue);
+    }
+
+    /// <summary>
+    /// 局外**部位装备**在战斗开场生效（装备系统交互案 §四：属性修正「在下一场战斗开场生效」）：
+    /// 防御值 → 防御、伤害修正 → 攻击、移动修正 → 每回合移动额度（与手位装备走同一套 `BattleUnitPlacement` 修正口）。
+    /// **不**生成 `GroundObject`：部位装备不进战场物品堆，战斗中也不可换（案 §九 第 3 条）。
+    /// 未注册的装备名一律忽略 —— 读档清洗（`RunEquipmentSystem.SanitizeEquipment`）已把关，这里只兜底、不抛错。
+    /// 被动 / 状态类效果（玩法 §5.2 末）暂无配表列，未接。
+    /// </summary>
+    private static void ApplyRunBodyEquipmentModifiers(BattleUnitPlacement placement, RunCharacterSlotSave slot, int slotIndex)
+    {
+        for (int kind = 0; kind < RunEquipmentSystem.BodySlotKindCount; kind++)
+        {
+            for (int index = 0; index < RunEquipmentSystem.SlotCountOf(kind); index++)
+            {
+                string definitionId = RunEquipmentSystem.BodySlotDefinitionOf(slot, kind, index);
+                if (string.IsNullOrWhiteSpace(definitionId)
+                    || !ItemNameResolver.TryGetArmorDefinition(definitionId, out ArmorDefinition armor)
+                    || armor == null)
+                {
+                    continue;
+                }
+
+                // 实例 ID 按「槽 + 部位 + 格序」唯一：同一角色多件部位装备各自记账（卸下 / 换装才会撤掉对应的修正）。
+                string instanceId = $"run-armor-{slotIndex + 1}-{kind}{index}";
+                placement.SetEquipmentMoveModifier(instanceId, armor.MoveBonus);
+                placement.SetEquipmentCombatModifiers(instanceId, armor.DamageBonus, armor.DefenseValue);
+            }
+        }
     }
 
     private static int drawCardCount(BattleUnitPlacement placement)

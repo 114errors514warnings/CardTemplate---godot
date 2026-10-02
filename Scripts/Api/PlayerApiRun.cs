@@ -26,6 +26,12 @@ public sealed class PlayerApiRun : IApiDomain
         new("run.bag.next_page", ApiLane.Player, "下一页。"),
         new("run.bag.prev_page", ApiLane.Player, "上一页。"),
         new("run.bag.drag", ApiLane.Player, "移动物品：把 fromCell 的格内容拖到 toCell（与鼠标拖放共用同一条落点判定）。", false, "fromCell,toCell"),
+        new("run.equip.state", ApiLane.Player, "装备界面：角色 Tab / 部位格与手位的格名与拖动载荷 / 横幅 / 负荷。", true),
+        new("run.equip.open", ApiLane.Player, "打开装备界面（= 顶栏「装备」按钮；与背包互斥）。"),
+        new("run.equip.close", ApiLane.Player, "关闭装备界面。"),
+        new("run.equip.toggle", ApiLane.Player, "开合装备界面（= 顶栏按钮的开关语义）。"),
+        new("run.equip.character_tab", ApiLane.Player, "切换部位格 / 手位归属的角色页签。", false, "slotIndex"),
+        new("run.equip.drag", ApiLane.Player, "换装：把 fromCell 的格内容拖到 toCell（背包 → 部位格 / 手位、部位格 → 背包、饰品互换）。", false, "fromCell,toCell"),
         new("run.end_day", ApiLane.Player, "点「结束当天」：进营地（内容进行中 / 结算面板打开时拒绝）。"),
         new("run.camp.state", ApiLane.Player, "营地（夜间 UI）：守夜模式 / 篝火饱食度 / 三个面板 / 按钮可用性 / 预览文案。", true),
         new("run.camp.toggle_food", ApiLane.Player, "点「添加食物」（开 / 关篝火食物面板）。"),
@@ -62,6 +68,12 @@ public sealed class PlayerApiRun : IApiDomain
             ["run.bag.next_page"] = request => PageStep(request, 1),
             ["run.bag.prev_page"] = request => PageStep(request, -1),
             ["run.bag.drag"] = Drag,
+            ["run.equip.state"] = request => Ok(request, "装备状态读取成功。", ApiRunSnapshot.Equip(Scene)),
+            ["run.equip.open"] = OpenEquip,
+            ["run.equip.close"] = CloseEquip,
+            ["run.equip.toggle"] = ToggleEquipUi,
+            ["run.equip.character_tab"] = EquipCharacterTab,
+            ["run.equip.drag"] = EquipDrag,
             ["run.end_day"] = EndDay,
             ["run.camp.state"] = request => CampOk(request, "营地状态读取成功。"),
             ["run.camp.toggle_food"] = request => CampAction(request, camp => camp.ToggleFoodPanel(), "已开合「添加食物」面板。"),
@@ -184,8 +196,66 @@ public sealed class PlayerApiRun : IApiDomain
             bag.HintText.Length > 0 ? bag.HintText : "落点被拒（原因见 run.bag.state 的 hint / banner）。", ApiRunSnapshot.Bag(Scene));
     }
 
-    // ── 时间点 / 营地（夜间 UI） ────────────────────────────────
+    // ── 装备界面（P0-18 界面半） ────────────────────────────────
 
+    /// <summary>装备界面实例（场景没挂 = null，调用方按 NO_EQUIP_UI 拒绝）。</summary>
+    private EquipmentUi Equip => context.Scene?.Equipment;
+
+    /// <summary>装备界面的共用闸门：没界面 / 没打开各给一条稳定错误码。</summary>
+    private ApiResult RequireOpenEquip(ApiRequest request, out EquipmentUi ui)
+    {
+        ui = Equip;
+        if (ui == null) return Fail(request, "NO_EQUIP_UI", "本场景没有装备界面。");
+        return ui.IsOpen ? null : Fail(request, "NO_EQUIP", "装备界面未打开（先 run.equip.open）。");
+    }
+
+    private ApiResult OpenEquip(ApiRequest request)
+    {
+        if (Equip == null) return Fail(request, "NO_EQUIP_UI", "本场景没有装备界面。");
+        if (!Equip.IsOpen && !Scene.ToggleEquipUi())
+            return Fail(request, "EQUIP_BLOCKED", "装备界面打不开（结算面板 / 放弃确认打开或已在营地期间不开）。");
+        return Ok(request, "装备界面已打开。", ApiRunSnapshot.Equip(Scene));
+    }
+
+    private ApiResult CloseEquip(ApiRequest request)
+    {
+        if (Equip?.IsOpen != true) return Ok(request, "装备界面本来就是关着的。", ApiRunSnapshot.Equip(Scene));
+        Scene.ToggleEquipUi();
+        return Ok(request, "装备界面已关闭。", ApiRunSnapshot.Equip(Scene));
+    }
+
+    private ApiResult ToggleEquipUi(ApiRequest request)
+    {
+        if (Equip == null) return Fail(request, "NO_EQUIP_UI", "本场景没有装备界面。");
+        bool open = Scene.ToggleEquipUi();
+        return Ok(request, open ? "装备界面已打开。" : "装备界面已关闭。", ApiRunSnapshot.Equip(Scene));
+    }
+
+    private ApiResult EquipCharacterTab(ApiRequest request)
+    {
+        ApiResult failure = RequireOpenEquip(request, out EquipmentUi ui);
+        if (failure != null) return failure;
+        if (!ui.SelectCharacterTab(request.SlotIndex))
+            return Fail(request, "INVALID_SLOT", $"角色槽 {request.SlotIndex} 不存在（当前角色数见 run.state）。");
+        return Ok(request, $"装备界面已切到角色槽 {request.SlotIndex}。", ApiRunSnapshot.Equip(Scene));
+    }
+
+    /// <summary>换装：与鼠标拖放共用 `EquipmentUi.ApplyDrop`（规则拒绝时把提示行原文当原因返回）。</summary>
+    private ApiResult EquipDrag(ApiRequest request)
+    {
+        ApiResult failure = RequireOpenEquip(request, out EquipmentUi ui);
+        if (failure != null) return failure;
+        if (string.IsNullOrWhiteSpace(request.FromCell) || string.IsNullOrWhiteSpace(request.ToCell))
+            return Fail(request, "MISSING_CELL", "请给出 fromCell 与 toCell（格名见 run.equip.state 的 bagCells / bodyCells / handCells）。");
+        if (ui.PayloadOfCell(request.FromCell).Length == 0)
+            return Fail(request, "EMPTY_SOURCE", $"格 {request.FromCell} 没有可拿起的装备。");
+        if (ui.DragCell(request.FromCell, request.ToCell))
+            return Ok(request, $"已移动：{request.FromCell} → {request.ToCell}（{ui.HintText}）。", ApiRunSnapshot.Equip(Scene));
+        return ApiResult.Fail(request.Type, ApiLane.Player, "DROP_REJECTED",
+            ui.HintText.Length > 0 ? ui.HintText : "落点被拒（原因见 run.equip.state 的 hint / banner）。", ApiRunSnapshot.Equip(Scene));
+    }
+
+    // ── 时间点 / 营地（夜间 UI） ────────────────────────────────
     /// <summary>点「结束当天」：进营地（与顶栏按钮同一入口，内容进行中 / 结算面板打开时拒绝）。</summary>
     private ApiResult EndDay(ApiRequest request)
     {

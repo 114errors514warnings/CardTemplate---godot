@@ -17,7 +17,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 
-public partial class BagUi : Node
+public partial class BagUi : Node, IDragHost
 {
 	public const string TitleText = "背包";
 	public const string CloseText = "关闭";
@@ -302,6 +302,10 @@ public partial class BagUi : Node
 		Array.Clear(bagSlotCells, 0, bagSlotCells.Length);
 		Array.Clear(carryCells, 0, carryCells.Length);
 		Array.Clear(handCells, 0, handCells.Length);
+		// 页签与角色 Tab 也是**本次面板**的子控件：面板一销毁就必须从列表摘掉，
+		// 否则「关 → 再开」几轮后会遍历到已释放的 Button（`ObjectDisposedException`，2026-10-02 装备烟测实测）。
+		tabButtons.Clear();
+		characterTabs.Clear();
 		previousPageButton = null;
 		nextPageButton = null;
 		pageLabel = null;
@@ -917,7 +921,7 @@ public partial class BagUi : Node
 	/// **口径 2026-10-02**：内容进行中（闸门有原因）时**照样可以拿起** —— 被拦的是落点，
 	/// 因此这里不再看 `IsArrangeBlocked`；拒绝原因由落点判定 → 提示行与横幅给出。
 	/// </summary>
-	internal string PayloadOf(BagCell cell)
+	public string PayloadOf(BagCell cell)
 	{
 		if (cell == null || Run == null)
 		{
@@ -940,7 +944,7 @@ public partial class BagUi : Node
 	/// **口径 2026-10-02**：闸门拦下的落点**也要能落**（`_CanDropData` 返回 true），否则 Godot 会直接吞掉这次
 	/// 拖动、`_DropData` 根本不会被调用 —— 那样就没有任何地方能显示横幅提示。落点再由 `ApplyDrop` 拒绝 + 给原因。
 	/// </summary>
-	internal bool CanAccept(BagCell target, string payload)
+	public bool CanAccept(BagCell target, string payload)
 	{
 		if (target == null || Run == null || string.IsNullOrWhiteSpace(payload))
 		{
@@ -960,7 +964,7 @@ public partial class BagUi : Node
 	/// <summary>
 	/// 落点（鼠标拖动与烟测共用）：调 `RunSession` 对应的整理 API，成功 / 失败都写提示行，成功后重画。
 	/// </summary>
-	internal bool ApplyDrop(BagCell target, string payload)
+	public bool ApplyDrop(BagCell target, string payload)
 	{
 		RunSession session = Session;
 		if (session?.Current == null || target == null || string.IsNullOrWhiteSpace(payload))
@@ -1104,12 +1108,30 @@ public partial class BagUi : Node
 	}
 }
 
-/// <summary>格子类别：背包格 / 道具栏格 / 装备栏（手位）格。</summary>
+/// <summary>格子类别：背包格 / 道具栏格 / 装备栏（手位）格 / 部位格（头 · 身 · 脚 · 饰品）。</summary>
 public enum BagCellKind
 {
 	BagEntry = 0,
 	Carry = 1,
 	Hand = 2,
+	BodySlot = 3,
+}
+
+/// <summary>
+/// 拖动宿主的窄口：背包界面（`BagUi`）与装备界面（`EquipmentUi`）共用同一个格控件 `BagCell`，
+/// 因此「怎么取载荷 / 接不接这个落点 / 落点怎么执行」由宿主实现 —— 格控件只把鼠标事件翻译成一次回调。
+/// 规则本体不在界面里（两边都通向 `RunSession` 的整理 API），宿主只做类别分流与文案。
+/// </summary>
+public interface IDragHost
+{
+	/// <summary>取该格的拖动载荷（空串 = 拿不起来）。</summary>
+	string PayloadOf(BagCell cell);
+
+	/// <summary>目标能不能接这个载荷（拖动高亮 + `_CanDropData`；只判「成套」，合法性由规则层给原因）。</summary>
+	bool CanAccept(BagCell cell, string payload);
+
+	/// <summary>执行一次落点（鼠标与烟测共用）。</summary>
+	bool ApplyDrop(BagCell cell, string payload);
 }
 
 /// <summary>
@@ -1118,31 +1140,35 @@ public enum BagCellKind
 /// </summary>
 public partial class BagCell : PanelContainer
 {
-	private readonly BagUi owner;
+	private readonly IDragHost owner;
 	private readonly Label nameLabel;
 	private readonly Label detailLabel;
 
 	public readonly BagCellKind Kind;
 
-	/// <summary>随身格序号 / 手位序号。</summary>
+	/// <summary>随身格序号 / 手位序号 / 部位格内的格序。</summary>
 	public readonly int Index;
 
-	/// <summary>手位所属角色槽（背包格与随身格为 -1）。</summary>
+	/// <summary>部位格的部位（`EquipmentSlotKind`；其它类别为 -1）。</summary>
+	public readonly int SlotKind;
+
+	/// <summary>手位 / 部位格所属角色槽（背包格与随身格为 -1）。</summary>
 	public int SlotIndex;
 
-	/// <summary>当前格内条目的实例键（手位按装备名串搬运，这里保持空串）。</summary>
+	/// <summary>当前格内条目的实例键（手位 / 部位格按装备名串搬运，这里保持空串）。</summary>
 	public string InstanceId = string.Empty;
 
-	public BagCell(BagUi owner, BagCellKind kind, int index, int slotIndex, string name)
+	public BagCell(IDragHost owner, BagCellKind kind, int index, int slotIndex, string name, int slotKind = -1, Vector2? size = null)
 	{
 		this.owner = owner;
 		Kind = kind;
 		Index = index;
+		SlotKind = slotKind;
 		SlotIndex = slotIndex;
 		Name = name;
-		CustomMinimumSize = kind == BagCellKind.BagEntry
+		CustomMinimumSize = size ?? (kind == BagCellKind.BagEntry
 			? new Vector2(BagUi.BagCellWidth, BagUi.BagCellHeight)   // 均匀网格 + 正方形（用户口径 2026-10-02）
-			: new Vector2(104, 62);                                    // 右侧道具栏 / 手位：保持原来的窄格
+			: new Vector2(104, 62));                                   // 右侧道具栏 / 手位：保持原来的窄格
 		MouseFilter = MouseFilterEnum.Stop;
 
 		VBoxContainer column = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };

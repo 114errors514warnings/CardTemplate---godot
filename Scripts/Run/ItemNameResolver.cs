@@ -24,6 +24,22 @@ public static class ItemNameResolver
 	private static readonly Dictionary<int, int> EquipmentHandsRequired = new Dictionary<int, int>();
 	private static readonly Dictionary<string, int> EquipmentKeysByName = new Dictionary<string, int>(StringComparer.Ordinal);
 
+	// ── 部位装备（Armor.csv，2026-10-02 装备界面批）：部位 / 关键数值 / 名字 ──
+	// 两张装备表（Weapon / Armor）共用上面那三个「装备」字典的命名空间：背包页签、负荷、名字反查都只认一份。
+	private static readonly Dictionary<int, ArmorDefinition> ArmorByKey = new Dictionary<int, ArmorDefinition>();
+	private static readonly Dictionary<string, ArmorDefinition> ArmorByName = new Dictionary<string, ArmorDefinition>(StringComparer.Ordinal);
+
+	/// <summary>饰品格数（装备界面按它铺格；`EquipmentConfig.csv` 未配时用默认 3，装备系统交互案 §九 第 5 条）。</summary>
+	private static int accessorySlotCount = EquipmentConfigDefinition.DefaultAccessorySlotCount;
+
+	/// <summary>饰品格数（读数口：界面与落点判定共用；非正数一律回落到默认 3）。</summary>
+	public static int AccessorySlotCount => accessorySlotCount;
+
+	/// <summary>写入饰品格数；非正数一律回落到默认值（不让一张坏表把装备界面锁死）。</summary>
+	public static void SetAccessorySlotCount(int count) =>
+		accessorySlotCount = count > 0 ? count : EquipmentConfigDefinition.DefaultAccessorySlotCount;
+
+
 	// ── 队伍负荷上限（DataBase/Inventory/InventoryConfig.csv 的 `Global` 行）──
 	private static float inventoryCapacity = DefaultInventoryCapacity;
 
@@ -190,6 +206,58 @@ public static class ItemNameResolver
 	/// <summary>装备单件负荷的推导口径（表里没填 `Load` 时）：单手 2.0 / 双手 4.0。</summary>
 	public static float DerivedEquipmentLoad(int handsRequired) => handsRequired >= 2 ? 4f : 2f;
 
+	/// <summary>
+	/// 注册部位装备表（Armor.csv）：名字 + 名字反查 + 部位 + 关键数值；负荷写进**同一个**装备负荷表。
+	/// 表里 `Load` 必填（加载器已保证），但测试夹具可能只填名字 —— 那时按部位兜底（饰品 0.5 / 其它 2.0）。
+	/// </summary>
+	public static void RegisterArmors(IReadOnlyDictionary<int, ArmorDefinition> definitions)
+	{
+		if (definitions == null)
+		{
+			return;
+		}
+
+		foreach ((int id, ArmorDefinition definition) in definitions)
+		{
+			if (definition == null || string.IsNullOrWhiteSpace(definition.DefinitionId))
+			{
+				continue;
+			}
+
+			EquipmentNames[id] = definition.DefinitionId;
+			EquipmentKeysByName[definition.DefinitionId] = id;
+			EquipmentHandsRequired[id] = Math.Max(0, definition.HandsRequired);
+			EquipmentLoads[id] = definition.Load >= 0f ? definition.Load : DerivedArmorLoad(definition.Slot);
+			ArmorByKey[id] = definition;
+			ArmorByName[definition.DefinitionId] = definition;
+		}
+	}
+
+	/// <summary>部位装备单件负荷的推导口径（**只在**表里没填 `Load` 时用到）：饰品 0.5 / 其它部位 2.0。</summary>
+	public static float DerivedArmorLoad(EquipmentSlotKind slot) =>
+		slot == EquipmentSlotKind.Accessory ? 0.5f : 2f;
+
+	/// <summary>按**装备名**取部位装备定义（武器 / 手位防具返回 false）。</summary>
+	public static bool TryGetArmorDefinition(string definitionId, out ArmorDefinition definition) =>
+		ArmorByName.TryGetValue(definitionId ?? string.Empty, out definition) && definition != null;
+
+	/// <summary>按**装备名**取部位：只有 Armor.csv 的部位装备返回 true（武器与手位防具返回 false）。</summary>
+	public static bool TryGetBodySlotOfDefinition(string definitionId, out EquipmentSlotKind slot)
+	{
+		if (TryGetArmorDefinition(definitionId, out ArmorDefinition definition))
+		{
+			slot = definition.Slot;
+			return true;
+		}
+
+		slot = EquipmentSlotKind.Head;
+		return false;
+	}
+
+	/// <summary>是否「部位装备」（Armor.csv 的行）。手位落点用它判「部位不符」。</summary>
+	public static bool IsBodySlotEquipment(string definitionId) => TryGetArmorDefinition(definitionId, out _);
+
+
 	/// <summary>占用手数（1 = 单手 / 2 = 双手）：未注册按 1 兜底（宁可宽放，不误判成双手）。</summary>
 	public static int HandsRequiredOf(int equipmentKey) =>
 		EquipmentHandsRequired.TryGetValue(equipmentKey, out int hands) ? hands : 1;
@@ -246,6 +314,9 @@ public static class ItemNameResolver
 		EquipmentLoads.Clear();
 		EquipmentHandsRequired.Clear();
 		EquipmentKeysByName.Clear();
+		ArmorByKey.Clear();
+		ArmorByName.Clear();
+		accessorySlotCount = EquipmentConfigDefinition.DefaultAccessorySlotCount;
 		inventoryCapacity = DefaultInventoryCapacity;
 	}
 }

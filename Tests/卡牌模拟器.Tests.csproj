@@ -30,6 +30,9 @@
 
     <None Include="..\DataBase\BattleMap\Maps\*.json" Link="BattleMap\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\DataBase\Equipment\Weapon.csv" Link="Weapon.csv" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 装备表（2026-10-02 装备界面批）：部位装备 + 装备配置（饰品格数） -->
+    <None Include="..\DataBase\Equipment\Armor.csv" Link="Equipment\Armor.csv" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\DataBase\Equipment\EquipmentConfig.csv" Link="Equipment\EquipmentConfig.csv" CopyToOutputDirectory="PreserveNewest" />
     <!-- 物品四表 + 掉落表（2026-10-02，批 A）：供 ItemTableFileTests 在纯 .NET 下做文件级校验 -->
     <None Include="..\DataBase\Item\Material.csv" Link="Item\Material.csv" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\DataBase\Item\Item.csv" Link="Item\Item.csv" CopyToOutputDirectory="PreserveNewest" />

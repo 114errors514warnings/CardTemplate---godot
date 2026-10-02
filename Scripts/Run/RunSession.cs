@@ -9,8 +9,8 @@ public partial class RunSession : Node
 	/// <summary>本局存档路径（烟测也用它备份 / 还原，见 RunFlowScene 的存档守卫）。</summary>
 	public const string SavePath = "user://run_save_v1.json";
 
-	/// <summary>存档格式版本：与 `RunSaveData.CurrentSchemaVersion` 同步（版本 5 = 左右手位字段 + 条目的随身格归属）。</summary>
-	public const string SaveSchemaVersion = "5";
+	/// <summary>存档格式版本：与 `RunSaveData.CurrentSchemaVersion` 同步（版本 6 = 左右手位字段 + 条目的随身格归属 + 部位格字段）。</summary>
+	public const string SaveSchemaVersion = "6";
 
 	/// <summary>当前局数据（null = 无进行中的局）。</summary>
 	public RunSaveData Current { get; private set; }
@@ -98,6 +98,8 @@ public partial class RunSession : Node
 				RunEquipmentSystem.SetHand(slot, RunEquipmentSystem.RightHand, initialWeapon);
 			}
 
+			// 部位格集合（SchemaVersion 6）：建档时就补齐到配置格数，与读档迁移同一口径。
+			RunEquipmentSystem.EnsureBodySlots(slot);
 			data.CharacterSlots.Add(slot);
 
 			List<RunDeckEntry> deck = new List<RunDeckEntry>();
@@ -164,6 +166,13 @@ public partial class RunSession : Node
 
 		data.MigrateToCurrentSchema();
 		MigrateSettlementCompat(data);
+		// 读档清洗（装备系统交互案 §九 第 4 条）：装备表里不存在的 / 部位对不上的装备清空该格并打印，
+		// 不丢整档、不炸建场（原先未知装备会让战斗开场直接抛 `ArgumentException`）。
+		foreach (string note in RunEquipmentSystem.SanitizeEquipment(data))
+		{
+			GD.PrintErr($"[RunSession] {note}");
+		}
+
 		Current = data;
 		ClearPendingEncounter();
 		GD.Print($"[RunSession] 读档成功：第 {data.MapState.CurrentDay} 天，存档版本 {data.SchemaVersion}。");
@@ -723,6 +732,74 @@ public partial class RunSession : Node
 		}
 
 		if (!RunEquipmentSystem.TryMoveHandToCarrySlot(Current, slotIndex, hand, carrySlot, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+
+	// ── 部位格（装备系统交互案 §二 / §三；2026-10-02 装备界面批，SchemaVersion 6）──
+	// 拖动落点同背包：闸门 → `RunEquipmentSystem`（规则本体）→ 成功立刻落档。
+
+	/// <summary>饰品格数（配置读数口；装备界面按它铺格）。</summary>
+	public int AccessorySlotCount => RunEquipmentSystem.AccessorySlotCount;
+
+	/// <summary>部位格显示文案（空位 = 「空」；`slotKind` = `EquipmentSlotKind`）。</summary>
+	public string GetBodySlotText(int slotIndex, int slotKind, int indexInKind) =>
+		Current == null ? RunEquipmentSystem.EmptyHandText : RunEquipmentSystem.BodySlotText(Current, slotIndex, slotKind, indexInKind);
+
+	/// <summary>
+	/// 背包 → 部位格（案 §三）：部位不符 / 饰品栏满各给对应原因；替换下来的装备回背包。
+	/// 成功立刻落档。落点受限（内容进行中）时由闸门拒绝并给原因。
+	/// </summary>
+	public bool TryEquipBagEntryToSlot(string instanceId, int slotIndex, int slotKind, int indexInKind, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryEquipSlotFromBag(Current, instanceId, slotIndex, slotKind, indexInKind, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>部位格 → 背包（卸下、局外不落地丢弃；进包超限则整笔拒绝）。成功立刻落档。</summary>
+	public bool TryUnequipSlotToBag(int slotIndex, int slotKind, int indexInKind, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TryUnequipSlot(Current, slotIndex, slotKind, indexInKind, out error))
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>部位格 ↔ 部位格（仅饰品之间可互换）。成功立刻落档。</summary>
+	public bool TrySwapBodySlots(int slotIndex, int fromKind, int fromIndex, int toKind, int toIndex, out string error)
+	{
+		error = string.Empty;
+		if (!RequireBagArrange(out error))
+		{
+			return false;
+		}
+
+		if (!RunEquipmentSystem.TrySwapBodySlots(Current, slotIndex, fromKind, fromIndex, toKind, toIndex, out error))
 		{
 			return false;
 		}

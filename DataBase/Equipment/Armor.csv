@@ -1,0 +1,7 @@
+ArmorId,DefinitionId,Slot,HandsRequired,DefenseValue,DamageBonus,MoveBonus,ResourceCost,Load
+20001,布头巾,Head,0,1,0,0,0,1.0
+20002,皮甲,Body,0,2,0,0,0,2.0
+20003,旅人靴,Feet,0,1,0,1,0,1.0
+20004,护身符,Accessory,0,0,0,0,0,0.5
+20005,青铜戒指,Accessory,0,1,0,0,0,0.5
+20006,猎人护腕,Accessory,0,0,1,0,0,0.5
