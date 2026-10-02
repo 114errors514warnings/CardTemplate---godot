@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dgkqc1vlmp0wr"
+
+[deps]
+
+files=["res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.DropTableId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.LevelType.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Difficulty.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.InstanceId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.ObjectType.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.DefinitionId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Q.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.R.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Facing.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.en.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.en.translation"]
+
+source_file="res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.csv"
+dest_files=["res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.DropTableId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.LevelType.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Difficulty.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.InstanceId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.ObjectType.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.DefinitionId.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Q.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.R.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.Facing.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.en.translation", "res://DataBase/Level/Archive/F1-009-收容区失控-2026-10-01.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

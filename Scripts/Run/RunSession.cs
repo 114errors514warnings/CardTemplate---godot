@@ -3,12 +3,14 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 
 public partial class RunSession : Node
 {
+	/// <summary>本局存档路径（烟测也用它备份 / 还原，见 RunFlowScene 的存档守卫）。</summary>
 	public const string SavePath = "user://run_save_v1.json";
-	public const string SaveSchemaVersion = "1";
+
+	/// <summary>存档格式版本：与 `RunSaveData.CurrentSchemaVersion` 同步（版本 4 = 背包实例 + 食物效果寿命轴）。</summary>
+	public const string SaveSchemaVersion = "4";
 
 	/// <summary>当前局数据（null = 无进行中的局）。</summary>
 	public RunSaveData Current { get; private set; }
@@ -16,7 +18,7 @@ public partial class RunSession : Node
 	/// <summary>等待进入战斗的遭遇层目录名（第一层…），运行时字段不入档。</summary>
 	public string PendingEncounterLayer = string.Empty;
 
-	/// <summary>等待进入战斗的已解析遭遇行（含怪物列表/DropTableId），运行时字段不入档。</summary>
+	/// <summary>等待进入战斗的已解析遭遇行（含怪物列表 / DropTableId），运行时字段不入档。</summary>
 	public StageEncounterRow PendingEncounter;
 
 	public static RunSession Instance { get; private set; }
@@ -41,6 +43,16 @@ public partial class RunSession : Node
 		return FileAccess.FileExists(SavePath);
 	}
 
+	/// <summary>当天剩余时间点（0 ~ 4；无局时为 0）。</summary>
+	public float RemainingToday => Current == null ? 0f : Current.MapState.RemainingToday;
+
+	/// <summary>当前天数（1 起；无局时为 1）。</summary>
+	public int CurrentDay => Current == null ? 1 : Current.MapState.CurrentDay;
+
+	/// <summary>
+	/// 开新局：按角色列表建档（HP = `Character.csv` 上限、默认卡组取自 `CharacterDefaultDeck.csv`、
+	/// 初始武器见 <see cref="GetInitialWeaponDefinition"/>），地图从第一层起步，初始背包为空。
+	/// </summary>
 	public void StartNewRun(IReadOnlyList<int> characterIds, int? seed = null)
 	{
 		if (characterIds == null || characterIds.Count == 0)
@@ -51,33 +63,30 @@ public partial class RunSession : Node
 
 		RunSaveData data = new RunSaveData
 		{
-			SchemaVersion = 1,
+			SchemaVersion = RunSaveData.CurrentSchemaVersion,
 			SavedAt = DateTime.Now.ToString("s"),
+			GameMode = RunGameModes.OnMap,
 			Gold = 0,
 			Keys = 0,
 			MapState = new RunMapStateSave
 			{
 				Act = 1,
-				Seed = seed ?? new Random().Next(),
-				LayoutVersion = 1,
+				Seed = seed ?? (int)(Time.GetTicksUsec() & 0x7FFFFFFF),
 				CurrentNodeId = -1,
-				TimePoints = 0,
 			},
 		};
 
-		foreach (int characterId in characterIds)
+		for (int i = 0; i < characterIds.Count; i++)
 		{
-			if (!LoadingSystem.CharacterDictionary.TryGetValue(characterId, out Character template))
-			{
-				GD.PrintErr($"[RunSession] 角色 {characterId} 未在缓存中找到，无法开始新局。");
-				continue;
-			}
-
+			int characterId = characterIds[i];
+			int maxHp = LoadingSystem.CharacterDictionary.TryGetValue(characterId, out Character template) && template != null
+				? template.MAX_HP
+				: 0;
 			data.CharacterSlots.Add(new RunCharacterSlotSave
 			{
 				CharacterId = characterId,
-				CurrentHp = template.MAX_HP,
-				MaxHp = template.MAX_HP,
+				CurrentHp = maxHp,
+				MaxHp = maxHp,
 				EquippedWeaponDefinitionId = GetInitialWeaponDefinition(characterId),
 			});
 
@@ -92,16 +101,14 @@ public partial class RunSession : Node
 			data.DeckSlots.Add(deck);
 		}
 
-		if (data.CharacterSlots.Count == 0)
-		{
-			GD.PrintErr("[RunSession] 开始新局失败：无有效角色。");
-			return;
-		}
-
+		RunBagSystem.EnsureCollections(data); // 新局也补齐集合（随身 3 格 / 背包列表），与 RunBagSystem 的口径一致
 		Current = data;
+		ClearPendingEncounter();
 		Save();
+		GD.Print($"[RunSession] 新局开始：{characterIds.Count} 名角色，地图种子 {data.MapState.Seed}。");
 	}
 
+	/// <summary>各角色开局武器（口径 = `Weapon.csv` 的 `DefinitionId`）。</summary>
 	private static string GetInitialWeaponDefinition(int characterId) => characterId switch
 	{
 		1002 => "双手剑",
@@ -109,7 +116,7 @@ public partial class RunSession : Node
 		1004 => "法典",
 		_ => string.Empty,
 	};
-
+	/// <summary>读档：反序列化 → 就地迁移到当前版本 → 装载（失败保留原状态并返回 false）。</summary>
 	public bool LoadSave()
 	{
 		if (!FileAccess.FileExists(SavePath))
@@ -118,39 +125,42 @@ public partial class RunSession : Node
 			return false;
 		}
 
-		using (FileAccess file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Read))
+		using FileAccess file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Read);
+		if (file == null)
 		{
-			if (file == null)
-			{
-				GD.PrintErr("[RunSession] 打开存档失败。");
-				return false;
-			}
-
-			string json = file.GetAsText();
-			try
-			{
-				RunSaveData data = RunSaveJson.Deserialize(json);
-				if (data == null)
-				{
-					GD.PrintErr("[RunSession] 存档内容解析失败。");
-					return false;
-				}
-
-				MigrateSettlementCompat(data);
-				// P2-11：旧档遗留的全局普通敌袭计数按当前层归入（新档该字段恒为 0，此调用无副作用）。
-				data.MapState.MigrateLegacyNormalEncounterCount();
-				Current = data;
-				GD.Print($"[RunSession] 已读取存档：角色 {Current.CharacterSlots.Count}，当前位置 {Current.MapState.CurrentNodeId}。");
-				return true;
-			}
-			catch (Exception ex)
-			{
-				GD.PrintErr($"[RunSession] 存档反序列化异常：{ex.Message}");
-				return false;
-			}
+			GD.PrintErr("[RunSession] 打开存档失败。");
+			return false;
 		}
+
+		string json = file.GetAsText();
+		file.Close();
+
+		RunSaveData data;
+		try
+		{
+			data = RunSaveJson.Deserialize(json);
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[RunSession] 存档反序列化异常：{ex.Message}");
+			return false;
+		}
+
+		if (data == null)
+		{
+			GD.PrintErr("[RunSession] 存档内容为空。");
+			return false;
+		}
+
+		data.MigrateToCurrentSchema();
+		MigrateSettlementCompat(data);
+		Current = data;
+		ClearPendingEncounter();
+		GD.Print($"[RunSession] 读档成功：第 {data.MapState.CurrentDay} 天，存档版本 {data.SchemaVersion}。");
+		return true;
 	}
 
+	/// <summary>落档：状态改动后立刻写（口径见 9 月施工文档 §39）。</summary>
 	public void Save()
 	{
 		if (Current == null)
@@ -184,28 +194,32 @@ public partial class RunSession : Node
 		}
 	}
 
+	/// <summary>删除存档文件（`user://` 不是绝对路径 → 先 GlobalizePath）。</summary>
 	public static void DeleteSave()
 	{
 		if (FileAccess.FileExists(SavePath))
 		{
-			DirAccess.RemoveAbsolute(SavePath);
+			DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
 			GD.Print("[RunSession] 已删除存档。");
 		}
 	}
 
-	/// <summary>清空内存中的当前局（不删档；弃档流程先调 DeleteSave 再调本方法）。</summary>
+	/// <summary>清掉内存中的当前局（不删档）。</summary>
 	public void ClearCurrent()
 	{
 		Current = null;
+		ClearPendingEncounter();
 	}
 
-	/// <summary>结束本局：清空内存态并删档（战斗失败等路径使用）。</summary>
+	/// <summary>放弃本局：删档 + 清当前局。</summary>
 	public void AbortRun()
 	{
-		Current = null;
 		DeleteSave();
+		ClearCurrent();
+		GD.Print("[RunSession] 已放弃本局。");
 	}
 
+	/// <summary>取角色槽（越界返回 null）。</summary>
 	public RunCharacterSlotSave GetSlot(int index)
 	{
 		if (Current == null || index < 0 || index >= Current.CharacterSlots.Count)
@@ -216,6 +230,7 @@ public partial class RunSession : Node
 		return Current.CharacterSlots[index];
 	}
 
+	/// <summary>取该槽的永久卡组（越界返回空表）。</summary>
 	public List<RunDeckEntry> GetSlotDeck(int index)
 	{
 		if (Current == null || index < 0 || index >= Current.DeckSlots.Count)
@@ -226,21 +241,37 @@ public partial class RunSession : Node
 		return Current.DeckSlots[index];
 	}
 
-	/// <summary>把一张卡（新奖励 / 升级）追加到指定槽位永久卡组。</summary>
+	/// <summary>把一张卡加入该槽的永久卡组（结算领卡 / 事件发卡共用）。</summary>
 	public void AddCardToSlotDeck(int slotIndex, int cardId, int permanentUpgradeLevel = 0)
 	{
-		List<RunDeckEntry> deck = GetSlotDeck(slotIndex);
-		deck.Add(new RunDeckEntry { CardId = cardId, PermanentUpgradeLevel = permanentUpgradeLevel });
+		if (Current == null || cardId <= 0 || slotIndex < 0 || slotIndex >= Current.DeckSlots.Count)
+		{
+			return;
+		}
+
+		Current.DeckSlots[slotIndex].Add(new RunDeckEntry
+		{
+			CardId = cardId,
+			PermanentUpgradeLevel = Math.Max(0, permanentUpgradeLevel),
+		});
 	}
 
+	/// <summary>记录当前位置格点（移动到达 / 进入节点时调用）并落档。</summary>
 	public void SetCurrentNode(int nodeId)
 	{
-		if (Current != null)
+		if (Current == null)
 		{
-			Current.MapState.CurrentNodeId = nodeId;
+			return;
 		}
+
+		Current.MapState.CurrentNodeId = nodeId;
+		Save();
 	}
 
+	/// <summary>
+	/// 节点内容完成（或经过已访问格）：把当前格点记入已访问并落档。**幂等** —— 同一个格点只记一次；
+	/// 普通敌袭的档位计数由 `RunBattleScene` 在胜利结算时按 `NormalCombat` 增量（P2-11），这里不重复计数。
+	/// </summary>
 	public void MarkCurrentNodeVisitedAndAdvanceEncounter()
 	{
 		if (Current == null)
@@ -248,14 +279,257 @@ public partial class RunSession : Node
 			return;
 		}
 
-		int nodeId = Current.MapState.CurrentNodeId;
-		if (nodeId >= 0 && !Current.MapState.VisitedNodeIds.Contains(nodeId))
+		RunMapStateSave state = Current.MapState;
+		if (state.CurrentNodeId >= 0 && !state.VisitedNodeIds.Contains(state.CurrentNodeId))
 		{
-			Current.MapState.VisitedNodeIds.Add(nodeId);
+			state.VisitedNodeIds.Add(state.CurrentNodeId);
 		}
 
 		Save();
 	}
+
+	/// <summary>累加时间点进程（移动 / 战斗回合 / 事件代价）并落档；顺带扣食物效果的 TimePoint 寿命轴。</summary>
+	public bool TryAddTimePoints(float delta, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!Current.MapState.TryAddTimePoints(delta, out error))
+		{
+			return false;
+		}
+
+		// 时间点变动 → 食物效果的 TimePoint 寿命轴（2026-10-02 口径 ②）
+		RunFoodSystem.TickTimePoints(Current, System.Math.Abs(delta));
+		Save();
+		return true;
+	}
+
+	/// <summary>支付时间点代价（移动 / 节点交互 / 事件选项）；不足则整笔拒绝，调用方应转向营地转场且不改动其它状态。</summary>
+	public bool TrySpendTimePoints(float cost, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		bool spentTimePoints = Current.MapState.TrySpendTimePoints(cost, out error);
+		if (spentTimePoints)
+		{
+			// 时间点消耗 → 食物效果的 TimePoint 寿命轴（2026-10-02 口径 ②）
+			RunFoodSystem.TickTimePoints(Current, System.Math.Abs(cost));
+		}
+
+		if (!spentTimePoints)
+		{
+			return false;
+		}
+
+		Save();
+		return true;
+	}
+
+	/// <summary>进入休息（营地打开时调用）：记下当刻的当天剩余并落档 —— 回复公式与营地预览都取这个值。</summary>
+	public void BeginRestDay()
+	{
+		if (Current == null)
+		{
+			return;
+		}
+
+		Current.MapState.BeginRestDay();
+		Current.CookedThisRest = 0; // 新的休息场次：烹饪次数重置（食物系统 §四）
+		Save();
+	}
+
+	/// <summary>休息结算（营地「休息」按钮）：逐槽回复 + 推进到新一天并落档；返回每名角色的实际回复量。</summary>
+	public List<int> ApplyRest(RunWatchMode watchMode, int watcherSlotIndex, int satiety)
+	{
+		if (Current == null)
+		{
+			return new List<int>();
+		}
+
+		List<int> healed = RunRestResolver.Apply(Current, watchMode, watcherSlotIndex, satiety);
+		Save();
+		return healed;
+	}
+	/// <summary>
+	/// 休息结算（营地「休息」按钮，食物系统 §二 / §三）：先消耗篝火食物并把**仍生效**的效果写进寿命轴，
+	/// 再按真实饱食度回复生命，然后跨天腐坏食物、扣 DayCount 轴、清零本次烹饪次数，最后落档。
+	/// </summary>
+	public List<int> ApplyRest(RunWatchMode watchMode, int watcherSlotIndex, RunFoodSystem.CampFirePlan plan)
+	{
+		if (Current == null)
+		{
+			return new List<int>();
+		}
+
+		int satiety = plan?.TotalSatiety ?? 0;
+		List<RunFoodEffectSave> gained = RunFoodSystem.ConsumeCampFire(Current, plan);
+		List<int> healed = RunRestResolver.Apply(Current, watchMode, watcherSlotIndex, satiety);
+		List<RunBagEntrySave> spoiled = RunBagSystem.DecayFoodExpiry(Current);
+		RunFoodSystem.TickRest(Current);
+		Current.CookedThisRest = 0;
+		Save();
+
+		GD.Print($"[营地] 篝火总饱食度 {satiety}（计入效果 {plan?.EffectiveSatiety ?? 0}）→ 食物效果 {gained.Count} 条；腐坏移除 {spoiled.Count} 件。");
+		return healed;
+	}
+
+	/// <summary>
+	/// 烹饪一次（营地「烹饪」按钮，食物系统 §四）：每次休息 ≤ 2 次，只消耗**食物**（材料暂不参与烹饪）。
+	/// 配方取自 `LoadingSystem.FoodRecipeDictionary`；成功即落档。`reservedInstanceIds` = 篝火草稿里已规划的食物实例，
+	/// 它们不能被烹饪吃掉（否则「同一件食物既在篝火里又被当原料」会让本次休息吃到不存在的东西）。
+	/// </summary>
+	public bool TryCook(int recipeId, IReadOnlyCollection<string> reservedInstanceIds, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!LoadingSystem.FoodRecipeDictionary.TryGetValue(recipeId, out FoodRecipeDefinition recipe))
+		{
+			error = $"配方不存在：{recipeId}";
+			return false;
+		}
+
+		bool ok = RunFoodSystem.TryCook(Current, recipe, out RunBagEntrySave result, out error, reservedInstanceIds);
+		if (ok)
+		{
+			GD.Print($"[营地] 烹饪 {recipe.Description} → {result?.DefinitionId}（本次休息已烹饪 {Current.CookedThisRest}/{RunFoodSystem.MaxCookPerRest}）");
+			Save();
+		}
+
+		return ok;
+	}
+
+	/// <summary>不改动篝火草稿的通用入口（事件 / 脚本 / 单测用）：等价于预留集合为空的 <see cref="TryCook(int, IReadOnlyCollection{string}, out string)"/>。</summary>
+	public bool TryCook(int recipeId, out string error) => TryCook(recipeId, null, out error);
+
+
+
+	// ─────────────────────────────────────────────────────────────
+	// 背包与食物效果（2026-10-02 批 B，P0-17 / P1-19）
+	// ─────────────────────────────────────────────────────────────
+
+	/// <summary>背包某类别的条目（材料 / 道具 / 装备 / 食物，背包系统交互案 §二）。</summary>
+	public List<RunBagEntrySave> GetBagEntries(BagCategory category)
+	{
+		if (Current == null)
+		{
+			return new List<RunBagEntrySave>();
+		}
+
+		RunBagSystem.EnsureCollections(Current);
+		return RunBagSystem.EntriesOf(Current, category);
+	}
+
+	/// <summary>当前背包总负荷（`Σ(单件负荷 × 数量)`；装备表暂无 `Load` 列，装备计 0）。</summary>
+	public float CurrentBagLoad => Current == null ? 0f : RunBagSystem.TotalLoad(Current);
+
+	/// <summary>按实例键取背包条目；不存在返回 null。</summary>
+	public RunBagEntrySave FindBagEntry(string instanceId) => Current == null ? null : RunBagSystem.Find(Current, instanceId);
+
+	/// <summary>把一个物品放进背包并立刻落档（事件奖励 / 调试补给 / 拾取回流都走这里）。</summary>
+	public bool TryAddBagItem(BagCategory category, int definitionKey, int count, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (definitionKey <= 0 || count <= 0)
+		{
+			error = "物品定义或数量非法。";
+			return false;
+		}
+
+		RunBagSystem.Add(Current, category, definitionKey, count);
+		Save();
+		return true;
+	}
+
+	/// <summary>从背包扣减并落档；数量不足时只扣现有部分并给出原因（调用方按提示展示）。</summary>
+	public bool TryRemoveBagItem(string instanceId, int count, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		RunBagEntrySave entry = RunBagSystem.Find(Current, instanceId);
+		if (entry == null)
+		{
+			error = "背包里没有该物品。";
+			return false;
+		}
+
+		bool enough = RunBagSystem.Remove(Current, instanceId, count);
+		if (!enough)
+		{
+			error = $"数量不足（现有 {entry.Count}，需求 {count}），已扣完现有部分。";
+		}
+
+		Save();
+		return enough;
+	}
+
+	/// <summary>
+	/// 局外随身 3 格：放入 / 交换。默认**不**写入战斗开场（背包系统交互案 §九 第 1 条），
+	/// 因此这里只落档不联动战斗；打通口径时改在开战场时读 `CarryItemSlots` 即可。
+	/// </summary>
+	public bool TrySetCarrySlot(int slot, string instanceId, out string error)
+	{
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		bool ok = RunBagSystem.TrySetCarrySlot(Current, slot, instanceId, out error);
+		if (ok)
+		{
+			Save();
+		}
+
+		return ok;
+	}
+
+	/// <summary>清空一个随身格并落档。</summary>
+	public bool TryClearCarrySlot(int slot, out string error)
+	{
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		bool ok = RunBagSystem.TryClearCarrySlot(Current, slot, out error);
+		if (ok)
+		{
+			Save();
+		}
+
+		return ok;
+	}
+
+	/// <summary>随身格显示文案（空格 = 「空」）。</summary>
+	public string GetCarrySlotText(int slot) => Current == null ? "空" : RunBagSystem.CarrySlotText(Current, slot);
+
 
 	// ── P0#9 存档状态机（OnMap / InBattleStart / InSettlement） ──
 

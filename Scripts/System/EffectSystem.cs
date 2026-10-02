@@ -142,6 +142,17 @@ public sealed class AttackEffect : IEffect
 
         int damage = Math.Max(0, context.Source.Attack + context.GetParam(0));
         damage = StateSystem.ModifyIncomingDamage(context.Card, context.Source, context.Target, damage);
+
+        // 食物效果「首次受伤额外护盾」（烤蟾蜍，2026-10-02）：在本次伤害的护盾抵扣**之前**生效，
+        // 使它真的挡下这一击；targetShieldBefore 取加盾后的值，结算文案与实际一致。
+        if (context.Target is CharacterInstance shieldedOnFirstHit && shieldedOnFirstHit.PendingShieldOnFirstHit > 0)
+        {
+            int bonusShield = shieldedOnFirstHit.PendingShieldOnFirstHit;
+            shieldedOnFirstHit.PendingShieldOnFirstHit = 0;
+            shieldedOnFirstHit.Shield += bonusShield;
+            BattleSytem.Current?.EnqueueDeferredCombatInfo($"[食物] {shieldedOnFirstHit.Name} 首次受伤：额外获得 {bonusShield} 点护盾。");
+        }
+
         int targetShieldBefore = context.Target.Shield;
         int targetHpBefore = context.Target.HP;
 
@@ -151,7 +162,21 @@ public sealed class AttackEffect : IEffect
         int hpDamage = damage - absorbedByShield;
         if (hpDamage > 0)
         {
-            context.Target.HP = Math.Max(0, context.Target.HP - hpDamage);
+            int hpAfter = context.Target.HP - hpDamage;
+
+            // 食物效果「首次濒死回复」（凤凰羽羹，2026-10-02）：本场首次生命降至 0 时回复 N% 最大生命。
+            // 必须在写 HP **之前**拦下 —— CharacterInstance.HP 落到 0 会触发死亡回调（移出战场），之后再回血也救不回来。
+            if (hpAfter <= 0 && context.Target is CharacterInstance survivor && survivor.PendingSurviveFatalOncePercent > 0)
+            {
+                int percent = survivor.PendingSurviveFatalOncePercent;
+                survivor.PendingSurviveFatalOncePercent = 0;
+                int restored = Math.Max(1, (int)Math.Ceiling(survivor.Max_HP * (percent / 100.0)));
+                hpAfter = Math.Min(survivor.Max_HP, restored);
+                BattleSytem.Current?.EnqueueDeferredCombatInfo(
+                    $"[食物] {survivor.Name} 首次濒死：回复 {percent}% 最大生命（{hpAfter}/{survivor.Max_HP}）。");
+            }
+
+            context.Target.HP = Math.Max(0, hpAfter);
         }
 
         if (hpDamage > 0)

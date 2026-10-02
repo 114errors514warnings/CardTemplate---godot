@@ -23,6 +23,12 @@ public partial class LoadingSystem : Node
 	public const string CharacterRewardPoolCsvPathKey = "Data.Card.CharacterRewardPool";
 	/// <summary>怪物意图价值表路径 key（FilePathRegistry）；奖励折损口径见 单位数值平衡标准 §2.4。</summary>
 	public const string MonsterValueCsvPathKey = "Data.Balance.MonsterValue";
+
+	// ── 物品四表（2026-10-02，P1-4 / P1-19）：材料 / 道具 / 食物 / 配方 ──
+	public const string MaterialCsvPathKey = "Data.Item.Material";
+	public const string ItemCsvPathKey = "Data.Item.Item";
+	public const string FoodCsvPathKey = "Data.Item.Food";
+	public const string FoodRecipeCsvPathKey = "Data.Item.FoodRecipe";
 	/// <summary>Stage 配置根目录：不逐文件注册，按 <层>/<节点类型>.csv 读取。</summary>
 	public const string StageRootDir = "res://DataBase/Stage/";
 
@@ -62,6 +68,19 @@ public partial class LoadingSystem : Node
 	/// 缓存怪物意图价值表条目（MonsterValue.csv），奖励折损口径用
 	/// </summary>
 	private static List<MonsterValueEntry> monsterValueCache = new List<MonsterValueEntry>();
+
+	// ── 物品四表缓存（2026-10-02）──
+	/// <summary>材料表缓存（`LoadMaterialsByKey` 后可用）。</summary>
+	private static Dictionary<int, MaterialDefinition> materialCache = new Dictionary<int, MaterialDefinition>();
+
+	/// <summary>道具表缓存。</summary>
+	private static Dictionary<int, ItemDefinition> itemCache = new Dictionary<int, ItemDefinition>();
+
+	/// <summary>食物表缓存（食物系统 §三）。</summary>
+	private static Dictionary<int, FoodDefinition> foodCache = new Dictionary<int, FoodDefinition>();
+
+	/// <summary>篝火合成配方缓存（食物系统 §四）。</summary>
+	private static Dictionary<int, FoodRecipeDefinition> foodRecipeCache = new Dictionary<int, FoodRecipeDefinition>();
 
 	/// <summary>
 	/// 缓存 Stage 遭遇配置：key = 层目录名（第一层…），value = 类型 → 行列表
@@ -132,6 +151,30 @@ public partial class LoadingSystem : Node
 	public static List<MonsterValueEntry> MonsterValueEntries
 	{
 		get { return monsterValueCache; }
+	}
+
+	/// <summary>材料表（LoadMaterialsByKey 后可用）。</summary>
+	public static Dictionary<int, MaterialDefinition> MaterialDictionary
+	{
+		get { return materialCache; }
+	}
+
+	/// <summary>道具表（LoadItemsByKey 后可用）。</summary>
+	public static Dictionary<int, ItemDefinition> ItemDictionary
+	{
+		get { return itemCache; }
+	}
+
+	/// <summary>食物表（LoadFoodsByKey 后可用）。</summary>
+	public static Dictionary<int, FoodDefinition> FoodDictionary
+	{
+		get { return foodCache; }
+	}
+
+	/// <summary>篝火合成配方表（LoadFoodRecipesByKey 后可用）。</summary>
+	public static Dictionary<int, FoodRecipeDefinition> FoodRecipeDictionary
+	{
+		get { return foodRecipeCache; }
 	}
 
 	public override void _Ready()
@@ -831,6 +874,153 @@ public partial class LoadingSystem : Node
 		return ids;
 	}
 
+	// ─────────────────────────────────────────────────────────────
+	// 物品四表（2026-10-02，P1-4 / P1-19）：材料 / 道具 / 食物 / 配方
+	// ─────────────────────────────────────────────────────────────
+
+	/// <summary>
+	/// 一次性加载物品四表并做跨表校验（配方结果食物、输入食物 / 材料必须已定义）。
+	/// 表头 / 枚举 / ID 有误时抛 <see cref="FormatException"/>（P1-4 验收：不静默降级）。
+	/// </summary>
+	public static void LoadItemTablesByKey(bool useCache = true)
+	{
+		LoadMaterialsByKey(MaterialCsvPathKey, useCache);
+		LoadItemsByKey(ItemCsvPathKey, useCache);
+		LoadFoodsByKey(FoodCsvPathKey, useCache);
+		LoadFoodRecipesByKey(FoodRecipeCsvPathKey, useCache);
+		LoadFoodCsv.ValidateReferences(foodRecipeCache, foodCache, materialCache);
+		ItemNameResolver.RegisterMaterials(materialCache);
+		ItemNameResolver.RegisterItems(itemCache);
+		ItemNameResolver.RegisterFoods(foodCache);
+		ValidateDropTableItemReferences();
+	}
+
+	/// <summary>
+	/// 掉落表 → 物品表的引用校验（P1-4 验收）：`Material / Item / Food` 行的 `RewardParam` 必须在对应表里存在，
+	/// 否则抛 <see cref="FormatException"/> 并一次列出**全部**悬空引用（不静默显示裸编号）。
+	/// `Equipment` 行只在校验器里做了"有注册名才校验"的弱校验 —— 装备表（P0-18）未落地前它没有名字来源。
+	/// </summary>
+	public static void ValidateDropTableItemReferences()
+	{
+		List<DropTableEntry> entries = LoadDropTablesByKey();
+		List<string> missing = new List<string>();
+		foreach (DropTableEntry entry in entries)
+		{
+			if (entry == null)
+			{
+				continue;
+			}
+
+			switch (entry.Category)
+			{
+				case DropCategory.Material:
+					if (!materialCache.ContainsKey(entry.RewardParam))
+					{
+						missing.Add($"Material {entry.RewardParam}（掉落表 {entry.DropTableId}）");
+					}
+					break;
+				case DropCategory.Item:
+					if (!itemCache.ContainsKey(entry.RewardParam))
+					{
+						missing.Add($"Item {entry.RewardParam}（掉落表 {entry.DropTableId}）");
+					}
+					break;
+				case DropCategory.Food:
+					if (!foodCache.ContainsKey(entry.RewardParam))
+					{
+						missing.Add($"Food {entry.RewardParam}（掉落表 {entry.DropTableId}）");
+					}
+					break;
+			}
+		}
+
+		if (missing.Count > 0)
+		{
+			throw new FormatException("[DropTable] 引用了未定义的物品（请在 DataBase/Item 下补定义）：" + string.Join("；", missing));
+		}
+	}
+
+	/// <summary>加载材料表（FilePathRegistry: Data.Item.Material）。</summary>
+	public static Dictionary<int, MaterialDefinition> LoadMaterialsByKey(string pathKey = MaterialCsvPathKey, bool useCache = true)
+	{
+		if (useCache && materialCache.Count > 0)
+		{
+			return materialCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		materialCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, MaterialDefinition>()
+			: LoadMaterialCsv.LoadFromCSV(path);
+		return materialCache;
+	}
+
+	/// <summary>加载道具表（FilePathRegistry: Data.Item.Item）。</summary>
+	public static Dictionary<int, ItemDefinition> LoadItemsByKey(string pathKey = ItemCsvPathKey, bool useCache = true)
+	{
+		if (useCache && itemCache.Count > 0)
+		{
+			return itemCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		itemCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, ItemDefinition>()
+			: LoadItemCsv.LoadFromCSV(path);
+		return itemCache;
+	}
+
+	/// <summary>加载食物表（FilePathRegistry: Data.Item.Food）。</summary>
+	public static Dictionary<int, FoodDefinition> LoadFoodsByKey(string pathKey = FoodCsvPathKey, bool useCache = true)
+	{
+		if (useCache && foodCache.Count > 0)
+		{
+			return foodCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		foodCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, FoodDefinition>()
+			: LoadFoodCsv.LoadFoodsFromCSV(path);
+		return foodCache;
+	}
+
+	/// <summary>加载篝火合成配方表（FilePathRegistry: Data.Item.FoodRecipe）。</summary>
+	public static Dictionary<int, FoodRecipeDefinition> LoadFoodRecipesByKey(string pathKey = FoodRecipeCsvPathKey, bool useCache = true)
+	{
+		if (useCache && foodRecipeCache.Count > 0)
+		{
+			return foodRecipeCache;
+		}
+
+		string path = GetFilePathByKey(pathKey);
+		foodRecipeCache = string.IsNullOrWhiteSpace(path)
+			? new Dictionary<int, FoodRecipeDefinition>()
+			: LoadFoodCsv.LoadRecipesFromCSV(path);
+		return foodRecipeCache;
+	}
+
+	/// <summary>材料定义；未定义返回 null（调用方按「未定义材料(ID)」显示并报错）。</summary>
+	public static MaterialDefinition GetMaterial(int materialId) =>
+		LoadMaterialsByKey().TryGetValue(materialId, out MaterialDefinition definition) ? definition : null;
+
+	/// <summary>道具定义；未定义返回 null。</summary>
+	public static ItemDefinition GetItem(int itemId) =>
+		LoadItemsByKey().TryGetValue(itemId, out ItemDefinition definition) ? definition : null;
+
+	/// <summary>食物定义；未定义返回 null。</summary>
+	public static FoodDefinition GetFood(int foodId) =>
+		LoadFoodsByKey().TryGetValue(foodId, out FoodDefinition definition) ? definition : null;
+
+	/// <summary>材料显示名；未定义返回空串。</summary>
+	public static string GetMaterialName(int materialId) => GetMaterial(materialId)?.DefinitionId ?? string.Empty;
+
+	/// <summary>道具显示名；未定义返回空串。</summary>
+	public static string GetItemName(int itemId) => GetItem(itemId)?.DefinitionId ?? string.Empty;
+
+	/// <summary>食物显示名；未定义返回空串。</summary>
+	public static string GetFoodName(int foodId) => GetFood(foodId)?.DefinitionId ?? string.Empty;
+
 	/// <summary>主流程入口统一预热（主界面 _Ready 调用，避免首次访问缓存为空）。</summary>
 	public static void EnsureAllDataLoaded()
 	{
@@ -844,5 +1034,6 @@ public partial class LoadingSystem : Node
 		LoadCharacterRewardPoolByKey();
 		LoadMonsterValueByKey();
 		LoadStageEncounters();
+		LoadItemTablesByKey();
 	}
 }

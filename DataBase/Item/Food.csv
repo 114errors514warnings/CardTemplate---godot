@@ -1,0 +1,9 @@
+FoodId,DefinitionId,Rarity,Satiety,ExpireDays,Effect1,Effect1Duration,Effect2,Effect2Duration,Load,Description
+401,粗麦饼,普通,2,3,,,,,0.5,耐放的干粮，不附带任何效果
+402,香草炖菜,普通,3,2,Shield:2,BattleCount:1,,,0.6,下一场战斗开始获得 2 点护盾
+403,烤蟾蜍,普通,3,2,ShieldOnFirstHit:1,BattleCount:1,,,0.6,下一场战斗第一次受到伤害时额外获得 1 点护盾
+404,蜂蜜烤肉,罕见,4,3,AddState:AddAttack:1,BattleCount:1,,,0.8,下一场战斗攻击 +1
+405,月光浓汤,罕见,4,2,ClearFirstNormalDebuff,BattleCount:1,,,0.7,下一场战斗开始清除 1 层普通弱化
+406,毒蛇杂烩,罕见,4,1,AddState:AddAttack:2,BattleCount:1,AddState:Weak:1,BattleCount:1,0.7,下一场战斗攻击 +2，但开始时获得 1 层虚弱
+407,龙血藤药膳,稀有,5,3,Shield:5,BattleCount:1,DrawCard:1,BattleCount:1,1.0,下一场战斗开始获得 5 点护盾并抽 1 张牌
+408,凤凰羽羹,稀有,5,2,SurviveFatalOnce:20,BattleCount:1,,,1.0,下一场战斗首次生命降至 0 时回复 20% 最大生命值（本场仅一次）

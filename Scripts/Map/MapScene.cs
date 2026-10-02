@@ -12,6 +12,13 @@ public partial class MapScene : Control
 	private bool readOnlyMode;
 	public event Action<string> LevelRequested;
 	public event Action<string> EventRequested;
+
+	/// <summary>
+	/// 时间点不足（当天剩余 &lt; 移动消耗 0.3）时触发：宿主应转场到营地休息（地图交互 §五）。
+	/// 嵌入模式下由宿主 `RunFlowScene` 接管；独立场景模式直接切 `CampScenePath`。
+	/// </summary>
+	public event Action RestRequested;
+
 	public void SetReadOnly(bool value)
 	{
 		readOnlyMode = value;
@@ -46,6 +53,7 @@ public partial class MapScene : Control
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
+	public const string CampScenePath = "res://Scenes/Run/CampScene.tscn";
 	[Export] public bool EnableDebugControls = true;
 
 	[Export] public float HexSize = 40f;
@@ -55,6 +63,9 @@ public partial class MapScene : Control
 	private readonly Dictionary<int, Vector2> centers = new Dictionary<int, Vector2>();
 	private Label statusLabel;
 	private Label infoLabel;
+	/// <summary>顶部时间点显示（天数 + 当天剩余；嵌入模式下由宿主常驻栏显示，这里为独立场景模式）。</summary>
+	private Label timePointLabel;
+	private static readonly Color TimePointTextColor = new("f5d98c");
 	private int currentNodeId = -1;
 	private CardSimulator.Battlefield.HexBattleDebugPanel debugPanel;
 
@@ -168,6 +179,14 @@ public partial class MapScene : Control
 		statusLabel.AddThemeColorOverride("font_color", Colors.White);
 		topRow.AddChild(statusLabel);
 
+		// 时间点显示（第 9 条）：天数 + 当天剩余，精度 0.1（`RunTimePoints.FormatDayAndRemaining`）。
+		timePointLabel = new Label { Text = string.Empty };
+		timePointLabel.AddThemeFontSizeOverride("font_size", 18);
+		timePointLabel.AddThemeColorOverride("font_color", TimePointTextColor);
+		timePointLabel.HorizontalAlignment = HorizontalAlignment.Right;
+		timePointLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		topRow.AddChild(timePointLabel);
+
 		// 底部信息条
 		PanelContainer bottomPanel = new PanelContainer();
 		bottomPanel.SetAnchorsPreset(LayoutPreset.BottomWide);
@@ -261,6 +280,11 @@ public partial class MapScene : Control
 
 	private void UpdateInfoLabel()
 	{
+		if (timePointLabel != null)
+		{
+			timePointLabel.Text = RunTimePoints.FormatDayAndRemaining(RunSession.Instance?.Current?.MapState.TimePoints ?? 0f);
+		}
+
 		if (infoLabel == null) return;
 		RunSession session = RunSession.Instance;
 		if (session == null || session.Current == null || board == null)
@@ -564,9 +588,36 @@ public partial class MapScene : Control
 
 		pendingNodeEnterId = -1;
 
-		// 1) 先移动当前位置
+		// 0) 时间点闸门（地图交互 §五）：当天已耗尽（`PendingRestDay`，进程在战斗 / 移动中跨过日界）必须先休息；
+		//    当天剩余不足以支付这次移动时同样禁止前往。两种情形都**不改动任何状态**（位置 / 访问标记 / 时间点）。
+		if (session.Current.MapState.PendingRestDay)
+		{
+			SetStatus("当天时间点已耗尽，必须先进营地休息。");
+			RequestRest();
+			return;
+		}
+
+		if (!session.Current.MapState.CanSpendTimePoints(RunTimePoints.MoveCost))
+		{
+			SetStatus($"时间点不足（当天剩余 {RunTimePoints.Format(session.Current.MapState.RemainingToday)}，"
+				+ $"移动需要 {RunTimePoints.Format(RunTimePoints.MoveCost)}），转入营地休息。");
+			RequestRest();
+			return;
+		}
+
+		// 1) 支付本次移动的时间点进程（0.3）；整笔成功才移动，避免"位置已动、时间点没花"。
+		if (!session.TrySpendTimePoints(RunTimePoints.MoveCost, out string timePointError))
+		{
+			SetStatus($"时间点不足，转入营地休息：{timePointError}");
+			RequestRest();
+			return;
+		}
+
+		// 2) 移动当前位置（位置与时间点一起落档：支付已落过一次，这里补位置）
 		session.SetCurrentNode(nodeId);
 		currentNodeId = nodeId;
+		session.Save();
+		UpdateInfoLabel();
 
 		// 已结算（访问过）的格：允许再次经过，但不重复触发该格遭遇/奖励
 		if (node.Visited)
@@ -607,6 +658,37 @@ public partial class MapScene : Control
 		SetStatus($"已到达（无配置遭遇），停留地图。");
 		UpdateInfoLabel();
 		QueueRedraw();
+	}
+
+	/// <summary>
+	/// 烟测用：按玩家左键点击的同一入口点一个**可达格**（走 `OnNodeClicked` → 前置闸门 → `EnterNode`）。
+	/// 返回 false = 当前没有可达格（地图不可选或没有相邻格）。
+	/// </summary>
+	public bool SimulateClickReachableNode()
+	{
+		foreach (int candidate in currentReachable)
+		{
+			OnNodeClicked(candidate);
+			return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>转入营地休息（时间点不足 / 主动结束当天）：嵌入模式交给宿主 `RunFlowScene`，独立场景模式直接切营地场景。</summary>
+	private void RequestRest()
+	{
+		if (EmbeddedMode)
+		{
+			if (RestRequested != null)
+			{
+				RestRequested.Invoke();
+			}
+
+			return;
+		}
+
+		GetTree().ChangeSceneToFile(CampScenePath);
 	}
 
 	/// <summary>剧情模式新局位于起点时，按 Start 节点事件池启动开始事件。</summary>

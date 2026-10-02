@@ -124,13 +124,15 @@ public static class BattleRewardPresenter
 			case DropCategory.Gold:
 				return $"金币 +{entry.Amount}";
 			case DropCategory.Material:
-				return $"材料 {entry.RewardParam} ×{entry.Amount}";
+				return $"材料 {ItemNameResolver.DisplayMaterial(entry.RewardParam)} ×{entry.Amount}";
 			case DropCategory.Item:
-				return $"道具 {entry.RewardParam} ×{entry.Amount}";
+				return $"道具 {ItemNameResolver.DisplayItem(entry.RewardParam)} ×{entry.Amount}";
+			case DropCategory.Food:
+				return $"食物 {ItemNameResolver.DisplayFood(entry.RewardParam)} ×{entry.Amount}";
 			case DropCategory.Key:
 				return $"钥匙 +{entry.Amount}";
 			case DropCategory.Equipment:
-				return $"装备 {entry.RewardParam} ×{entry.Amount}";
+				return $"装备 {ItemNameResolver.DisplayEquipment(entry.RewardParam)} ×{entry.Amount}";
 			default:
 				return entry.Category.ToString();
 		}
@@ -143,9 +145,11 @@ public static class BattleRewardPresenter
 		{
 			case DropCategory.Gold: run.Gold += entry.Amount; break;
 			case DropCategory.Key: run.Keys += entry.Amount; break;
-			case DropCategory.Material: AddCount(run.Materials, entry.RewardParam, entry.Amount); break;
-			case DropCategory.Item: AddCount(run.Items, entry.RewardParam, entry.Amount); break;
-			case DropCategory.Equipment: AddCount(run.Equipment, entry.RewardParam, entry.Amount); break;
+			case DropCategory.Material: AddCount(run.Materials, entry.RewardParam, entry.Amount); RunBagSystem.Add(run, BagCategory.Material, entry.RewardParam, entry.Amount); break;
+			case DropCategory.Item: AddCount(run.Items, entry.RewardParam, entry.Amount); RunBagSystem.Add(run, BagCategory.Item, entry.RewardParam, entry.Amount); break;
+			case DropCategory.Equipment: AddCount(run.Equipment, entry.RewardParam, entry.Amount); RunBagSystem.Add(run, BagCategory.Equipment, entry.RewardParam, entry.Amount); break;
+			// 食物按**实例**入背包（各自记录稀有度与有效期，食物系统 §二）：不进 Items 汇总字典。
+			case DropCategory.Food: RunBagSystem.Add(run, BagCategory.Food, entry.RewardParam, entry.Amount); break;
 		}
 	}
 

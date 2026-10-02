@@ -1,0 +1,9 @@
+ItemId,DefinitionId,Rarity,UseScope,Effect1,Effect2,Load,Description
+301,治疗药水,普通,使用后立即,Heal:10,,0.3,回复 10 点生命
+302,力量药剂,普通,战斗内,AddState:AddAttack:2,,0.3,本场战斗攻击 +2
+303,迅捷药水,罕见,战斗内,Pending:每回合多抽 1 张（待 StateType 扩词汇）,,0.2,本场战斗中每回合多抽 1 张牌
+304,铁壁药剂,罕见,战斗内,Pending:每次防御额外 +2 护盾（待 StateType 扩词汇）,,0.4,本场战斗中每次防御额外 +2 护盾
+305,净化药剂,罕见,使用后立即,ClearAllStates,,0.2,清除自身全部弱化状态
+306,剧毒瓶,罕见,使用后立即,Damage:8,AddState:Ignite:1,0.3,对单体敌人造成伤害并施加燃烧
+307,龙息药剂,稀有,使用后立即,Damage:6,,0.5,对全体敌人造成伤害
+308,再生药剂,稀有,持续,Pending:每回合开始回复少量生命（待 TurnStartResourceType 扩 Heal）,,0.3,战斗中每回合开始回复少量生命

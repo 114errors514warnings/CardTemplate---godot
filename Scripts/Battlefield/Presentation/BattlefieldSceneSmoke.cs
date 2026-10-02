@@ -19,9 +19,11 @@ public static class BattlefieldSceneSmoke
             VerifyCardWeaponModeStacking();
             VerifyNormalCombatPool();
             VerifyAssetPaths();
+            VerifyHealthBarPresentation();
             VerifyMonsterInitialStates();
             VerifyLevelConfigs();
             VerifyMonsterTableColumns();
+            VerifyItemTables();
             VerifyBattleRules();
             VerifyStateEnumNames();
             VerifyGoldStealLedger();
@@ -87,6 +89,21 @@ public static class BattlefieldSceneSmoke
             int woundedHp = session.Selected.Unit.HP;
             Check(session.TryUseItem(0, out inventoryError) && session.Selected.Unit.HP > woundedHp, "use item: " + inventoryError);
             StateSystem.AddOrUpdateState(session.Selected.Unit, StateType.Vulnerable, 1);
+            if (OS.GetCmdlineUserArgs().Contains("--battlefield-health-capture"))
+            {
+                // 只截图用：把一只怪打到 60% 上下，让「当前/上限 + 部分填充 + 深色底条」同框；
+                // 截完立刻还原（不影响后续任何断言），产物 Tests/battlefield-health-bars.png。
+                var showcase = session.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy);
+                int showcaseHp = showcase.Unit.HP;
+                showcase.Unit.HP = Math.Max(1, showcaseHp * 3 / 5);
+                view.CenterSelected(); view.QueueRedraw();
+                await scene.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                Error healthCapture = scene.GetViewport().GetTexture().GetImage().SavePng("res://Tests/battlefield-health-bars.png");
+                Check(healthCapture == Error.Ok, "health bar capture saved");
+                showcase.Unit.HP = showcaseHp;
+                view.QueueRedraw();
+            }
+
             Check(view.Describe(session.Selected.Coord).Contains("易伤"), "state tooltip binding");
             session.DrawCards(session.SelectedId, 99);
             Card selfCard = session.GetHand(session.SelectedId).FirstOrDefault(x => x.CardId == 21001001);
@@ -170,7 +187,7 @@ public static class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, monster state target, monster turn, states, victory");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, item tables, monster state target, monster turn, states, health text, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)
@@ -541,6 +558,46 @@ public static class BattlefieldSceneSmoke
         Check(builtLevelIds.Count == indexRows.Count, $"every indexed level builds a battlefield ({builtLevelIds.Count}/{indexRows.Count})");
         GD.Print($"BATTLEFIELD_LEVEL_CONFIG_PASS: LevelIndex 的 {builtLevelIds.Count} 个关卡按运行局路径建场成功（含 InitialValue 解析），共 {monsterTotal} 只怪物");
     }
+    /// <summary>
+    /// 物品四表（2026-10-02 批 A / 代码需求清单 P1-4）：材料 / 道具 / 食物 / 配方的**真实加载**接线 ——
+    /// 表头校验、ID 去重、效果文本与寿命轴解析、跨表引用（配方结果与输入）、掉落表引用，
+    /// 以及 2026-10-02 的两条口径：① 材料不参与烹饪（放行配方只允许 Food 输入）；② 寿命不填默认 1（下一场战斗）。
+    /// </summary>
+    private static void VerifyItemTables()
+    {
+        LoadingSystem.LoadItemTablesByKey();
+
+        int materials = LoadingSystem.MaterialDictionary.Count;
+        int items = LoadingSystem.ItemDictionary.Count;
+        int foods = LoadingSystem.FoodDictionary.Count;
+        int recipes = LoadingSystem.FoodRecipeDictionary.Count;
+        Check(materials == 16, $"material table rows (实际 {materials})");
+        Check(items == 8, $"item table rows (实际 {items})");
+        Check(foods == 8, $"food table rows (实际 {foods})");
+        Check(recipes == 12, $"recipe rows (实际 {recipes})");
+
+        int enabled = LoadingSystem.FoodRecipeDictionary.Values.Count(x => x.Enabled);
+        int disabled = recipes - enabled;
+        Check(enabled == 5 && disabled == 7, $"放行 5 条食物升级配方 / 禁用 7 条材料配方（实际 {enabled} / {disabled}）");
+        Check(LoadingSystem.FoodRecipeDictionary.Values.Where(x => x.Enabled)
+                .All(x => x.Inputs.All(i => i.Kind == RecipeInputKind.Food)),
+            "2026-10-02 口径：放行配方只允许 Food 输入（材料暂不参与烹饪）");
+
+        Check(LoadingSystem.FoodDictionary.Values.SelectMany(x => x.Effects)
+                .All(e => e.DurationKind != FoodEffectDurationKind.None && e.DurationValue >= 1),
+            "每条食物效果都带寿命轴且数量 ≥ 1");
+        ItemEffectSpecParser.TryParseDuration(string.Empty, out FoodEffectDurationKind blankKind, out int blankValue, "smoke");
+        Check(blankKind == FoodEffectDurationKind.BattleCount && blankValue == 1,
+            "寿命列留空 = BattleCount:1（下一场战斗）");
+
+        Check(ItemNameResolver.DisplayMaterial(101) == "药草", $"掉落表 Material 101 → 药草（实际 {ItemNameResolver.DisplayMaterial(101)}）");
+        Check(ItemNameResolver.DisplayFood(402) == "香草炖菜", "食物 402 → 香草炖菜");
+
+        GD.Print($"BATTLEFIELD_ITEM_TABLES_PASS: 材料 {materials} / 道具 {items} / 食物 {foods} / 配方 {recipes}" +
+            $"（放行 {enabled} · 材料通道禁用 {disabled}）；掉落表 Material 101 → {ItemNameResolver.DisplayMaterial(101)}");
+    }
+
+
 
     /// <summary>
     /// `Monster.csv` 的 `IsMinion`（是否为爪牙）列：真实表按表头定位并整表可解析（意图列不受新列影响），
@@ -702,11 +759,26 @@ public static class BattlefieldSceneSmoke
             "res://Resources/Images/Characters/Pixel/fx_bow_arrow_trail.png",
             "res://Resources/Images/Characters/Pixel/fx_tome_cast_rune.png",
             "res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png",
+            "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png",
         };
         foreach (string path in required) Check(ResourceLoader.Exists(path), $"asset path resolves: {path}");
         Check(!ResourceLoader.Exists("res://Images/UI/IntentIcons/intent_move.png"), "legacy root Images/ folder is gone");
         GD.Print("BATTLEFIELD_ASSET_PATH_PASS: 图片资源统一位于 Resources/Images/（意图图标 + 剧情背景 + 像素角色与装备全部可解析）");
     }
+
+    /// <summary>
+    /// 血条生命数值文本口径（血条案 §二 / §四，2026-10-01 用户口径）：玩家与怪物**同格式** `当前/上限`，颜色**纯黑**。
+    /// 断言的是口径本身（表现层不跑渲染断言；黑字 + 描边好不好看由出图人工看）。
+    /// </summary>
+    private static void VerifyHealthBarPresentation()
+    {
+        Check(BattlefieldView.FormatHealthText(12, 40) == "12/40", "health text shows current/max");
+        Check(BattlefieldView.FormatHealthText(40, 40) == "40/40", "full-health text shows current/max");
+        Check(BattlefieldView.FormatHealthText(0, 30) == "0/30", "defeated text shows current/max");
+        Check(BattlefieldView.HealthTextColor == Colors.Black, "health text is pure black");
+        GD.Print("BATTLEFIELD_HEALTH_TEXT_PASS: 血条生命数值 = `当前/上限`（玩家与怪物同格式）、纯黑字 + 浅色细描边");
+    }
+
 
     /// <summary>状态表 `EnumName` 列：每行都要与 `StateType` 枚举逐一对上（含 Steal=21），枚举成员也不能缺行。</summary>
     private static void VerifyStateEnumNames()

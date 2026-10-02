@@ -166,17 +166,22 @@ public partial class SettlementUi : Node
 		titleRow.AddChild(closeX);
 	}
 
+	/// <summary>
+	/// 面板列表：物品 Tab（掉落表行）+ 卡牌份 Tab。
+	/// **2026-10-02 用户口径**：领取过的条目**直接从列表里消失**（不再转灰显示「已领取」）——
+	/// 因此渲染走 `BuildVisibleItemTabs` / `BuildVisibleCardPools`，只列出还没领的。
+	/// 回改方式：换成 `BuildItemTabs` / `Run.SettlementCardPools` 并把「已领取」文案与 `Disabled` 分支加回来。
+	/// </summary>
 	private void BuildTabs(VBoxContainer tabs)
 	{
-		foreach (SettlementItemTab tab in SettlementRewardPresenter.BuildItemTabs(Run, LoadingSystem.DropTableEntries))
+		foreach (SettlementItemTab tab in SettlementRewardPresenter.BuildVisibleItemTabs(Run, LoadingSystem.DropTableEntries))
 		{
 			SettlementItemTab captured = tab;
 			Button row = new Button
 			{
-				Text = captured.Claimed ? captured.Text + SettlementRewardPresenter.ClaimedSuffix : captured.Text,
+				Text = captured.Text,
 				Alignment = HorizontalAlignment.Left,
 				CustomMinimumSize = new Vector2(0, 64),
-				Disabled = captured.Claimed,
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 				FocusMode = Control.FocusModeEnum.None,
 			};
@@ -185,25 +190,16 @@ public partial class SettlementUi : Node
 			tabs.AddChild(row);
 		}
 
-		foreach (SettlementCardPoolSave pool in Run.SettlementCardPools)
+		foreach (SettlementCardPoolSave pool in SettlementRewardPresenter.BuildVisibleCardPools(Run))
 		{
-			if (pool == null)
-			{
-				continue;
-			}
-
 			SettlementCardPoolSave captured = pool;
-			SettlementCardClaimSave claim = SettlementRewardPresenter.FindCardClaim(Run, captured.SlotIndex);
 			string slotName = SettlementRewardPresenter.GetSlotDisplayName(captured, Session.GetSlotDisplayName);
 			Button row = new Button
 			{
 				Name = CardTabButtonNamePrefix + captured.SlotIndex,
-				Text = claim == null
-					? SettlementRewardPresenter.GetCardTabText(slotName)
-					: SettlementRewardPresenter.GetClaimedCardTabText(slotName, ResolveCardName(claim.CardId)),
+				Text = SettlementRewardPresenter.GetCardTabText(slotName),
 				Alignment = HorizontalAlignment.Left,
 				CustomMinimumSize = new Vector2(0, 64),
-				Disabled = claim != null,
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 				FocusMode = Control.FocusModeEnum.None,
 			};
@@ -249,7 +245,7 @@ public partial class SettlementUi : Node
 		vbox.AddChild(actionRow);
 	}
 
-	/// <summary>物品 Tab 点击即领取（§四）：入账 + 去重键落档 → 重建面板转「已领取」。</summary>
+	/// <summary>物品 Tab 点击即领取（§四）：入账 + 去重键落档 → 重建面板，该 Tab 直接从列表消失（2026-10-02 口径）。</summary>
 	private void ClaimItem(SettlementItemTab tab)
 	{
 		if (Session == null || tab == null)
@@ -400,7 +396,7 @@ public partial class SettlementUi : Node
 		return Mathf.Clamp(available / 420f, 0.5f, 1f);
 	}
 
-	/// <summary>选中并立即领取（§5.4）：只有该份转「已领取」，入组槽位 = 该份自带槽位。</summary>
+	/// <summary>选中并立即领取（§5.4）：只有该份落档，重建面板后该份 Tab 从列表消失（2026-10-02 口径）。</summary>
 	private void ChooseCard(SettlementCardPoolSave pool, int cardId)
 	{
 		if (Session == null || pool == null)
@@ -480,7 +476,7 @@ public partial class SettlementUi : Node
 		badgeRoot = badge;
 	}
 
-	/// <summary>点浮窗 → 重新打开面板（§6.4）：已领取项保持禁用、各份候选不重抽（直接读存档）。</summary>
+	/// <summary>点浮窗 → 重新打开面板（§6.4）：已领取的条目不再列出、各份候选不重抽（直接读存档）。</summary>
 	private void OpenPanelFromBadge()
 	{
 		if (Session == null)

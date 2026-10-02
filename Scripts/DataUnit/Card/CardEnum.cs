@@ -62,6 +62,10 @@ namespace CardSimulator
 		MirrorShieldToAllies = 15,  // 将前续Shield效果的累积护盾复制到全体友方
 		RearrangeMonsterTargets = 16, // 到我身后：将所有怪物单攻意图重定向到施法者，每改一个目标获得 1 点护盾
 		HpLoss = 17,                // 纯扣血（不叠加 source.Attack，公式 = target.HP -= extraHp）
+
+		// ── 食物系统专用（2026-10-02 新增，见 食物系统 §三）──
+		ShieldOnFirstHit = 18,      // 本场战斗首次受到伤害时额外获得护盾（参数 0 = 护盾值）；食物「烤蟾蜍」用
+		SurviveFatalOnce = 19,      // 本场战斗首次生命降至 0 时按最大生命百分比回复（参数 0 = 百分比）；食物「凤凰羽羹」用
 	}
 
 	public enum CardOperationTargetType

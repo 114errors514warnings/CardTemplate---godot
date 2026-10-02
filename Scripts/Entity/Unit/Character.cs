@@ -29,6 +29,18 @@ public class CharacterInstance : Character, IUnitInstance
     public int UniqueInGameId { get; set; }
     public int Max_HP { get; set; }
 
+    /// <summary>
+    /// 食物效果（2026-10-02，食物系统 §三）：本场战斗**首次受到伤害时**额外获得的护盾值（0 = 无）。
+    /// 由 `BattlefieldSession.ApplyBattleStartEffects` 按食物效果写入；在下次伤害的护盾抵扣前生效并随即归零。
+    /// </summary>
+    public int PendingShieldOnFirstHit;
+
+    /// <summary>
+    /// 食物效果（2026-10-02，食物系统 §三）：本场战斗**首次生命降至 0 时**按最大生命百分比回复（0 = 无；
+    /// 食物「凤凰羽羹」= 20）。在写 HP 之前拦下致命伤害，因此不会触发死亡回调；每场仅一次。
+    /// </summary>
+    public int PendingSurviveFatalOncePercent;
+
     private int _hp;
     public int HP
     {

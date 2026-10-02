@@ -12,7 +12,15 @@ public static class RunGameModes
 
 public sealed class RunSaveData
 {
-	public int SchemaVersion = 2;
+	/// <summary>
+	/// **当前**存档结构版本 = 4：背包实例批（P0-17 / P1-19）新增 `BagEntries`（材料 / 道具 / 装备 / 食物的**实例**条目）、
+	/// `CarryItemSlots`（局外随身 3 格）、`ActiveFoodEffects`（食物效果的寿命轴）与 `CookedThisRest`（本次休息已烹饪次数）。
+	/// `Materials / Items / Equipment` 三个计数字典保留为**汇总视图**（继续写，旧档读起来不丢数）。
+	/// 版本 3 的旧档由 `MigrateToCurrentSchema()` 就地升级，不弃档。
+	/// </summary>
+	public const int CurrentSchemaVersion = 4;
+
+	public int SchemaVersion = CurrentSchemaVersion;
 	public string SavedAt = string.Empty;
 
 	/// <summary>存档状态机：OnMap / InBattleStart / InSettlement。</summary>
@@ -29,6 +37,26 @@ public sealed class RunSaveData
 	public Dictionary<int, int> Materials { get; set; } = new Dictionary<int, int>();
 	public Dictionary<int, int> Items { get; set; } = new Dictionary<int, int>();
 	public Dictionary<int, int> Equipment { get; set; } = new Dictionary<int, int>();
+
+	// ── 背包实例载体（2026-10-02，P0-17 / P1-19；SchemaVersion 4）──
+
+	/// <summary>
+	/// 背包**实例**条目（背包系统交互案 §六）：材料 / 道具 / 装备按定义合并计数，食物恒为独立实例
+	/// （各自记录稀有度与剩余有效期）。`Materials / Items / Equipment` 是它的汇总视图，不是另一份真相。
+	/// </summary>
+	public List<RunBagEntrySave> BagEntries { get; set; } = new List<RunBagEntrySave>();
+
+	/// <summary>局外随身 3 格（空串 = 空位）。默认**不**写入战斗开场（背包系统交互案 §九 第 1 条）。</summary>
+	public List<string> CarryItemSlots { get; set; } = new List<string>();
+
+	/// <summary>
+	/// 仍在生效的食物效果（食物系统 §三，2026-10-02 口径 ②）：每条带寿命轴剩余量，
+	/// 每场战斗开场重新应用一次；战斗结算（BattleCount）/ 时间点变动（TimePoint）/ 跨天休息（DayCount）各扣一次。
+	/// </summary>
+	public List<RunFoodEffectSave> ActiveFoodEffects { get; set; } = new List<RunFoodEffectSave>();
+
+	/// <summary>本次休息已经烹饪的次数（每次休息上限 2 次；进入营地 / 跨天时清零）。</summary>
+	public int CookedThisRest;
 
 	/// <summary>被怪物窃取的金币账本（**按怪物实例分开记**）：每条记录对应关卡里的一个怪物实例，
 	/// 战斗内按实例实时记账（进入存档），结算时只返还"该实例被击杀"的那一条。</summary>
@@ -87,6 +115,68 @@ public sealed class RunSaveData
 	/// 为空 = 没有可重建的战后战场（事件 / 商人发卡、旧档，或结算已完成）。
 	/// </summary>
 	public RunPostBattleSave PostBattleBattlefield { get; set; }
+
+	/// <summary>
+	/// 把任意旧档升级到 `CurrentSchemaVersion`（幂等：已是当前版本时只做非负校验与旧字段归入）。
+	/// 读档路径的唯一入口：`RunSession.LoadSave` 反序列化后立即调用，避免各处各写一份迁移。
+	/// </summary>
+	public void MigrateToCurrentSchema()
+	{
+		MapState?.MigrateTimePointsToSchema3();
+		MapState?.MigrateLegacyNormalEncounterCount();
+		MigrateBagEntriesFromLegacyDictionaries();
+		EnsureBagCollections();
+		SchemaVersion = CurrentSchemaVersion;
+	}
+
+	/// <summary>
+	/// 版本 3 → 4 的背包迁移：把 `Materials / Items / Equipment` 计数字典**展开**成 `BagEntries`
+	/// （每个定义一条、`Count` 原样搬过来），不丢数量。已有 `BagEntries` 的档不动（幂等）。
+	/// </summary>
+	private void MigrateBagEntriesFromLegacyDictionaries()
+	{
+		BagEntries ??= new List<RunBagEntrySave>();
+		if (BagEntries.Count > 0)
+		{
+			return;
+		}
+
+		AppendLegacyEntries(BagCategory.Material, Materials);
+		AppendLegacyEntries(BagCategory.Item, Items);
+		AppendLegacyEntries(BagCategory.Equipment, Equipment);
+	}
+
+	private void AppendLegacyEntries(BagCategory category, Dictionary<int, int> legacy)
+	{
+		if (legacy == null)
+		{
+			return;
+		}
+
+		foreach (KeyValuePair<int, int> pair in legacy)
+		{
+			if (pair.Key <= 0 || pair.Value <= 0)
+			{
+				continue;
+			}
+
+			RunBagEntrySave entry = RunBagSystem.CreateEntry(this, category, pair.Key, count: pair.Value);
+			BagEntries.Add(entry);
+		}
+	}
+
+	/// <summary>补齐四个集合字段：旧档反序列化后可能是 null（`List` 缺字段），这里统一兜住。</summary>
+	private void EnsureBagCollections()
+	{
+		BagEntries ??= new List<RunBagEntrySave>();
+		CarryItemSlots ??= new List<string>();
+		ActiveFoodEffects ??= new List<RunFoodEffectSave>();
+		while (CarryItemSlots.Count < RunBagSystem.CarryItemSlotCount)
+		{
+			CarryItemSlots.Add(string.Empty);
+		}
+	}
+
 }
 
 public sealed class RunCharacterSlotSave
@@ -216,8 +306,116 @@ public sealed class RunMapStateSave
 		NormalEncounterIndex = 0;
 	}
 
-	/// <summary>时间点计数（占位：本期不结算玩法，仅存取）。</summary>
-	public int TimePoints;
+	/// <summary>
+	/// 时间点**进程**（地图玩法 §5.1）。P0-3：精度 = 0.1（对应战斗 1 回合），**只增不减** ——
+	/// 任何玩法结果都不能让它回退（回退会改动跨天边界并使休息回复公式失效），负向写入一律由
+	/// `TryAddTimePoints` / `TrySpendTimePoints` 拒绝。累加对齐 0.1，避免浮点漂移。
+	/// </summary>
+	public float TimePoints;
+
+	/// <summary>进入休息当刻的**当天剩余时间点**：营地界面显示与回复公式取值（落档 —— 读档重进同一个休息界面不重算）。</summary>
+	public float RestRemainingTimePoints;
+
+	/// <summary>
+	/// **当天是否已耗尽而等待休息**：进程在战斗 / 移动中跨过日界（每满 4 点）时置位 —— 那一刻「这一天」的剩余
+	/// 已写进 `RestRemainingTimePoints`，必须先回营地休息才能继续（地图交互 §五「剩余为 0 时强制进入休息」）。
+	/// 休息结算（`AdvanceToNextDay`）后清除；单独落档，读档重进不会漏掉这次强制休息。
+	/// </summary>
+	public bool PendingRestDay;
+
+	/// <summary>当前天数（1 起，由进程推导，不落档）。</summary>
+	public int CurrentDay => RunTimePoints.DayIndex(TimePoints);
+
+	/// <summary>当天剩余时间点（0 ~ 4，由进程推导，不落档）。</summary>
+	public float RemainingToday => RunTimePoints.RemainingToday(TimePoints);
+
+	/// <summary>时间点是否够支付一项代价（不足则禁止前往，转营地转场）。</summary>
+	public bool CanSpendTimePoints(float cost) => RunTimePoints.CanSpend(TimePoints, cost);
+
+	/// <summary>累加时间点进程（移动 0.3 / 战斗每回合 0.1 / 事件代价）。**拒绝负向写入**：时间点是单调递增的运行时钟。</summary>
+	public bool TryAddTimePoints(float delta, out string error)
+	{
+		error = string.Empty;
+		if (float.IsNaN(delta) || delta < 0f)
+		{
+			error = $"时间点只能消耗、不能回复（收到 {delta}）。";
+			return false;
+		}
+
+		float value = RunTimePoints.Quantize(TimePoints + delta);
+		if (value <= TimePoints)
+		{
+			return false; // 不足一个计量单位（0.1）的增量不进账
+		}
+
+		// 跨过日界 = 这一天就此耗尽：把「那一天」的剩余记成回复比例来源，并置为待休息（强制营地转场）。
+		if (RunTimePoints.DayIndex(value) > RunTimePoints.DayIndex(TimePoints))
+		{
+			RestRemainingTimePoints = RunTimePoints.RemainingToday(TimePoints);
+			PendingRestDay = true;
+		}
+
+		TimePoints = value;
+		return true;
+	}
+
+	/// <summary>支付一项时间点代价（移动 / 节点交互 / 事件选项）：不足则整笔拒绝，不允许透支。</summary>
+	public bool TrySpendTimePoints(float cost, out string error)
+	{
+		error = string.Empty;
+		if (float.IsNaN(cost) || cost < 0f)
+		{
+			error = $"时间点代价不能为负（收到 {cost}）。";
+			return false;
+		}
+
+		if (!RunTimePoints.CanSpend(TimePoints, cost))
+		{
+			error = $"时间点不足：当天剩余 {RunTimePoints.Format(RemainingToday)}，需要 {RunTimePoints.Format(cost)}。";
+			return false;
+		}
+
+		return TryAddTimePoints(cost, out error);
+	}
+
+	/// <summary>
+	/// 进入休息：主动结束当天时记下当刻的当天剩余；若这一天是**耗尽**来的（`PendingRestDay`），
+	/// 保留跨日界那一刻记下的剩余（那才是"这一天"的剩余），并确保仍处于待休息态。
+	/// </summary>
+	public void BeginRestDay()
+	{
+		if (!PendingRestDay)
+		{
+			RestRemainingTimePoints = RemainingToday;
+		}
+
+		PendingRestDay = true;
+	}
+
+	/// <summary>休息结算完成：推进到新一天（当天剩余作废；进程只增不减，补齐到次日边界），并清掉待休息标记。</summary>
+	public void AdvanceToNextDay()
+	{
+		float next = RunTimePoints.NextDayStart(TimePoints);
+		if (next > TimePoints)
+		{
+			TimePoints = RunTimePoints.Quantize(next);
+		}
+
+		PendingRestDay = false;
+	}
+
+	/// <summary>旧档迁移（SchemaVersion ≤ 2 → 3）：`TimePoints` 由 int 升为 0.1 精度的 float 语义，非负并对齐步长。</summary>
+	public void MigrateTimePointsToSchema3()
+	{
+		TimePoints = RunTimePoints.Quantize(TimePoints);
+		RestRemainingTimePoints = RunTimePoints.Quantize(RestRemainingTimePoints);
+		// 旧档停在日界上（int 语义下常见）时补一次待休息：否则那一天的耗尽是断的。
+		if (TimePoints > 0f && RunTimePoints.RemainingToday(TimePoints) >= RunTimePoints.PointsPerDay)
+		{
+			PendingRestDay = true;
+			RestRemainingTimePoints = 0f;
+		}
+	}
 }
 
 /// <summary>
@@ -311,4 +509,63 @@ public sealed class RunLoadoutSave
 	public RunGroundObjectSave RightHand { get; set; }
 	public List<RunGroundObjectSave> Items { get; set; } = new List<RunGroundObjectSave>();
 }
+/// <summary>背包条目类别（背包系统交互案 §二 的页签口径：材料 / 道具 / 装备 / 食物）。</summary>
+public enum BagCategory
+{
+	Material = 0,
+	Item = 1,
+	Equipment = 2,
+	Food = 3,
+}
+
+/// <summary>
+/// 背包的一条**实例**条目（SchemaVersion 4）。材料 / 道具 / 装备按 `DefinitionKey` 合并计数；
+/// 食物恒为一条一实例（`ExpireDaysRemaining` 各自衰减、到 0 腐坏移除）。
+/// </summary>
+public sealed class RunBagEntrySave
+{
+	/// <summary>局内唯一实例键（`bag-{类别}{定义键}-{序号}`）：食物按它区分同类不同批。</summary>
+	public string InstanceId = string.Empty;
+
+	/// <summary>定义表主键（MaterialId / ItemId / FoodId / WeaponId）。</summary>
+	public int DefinitionKey;
+
+	/// <summary>定义名（材料 / 道具 / 食物 / 装备的显示名，冗余保存便于脱离配表展示）。</summary>
+	public string DefinitionId = string.Empty;
+
+	/// <summary>`BagCategory`。</summary>
+	public int Category;
+
+	public int Count = 1;
+
+	/// <summary>`ItemRarity`：普通 / 罕见 / 稀有。</summary>
+	public int Rarity;
+
+	/// <summary>食物剩余有效期（天）；非食物为 -1。到 0 即腐坏移除（食物系统 §二）。</summary>
+	public int ExpireDaysRemaining = -1;
+
+	public BagCategory CategoryEnum => (BagCategory)Category;
+}
+
+/// <summary>
+/// 一条仍在生效的食物效果（SchemaVersion 4，食物系统 §三 / 2026-10-02 口径 ②）。
+/// `DurationKind` 取 `FoodEffectDurationKind`，`Remaining` 按对应轴扣减。
+/// </summary>
+public sealed class RunFoodEffectSave
+{
+	/// <summary>`CardSimulator.EffectType`。</summary>
+	public int EffectType;
+
+	public List<int> Params { get; set; } = new List<int>();
+
+	/// <summary>`FoodEffectDurationKind`（0 = None / 1 = BattleCount / 2 = TimePoint / 3 = DayCount）。</summary>
+	public int DurationKind = 1;
+
+	/// <summary>剩余寿命数量：BattleCount = 剩余场次、DayCount = 剩余天数、TimePoint = 剩余时间点（0.1 精度）。</summary>
+	public float Remaining = 1f;
+
+	/// <summary>来源食物显示名（面板 / 日志用）。</summary>
+	public string SourceFoodId = string.Empty;
+}
+
 

@@ -38,6 +38,12 @@ public sealed partial class BattlefieldSession : IDisposable
     /// <summary>怪物攻击命中玩家时触发（攻击者、被命中玩家），每次攻击只触发一次。
     /// 战斗层不认识金币：窃取等依赖局外数据的机制由运行局侧订阅后自行结算。</summary>
     public event Action<BattleUnitPlacement, BattleUnitPlacement> MonsterHitPlayer;
+
+    /// <summary>
+    /// 玩家回合开始（参数 = 新回合号）。运行局据此计时间点进程（地图玩法 §5.1：每 10 个战斗中的回合 = 1 时间点）。
+    /// 纯运行时事件、不依赖 `RunSession`：本类是可在无存档环境下单跑的战斗规则层。
+    /// </summary>
+    public event Action<int> PlayerRoundStarted;
     private long attackEventSequence;
 
     /// <summary>怪物单位 → 实例键（来自关卡 CSV 的 `InstanceId`）：窃取金币等"按怪物实例"记账的稳定标识。</summary>
@@ -865,6 +871,79 @@ public sealed partial class BattlefieldSession : IDisposable
         }
         Notify();
     }
+    /// <summary>
+    /// 食物效果（[食物系统](../../../README/玩法说明文档/系统规则/物品系统/食物系统.md) §三，2026-10-02 口径 ②）：
+    /// 在 `RestoreRunState` 之后、第一回合之前调用 —— 把**仍在寿命轴上**的效果套到每名在场角色身上。
+    /// 已接：`Shield`（开局护盾）、`Heal`、`DrawCard`（抽牌）、`AddState`（攻击 +N / 虚弱等）、
+    /// `ClearFirstNormalDebuff`（清 1 层普通弱化）、`ShieldOnFirstHit`（首次受伤额外护盾）、
+    /// `SurviveFatalOnce`（首次濒死回复 N% 最大生命）。返回逐条说明（控制台 / 烟测断言用）。
+    /// </summary>
+    public List<string> ApplyBattleStartEffects(IReadOnlyList<RunFoodEffectSave> effects)
+    {
+        var logs = new List<string>();
+        if (effects == null || effects.Count == 0)
+        {
+            return logs;
+        }
+
+        foreach (RunFoodEffectSave effect in effects)
+        {
+            if (effect == null)
+            {
+                continue;
+            }
+
+            EffectType type = (EffectType)effect.EffectType;
+            int first = effect.Params != null && effect.Params.Count > 0 ? effect.Params[0] : 0;
+            int second = effect.Params != null && effect.Params.Count > 1 ? effect.Params[1] : 0;
+
+            foreach (int playerId in PlayerIds)
+            {
+                if (!Occupancy.Placements.TryGetValue(playerId, out BattleUnitPlacement placement)
+                    || placement.Unit is not CharacterInstance character
+                    || placement.Presence != BattlefieldPresence.Active)
+                {
+                    continue;
+                }
+
+                switch (type)
+                {
+                    case EffectType.Shield:
+                        character.Shield += Math.Max(0, first);
+                        break;
+                    case EffectType.Heal:
+                        character.HP = Math.Min(character.Max_HP, character.HP + Math.Max(0, first));
+                        break;
+                    case EffectType.DrawCard:
+                        DrawCards(playerId, Math.Max(0, first));
+                        break;
+                    case EffectType.AddState:
+                        StateSystem.AddOrUpdateState(character, (StateType)first, Math.Max(1, second));
+                        break;
+                    case EffectType.ClearFirstNormalDebuff:
+                        StateSystem.TryRemoveFirstNormalDebuff(character, out _);
+                        break;
+                    case EffectType.ShieldOnFirstHit:
+                        character.PendingShieldOnFirstHit += Math.Max(0, first);
+                        break;
+                    case EffectType.SurviveFatalOnce:
+                        character.PendingSurviveFatalOncePercent = Math.Max(character.PendingSurviveFatalOncePercent, first);
+                        break;
+                }
+            }
+
+            logs.Add($"{RunFoodSystem.DescribeEffect(effect)}（来源：{effect.SourceFoodId}）");
+        }
+
+        if (logs.Count > 0)
+        {
+            Notify();
+        }
+
+        return logs;
+    }
+
+
 
     private void RestoreRunWeapon(BattleUnitPlacement placement, string definitionId, int slotIndex)
     {
@@ -1476,6 +1555,8 @@ public sealed partial class BattlefieldSession : IDisposable
     private void StartNextPlayerRound()
     {
         Round++; cardsPlayedThisTurn.Clear();
+        // 回合计点（地图玩法 §5.1）：一个战斗回合 = 0.1 时间点；订阅方（RunBattleScene）落档，本类不认识存档。
+        PlayerRoundStarted?.Invoke(Round);
         foreach (int playerId in PlayerIds)
         {
             var p = Occupancy.Placements[playerId];

@@ -1,13 +1,14 @@
-﻿# 构建检查规则 (Build Check Rule)
+﻿# 构建检查规则 (Build Check Rule) — 仅 C# 代码改动适用
 
 ## 规则
-每次完成代码修改后，自动调用 `dotnet build` 命令检查编译是否通过。
+每次完成 **C# 代码**修改后，自动调用 `dotnet build` 命令检查编译是否通过。
+改**配置**（`DataBase/**`）与改**文档**（`README/**`）**不做编译检测**；代码改动还需在 build 之后跑 `dotnet test`。分级口径与按需检查清单见 [编译验证规则.md](编译验证规则.md)。
 
 ## 执行方式
 在项目根目录 (`D:\MY\My Game\卡牌模拟器`) 下执行：
 
 ```
-dotnet build 2>&1
+dotnet build 卡牌模拟器.csproj -v q --nologo
 ```
 
 ## 要求

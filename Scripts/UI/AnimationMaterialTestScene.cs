@@ -18,6 +18,26 @@ public partial class AnimationMaterialTestScene : Control
         BuildUi();
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--animation-material-smoke") >= 0 ||
             Array.IndexOf(OS.GetCmdlineUserArgs(), "--character-rig-smoke") >= 0) CallDeferred(nameof(RunSmoke));
+        else if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--rig-pose-smoke") >= 0) CallDeferred(nameof(RunPoseSmoke));
+    }
+
+    private async void RunPoseSmoke()
+    {
+        try
+        {
+            GD.Print("RIG_POSE_SMOKE_START");
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            hero.SetPreviewScale(2f);
+            await CaptureRigSequence(PixelHeroActor.CharacterKind.Greatsword, PixelHeroActor.Loadout.TwoHandedWeapon, "sword");
+            await CaptureRigSequence(PixelHeroActor.CharacterKind.Elf, PixelHeroActor.Loadout.Bow, "elf-bow");
+            GD.Print("RIG_POSE_SMOKE_PASS: six distinct sword and bow poses captured");
+            GetTree().Quit();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr("RIG_POSE_SMOKE_FAIL: " + ex);
+            GetTree().Quit(1);
+        }
     }
 
     private void BuildUi()
@@ -42,10 +62,20 @@ public partial class AnimationMaterialTestScene : Control
         AddButton(characterRow, "重剑手", () => SelectCharacter(PixelHeroActor.CharacterKind.Greatsword));
         AddButton(characterRow, "精灵", () => SelectCharacter(PixelHeroActor.CharacterKind.Elf));
         AddButton(content, "切换骨骼 / 旧图集对照", () => { hero.SetRigPreviewEnabled(!hero.UsesSkeletalRig); SetState("待机"); });
+        AddButton(content, "切换原尺寸 / 2 倍放大", () => hero.SetPreviewScale(hero.PreviewScale > 1f ? 1f : 2f));
         stateLabel = MakeLabel("状态：待机 / 双手武器", 14, new Color("f0d99a")); content.AddChild(stateLabel);
         content.AddChild(new HSeparator()); content.AddChild(MakeLabel("动作预览", 17, new Color("dcecff")));
         AddButton(content, "移动", () => { hero.PlayMove(); SetState("移动"); });
         AddButton(content, "攻击", () => { hero.PlayAttack(); SetState("攻击"); });
+        var attackScrub = new HSlider { MinValue = 0, MaxValue = .64, Step = .02, Value = 0 };
+        attackScrub.ValueChanged += value =>
+        {
+            if (!hero.UsesSkeletalRig) return;
+            hero.Rig.PreviewAttackAt(value);
+            SetState($"攻击逐帧 {value:F2}s");
+        };
+        content.AddChild(MakeLabel("攻击姿势时间轴", 12, new Color("8fa4b7")));
+        content.AddChild(attackScrub);
         AddButton(content, "受击", () => { hero.PlayHit(); SetState("受击"); });
         AddButton(content, "死亡", () => { hero.PlayDeath(); SetState("死亡"); });
         AddButton(content, "重置角色", () => { hero.ResetActor(); SetState("待机"); });
@@ -138,20 +168,28 @@ public partial class AnimationMaterialTestScene : Control
             if (hero.RightHandPosition == moveRestWeapon) throw new InvalidOperationException("移动动画中右手武器没有跟随帧移动。");
             if (!CaptureFrame("res://Tests/animation-material-SwordAndShield-move.png", "剑盾移动")) throw new InvalidOperationException("无法保存剑盾移动截图。");
             await ToSignal(GetTree().CreateTimer(.36), SceneTreeTimer.SignalName.Timeout);
+            PositionHero();
+            hero.ResetActor();
             hero.SetLoadout(PixelHeroActor.Loadout.TwoHandedWeapon);
             hero.PlayAttack(); await ToSignal(GetTree().CreateTimer(.16), SceneTreeTimer.SignalName.Timeout);
             if (!CaptureFrame("res://Tests/animation-material-attack.png", "攻击动作")) throw new InvalidOperationException("无法保存攻击动作截图。");
-            await ToSignal(GetTree().CreateTimer(.44), SceneTreeTimer.SignalName.Timeout);
+            hero.Rig.PreviewAttackAt(.34);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (hero.Rig.SecondaryGripError > 3f)
+                throw new InvalidOperationException($"双手剑命中姿势的副手脱离剑柄 {hero.Rig.SecondaryGripError:F2} 像素。");
+            if (!CaptureFrame("res://Tests/animation-material-attack-contact.png", "双手剑命中姿势")) throw new InvalidOperationException("无法保存双手剑命中姿势截图。");
             hero.SetLoadout(PixelHeroActor.Loadout.Bow);
-            SetState("弓箭攻击"); hero.PlayAttack(); await ToSignal(GetTree().CreateTimer(.16), SceneTreeTimer.SignalName.Timeout);
-            if (!hero.IsAttackEffectVisible) throw new InvalidOperationException("弓箭释放帧没有显示独立箭迹特效。");
+            SetState("弓箭攻击"); hero.PlayAttack(); hero.Rig.PreviewAttackAt(.36);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!hero.IsAttackEffectVisible) throw new InvalidOperationException($"弓箭释放帧没有显示独立箭迹特效：动画={hero.Rig.CurrentAnimationName}，时间={hero.Rig.CurrentAnimationSeconds:F3}。");
+            if (hero.Rig.SecondaryGripError > 3f)
+                throw new InvalidOperationException($"弓箭拉弦手偏离弓弦 {hero.Rig.SecondaryGripError:F2} 像素。");
             if (!CaptureFrame("res://Tests/animation-material-Bow-attack.png", "弓箭攻击")) throw new InvalidOperationException("无法保存弓箭攻击截图。");
-            await ToSignal(GetTree().CreateTimer(.44), SceneTreeTimer.SignalName.Timeout);
             hero.SetLoadout(PixelHeroActor.Loadout.Tome);
-            SetState("法典攻击"); hero.PlayAttack(); await ToSignal(GetTree().CreateTimer(.16), SceneTreeTimer.SignalName.Timeout);
+            SetState("法典攻击"); hero.PlayAttack(); hero.Rig.PreviewAttackAt(.38);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             if (!hero.IsAttackEffectVisible) throw new InvalidOperationException("法典释放帧没有显示独立符文特效。");
             if (!CaptureFrame("res://Tests/animation-material-Tome-attack.png", "法典攻击")) throw new InvalidOperationException("无法保存法典攻击截图。");
-            await ToSignal(GetTree().CreateTimer(.44), SceneTreeTimer.SignalName.Timeout);
             hero.SetLoadout(PixelHeroActor.Loadout.SwordAndShield);
             SetState("剑盾攻击");
             hero.PlayAttack();
@@ -187,7 +225,8 @@ public partial class AnimationMaterialTestScene : Control
             if (!CaptureFrame("res://Tests/animation-material-smoke.png", "烟测收尾")) throw new InvalidOperationException("无法保存动画素材烟测截图。");
             SelectCharacter(PixelHeroActor.CharacterKind.Elf);
             if (hero.RigBoneCount < 15 || hero.RigSocketCount != 2) throw new InvalidOperationException("精灵骨骼或手部插槽数量不足。");
-            if (!ResourceLoader.Exists("res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png")) throw new InvalidOperationException("缺少精灵骨骼拆件图集。");
+            if (!ResourceLoader.Exists("res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png")) throw new InvalidOperationException("缺少精灵连续蒙皮资源。");
+            if (hero.Rig.ContinuousSkinVertexCount < 500) throw new InvalidOperationException($"精灵连续蒙皮网格顶点不足：{hero.Rig.ContinuousSkinVertexCount}。");
             await VerifyRigAnchors("精灵");
             if (!hero.IsIdlePlaying) throw new InvalidOperationException("切换精灵后没有播放待机动画。");
             int elfIdleFrame = hero.CurrentFrame;
@@ -205,15 +244,25 @@ public partial class AnimationMaterialTestScene : Control
             SetState("移动"); hero.PlayMove(); await ToSignal(GetTree().CreateTimer(.08), SceneTreeTimer.SignalName.Timeout);
             if (!CaptureFrame("res://Tests/animation-material-elf-move.png", "精灵移动")) throw new InvalidOperationException("无法保存精灵移动截图。");
             await ToSignal(GetTree().CreateTimer(.36), SceneTreeTimer.SignalName.Timeout);
-            SetState("攻击"); hero.PlayAttack(); await ToSignal(GetTree().CreateTimer(.16), SceneTreeTimer.SignalName.Timeout);
+            PositionHero();
+            hero.ResetActor();
+            SetState("攻击"); hero.PlayAttack(); hero.Rig.PreviewAttackAt(.16);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!CaptureFrame("res://Tests/animation-material-elf-draw.png", "精灵拉弦")) throw new InvalidOperationException("无法保存精灵拉弦截图。");
+            hero.Rig.PreviewAttackAt(.34);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (hero.Rig.SecondaryGripError > 3f)
+                throw new InvalidOperationException($"精灵拉弦手偏离弓弦 {hero.Rig.SecondaryGripError:F2} 像素；目标距离 {hero.Rig.SecondaryGripTargetDistance:F2}，可达 {hero.Rig.SecondaryGripMaxReach:F2}。");
             if (!CaptureFrame("res://Tests/animation-material-elf-attack.png", "精灵攻击")) throw new InvalidOperationException("无法保存精灵攻击截图。");
-            await ToSignal(GetTree().CreateTimer(.44), SceneTreeTimer.SignalName.Timeout);
+            hero.Rig.PlayIdle();
             SetState("受击"); hero.PlayHit(); await ToSignal(GetTree().CreateTimer(.06), SceneTreeTimer.SignalName.Timeout);
             if (!CaptureFrame("res://Tests/animation-material-elf-hurt.png", "精灵受击")) throw new InvalidOperationException("无法保存精灵受击截图。");
             await ToSignal(GetTree().CreateTimer(.28), SceneTreeTimer.SignalName.Timeout);
             SetState("死亡"); hero.PlayDeath(); await ToSignal(GetTree().CreateTimer(.5), SceneTreeTimer.SignalName.Timeout);
             if (!hero.IsDedicatedDeathVisible || !hero.Rig.IsElf) throw new InvalidOperationException("精灵死亡没有保持在专属骨骼姿势。");
             if (!CaptureFrame("res://Tests/animation-material-elf-death.png", "精灵死亡")) throw new InvalidOperationException("无法保存精灵死亡截图。");
+            await CaptureRigSequence(PixelHeroActor.CharacterKind.Greatsword, PixelHeroActor.Loadout.TwoHandedWeapon, "sword");
+            await CaptureRigSequence(PixelHeroActor.CharacterKind.Elf, PixelHeroActor.Loadout.Bow, "elf-bow");
             SelectCharacter(PixelHeroActor.CharacterKind.Greatsword);
             GD.Print("ANIMATION_MATERIAL_SMOKE_PASS: fixed idle anchors + dedicated bow/tome actions/effects + distinct greatsword/elf hurt/death; screenshots="
                 + (CanCaptureFrames ? "Tests/animation-material-*.png" : "headless 跳过（无帧缓冲，资源路径已由 BATTLEFIELD_ASSET_PATH_PASS 覆盖）"));
@@ -225,6 +274,34 @@ public partial class AnimationMaterialTestScene : Control
             GD.PrintErr("ANIMATION_MATERIAL_SMOKE_FAIL: " + ex);
             GetTree().Quit(1);
         }
+    }
+
+    private async System.Threading.Tasks.Task CaptureRigSequence(PixelHeroActor.CharacterKind kind, PixelHeroActor.Loadout loadout, string label)
+    {
+        SelectCharacter(kind);
+        hero.SetLoadout(loadout);
+        CharacterRig2D rig = hero.Rig;
+        rig.PlayAttack();
+        int impactCount = 0;
+        void OnImpact() => impactCount++;
+        rig.AttackImpact += OnImpact;
+        double[] poses = { .08, .18, .28, .34, .44, .58 };
+        Vector2 firstHand = Vector2.Zero;
+        float farthestHand = 0;
+        for (int i = 0; i < poses.Length; i++)
+        {
+            GD.Print($"[骨骼姿势] {label} {i} {poses[i]:F2}s");
+            rig.PreviewAttackAt(poses[i]);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (i == 0) firstHand = rig.RightHandPosition;
+            farthestHand = Math.Max(farthestHand, rig.RightHandPosition.DistanceTo(firstHand));
+            if (!CaptureFrame($"res://Tests/character-rig-{label}-{i:00}.png", $"{label} 动作 {poses[i]:F2}s"))
+                throw new InvalidOperationException($"无法保存 {label} 连续姿势 {i}。");
+        }
+        rig.AttackImpact -= OnImpact;
+        if (impactCount != 1) throw new InvalidOperationException($"{label} 命中/释放事件次数为 {impactCount}，预期 1。");
+        if (farthestHand < 4f) throw new InvalidOperationException($"{label} 六个动作采样姿势相同：右手最大位移 {farthestHand:F2} 像素。");
+        rig.PlayIdle();
     }
 
     private async System.Threading.Tasks.Task VerifyRigAnchors(string name)
@@ -325,6 +402,9 @@ public partial class PixelHeroActor : Node2D
         ResetActor();
     }
     private Tween tween;
+    private float previewScale = 1f;
+    public float PreviewScale => previewScale;
+    public void SetPreviewScale(float value) { previewScale = value; Scale = Vector2.One * previewScale; }
     private Vector2 home;
     private Loadout loadout;
     private CharacterKind characterKind;
@@ -602,7 +682,7 @@ public partial class PixelHeroActor : Node2D
         }
         PlayActionSheet("idle");
     }
-    public void ResetActor() { tween?.Kill(); Position = home; Rotation = 0; Scale = Vector2.One; Modulate = Colors.White; Visible = true; deathSprite.Visible = false; RestoreIdlePresentation(); }
+    public void ResetActor() { tween?.Kill(); Position = home; Rotation = 0; Scale = Vector2.One * previewScale; Modulate = Colors.White; Visible = true; deathSprite.Visible = false; RestoreIdlePresentation(); }
     public void PlayMove()
     {
         ResetActor();

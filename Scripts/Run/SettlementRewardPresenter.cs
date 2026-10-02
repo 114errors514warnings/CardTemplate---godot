@@ -2,6 +2,10 @@
 // 结算奖励的份数 / 候选 / 文案 / 放弃日志：战斗结算界面交互案（2026-09-27 定稿）§三 / §四 / §五 / §7.4。
 // 纯逻辑（只依赖 RunSaveData 与调用方注入的卡池委托、随机数），便于单测；
 // 界面与落档由 SettlementUi / RunSession 负责。
+//
+// 2026-10-02 用户口径：**领取过的条目不再显示成「已领取」，直接从面板列表里消失**。
+// 因此面板渲染走 `BuildVisibleItemTabs` / `BuildVisibleCardPools`（只留未领取的），
+// `BuildItemTabs` / `IsCardPoolClaimed` 仍保留「已领取」这个判定本身（发奖防重、浮窗计数、放弃日志都要用）。
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -38,7 +42,6 @@ public static class SettlementRewardPresenter
 	public const string UnknownSlotName = "角色 ?";
 
 	public const string CardTabTextPrefix = "将一张牌添加到你的牌组。· ";
-	public const string ClaimedSuffix = "（已领取）";
 	public const string EmptyPoolText = "该角色暂无可用卡牌";
 
 	// ── 物品 Tab（§四） ────────────────────────────────────────
@@ -78,6 +81,24 @@ public static class SettlementRewardPresenter
 		return tabs;
 	}
 
+	/// <summary>
+	/// 结算面板上**实际渲染**的物品 Tab：已领取的条目直接消失（2026-10-02 用户口径，
+	/// 原来渲染成灰显 +「已领取」后缀）。面板与浮窗计数都用它；发奖防重仍看 `SettlementClaimedRewardKeys`。
+	/// </summary>
+	public static List<SettlementItemTab> BuildVisibleItemTabs(RunSaveData run, IReadOnlyList<DropTableEntry> allEntries)
+	{
+		List<SettlementItemTab> visible = new List<SettlementItemTab>();
+		foreach (SettlementItemTab tab in BuildItemTabs(run, allEntries))
+		{
+			if (!tab.Claimed)
+			{
+				visible.Add(tab);
+			}
+		}
+
+		return visible;
+	}
+
 	/// <summary>物品 Tab 的去重键：`{行号}:{Category}:{RewardParam}:{Amount}`（§4.2）。</summary>
 	public static string GetClaimKey(int rowIndex, DropTableEntry entry)
 	{
@@ -95,16 +116,8 @@ public static class SettlementRewardPresenter
 
 	public static int CountUnclaimedItems(RunSaveData run, IReadOnlyList<DropTableEntry> allEntries)
 	{
-		int count = 0;
-		foreach (SettlementItemTab tab in BuildItemTabs(run, allEntries))
-		{
-			if (!tab.Claimed)
-			{
-				count++;
-			}
-		}
-
-		return count;
+		// 面板上「还看得见的物品 Tab 数」= 未领取项数（已领取的直接消失，2026-10-02）。
+		return BuildVisibleItemTabs(run, allEntries).Count;
 	}
 
 	// ── 卡牌份（§五） ──────────────────────────────────────────
@@ -132,23 +145,32 @@ public static class SettlementRewardPresenter
 		return FindCardClaim(run, slotIndex) != null;
 	}
 
-	public static int CountUnclaimedCards(RunSaveData run)
+	/// <summary>
+	/// 结算面板上**实际渲染**的卡牌份 Tab：已领取的份直接消失（2026-10-02 用户口径，
+	/// 原来渲染成灰显 +「（已领取：&lt;卡名&gt;）」）。发奖防重仍看 `SettlementCardClaims`。
+	/// </summary>
+	public static List<SettlementCardPoolSave> BuildVisibleCardPools(RunSaveData run)
 	{
+		List<SettlementCardPoolSave> visible = new List<SettlementCardPoolSave>();
 		if (run?.SettlementCardPools == null)
 		{
-			return 0;
+			return visible;
 		}
 
-		int count = 0;
 		foreach (SettlementCardPoolSave pool in run.SettlementCardPools)
 		{
 			if (pool != null && !IsCardPoolClaimed(run, pool.SlotIndex))
 			{
-				count++;
+				visible.Add(pool);
 			}
 		}
 
-		return count;
+		return visible;
+	}
+
+	public static int CountUnclaimedCards(RunSaveData run)
+	{
+		return BuildVisibleCardPools(run).Count;
 	}
 
 	/// <summary>未领取项总数 = 未领取物品 Tab 数 + 未领取卡牌份数（浮窗计数用，§6.3）。</summary>
@@ -161,13 +183,6 @@ public static class SettlementRewardPresenter
 	public static string GetCardTabText(string displayName)
 	{
 		return CardTabTextPrefix + (string.IsNullOrWhiteSpace(displayName) ? "角色 ?" : displayName);
-	}
-
-	/// <summary>已领取的卡牌 Tab 文案：附「已领取：&lt;卡名&gt;」（§三 状态表）。</summary>
-	public static string GetClaimedCardTabText(string displayName, string cardName)
-	{
-		string baseText = GetCardTabText(displayName);
-		return string.IsNullOrWhiteSpace(cardName) ? baseText + ClaimedSuffix : baseText + $"（已领取：{cardName}）";
 	}
 
 	/// <summary>

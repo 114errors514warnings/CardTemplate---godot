@@ -18,6 +18,9 @@ public enum DropCategory
 	Item = 3,
 	Key = 4,
 	Equipment = 5,
+
+	/// <summary>食物（2026-10-02 新增）：入账进 `RunSaveData.BagEntries` 的「食物」类别，按实例保存有效期。</summary>
+	Food = 6,
 }
 
 /// <summary>DataBase/Stage/&lt;层&gt;/&lt;节点类型&gt;.csv 的一行。</summary>

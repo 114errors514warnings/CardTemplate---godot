@@ -5,8 +5,15 @@ using System;
 using System.Collections.Generic;
 using Xunit;
 
+[Collection("ItemNameResolverState")]
 public class SettlementRewardPresenterTests
 {
+    /// <summary>
+    /// 物品显示名是**全局注册表**（`LoadingSystem` 加载配表时填充）。本类断言的是「未注册 → `未定义材料(ID)`」兜底，
+    /// 因此每个测试前先清空，避免与其它测试类的注册互扰；同时与同样读写该注册表的测试类共用 Collection 串行执行。
+    /// </summary>
+    public SettlementRewardPresenterTests() => ItemNameResolver.Clear();
+
     private static List<DropTableEntry> Entries()
     {
         return new List<DropTableEntry>
@@ -49,7 +56,7 @@ public class SettlementRewardPresenterTests
 
         Assert.Equal(2, tabs.Count);
         Assert.Equal("金币 +120", tabs[0].Text);
-        Assert.Equal("材料 101 ×2", tabs[1].Text);
+        Assert.Equal("材料 未定义材料(101) ×2", tabs[1].Text); // 未注册名字时按 `未定义材料(ID)` 兜底（P1-4）；注册名场景见 ItemTableFileTests
         Assert.True(tabs[1].Claimed);
         Assert.Equal(1, SettlementRewardPresenter.CountUnclaimedItems(run, Entries()));
     }
@@ -137,11 +144,42 @@ public class SettlementRewardPresenterTests
     }
 
     [Fact]
-    public void CardTabText_UsesCharacterDisplayNameAndClaimedSuffix()
+    public void CardTabText_UsesCharacterDisplayName()
     {
         Assert.Equal("将一张牌添加到你的牌组。· 重剑手2", SettlementRewardPresenter.GetCardTabText("重剑手2"));
-        Assert.Equal("将一张牌添加到你的牌组。· 重剑手（已领取：重击）", SettlementRewardPresenter.GetClaimedCardTabText("重剑手", "重击"));
-        Assert.Equal("将一张牌添加到你的牌组。· 重剑手（已领取）", SettlementRewardPresenter.GetClaimedCardTabText("重剑手", null));
+    }
+
+    /// <summary>
+    /// 2026-10-02 用户口径：领取过的条目**直接从面板列表里消失**（不再显示成「已领取」）。
+    /// 面板渲染走 BuildVisibleItemTabs / BuildVisibleCardPools，这里断言「领过的不再出现」。
+    /// </summary>
+    [Fact]
+    public void VisibleLists_DropClaimedEntries()
+    {
+        RunSaveData run = new RunSaveData { SettlementDropTableId = 2002 };
+        run.SettlementCardPools.Add(new SettlementCardPoolSave { SlotIndex = 0, CharacterId = 1002 });
+        run.SettlementCardPools.Add(new SettlementCardPoolSave { SlotIndex = 1, CharacterId = 1003 });
+
+        // 领取前：两条物品 Tab（金币 / 材料）+ 两份卡牌 Tab 都在。
+        Assert.Equal(2, SettlementRewardPresenter.BuildVisibleItemTabs(run, Entries()).Count);
+        Assert.Equal(2, SettlementRewardPresenter.BuildVisibleCardPools(run).Count);
+
+        // 领掉「材料」这一条与槽位 0 的那一份 → 两个列表里都不再出现它们。
+        run.SettlementClaimedRewardKeys.Add("1:Material:101:2");
+        run.SettlementCardClaims.Add(new SettlementCardClaimSave { SlotIndex = 0, CardId = 11 });
+
+        List<SettlementItemTab> visibleItems = SettlementRewardPresenter.BuildVisibleItemTabs(run, Entries());
+        Assert.Single(visibleItems);
+        Assert.Equal("金币 +120", visibleItems[0].Text);
+
+        List<SettlementCardPoolSave> visiblePools = SettlementRewardPresenter.BuildVisibleCardPools(run);
+        Assert.Single(visiblePools);
+        Assert.Equal(1, visiblePools[0].SlotIndex);
+
+        // 浮窗计数与列表口径一致（未领取项数 = 还看得见的 Tab 数）。
+        Assert.Equal(1, SettlementRewardPresenter.CountUnclaimedItems(run, Entries()));
+        Assert.Equal(1, SettlementRewardPresenter.CountUnclaimedCards(run));
+        Assert.Equal(2, SettlementRewardPresenter.CountUnclaimed(run, Entries()));
     }
 
     [Fact]
@@ -174,7 +212,7 @@ public class SettlementRewardPresenterTests
 
         List<string> details = SettlementRewardPresenter.BuildUnclaimedDetails(run, Entries(), slotIndex => slotIndex == 2 ? "重剑手2" : "角色 ?");
 
-        Assert.Equal(new List<string> { "金币 +120", "材料 101 ×2", "卡牌（重剑手2）未领" }, details);
+        Assert.Equal(new List<string> { "金币 +120", "材料 未定义材料(101) ×2", "卡牌（重剑手2）未领" }, details);
 
         run.SettlementCardClaims.Add(new SettlementCardClaimSave { SlotIndex = 2, CardId = 1002 });
         Assert.Equal(2, SettlementRewardPresenter.BuildUnclaimedDetails(run, Entries(), slotIndex => "重剑手").Count);

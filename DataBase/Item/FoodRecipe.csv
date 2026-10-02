@@ -1,0 +1,13 @@
+RecipeId,ResultFoodId,ResultCount,Input1Kind,Input1Id,Input1Count,Input2Kind,Input2Id,Input2Count,Enabled,Description
+1,402,1,Material,101,2,Material,102,1,FALSE,材料→香草炖菜：2026-10-02 暂定禁用（材料暂不参与烹饪）
+2,403,1,Material,105,1,Material,101,1,FALSE,材料→烤蟾蜍：2026-10-02 暂定禁用（材料暂不参与烹饪）
+3,404,1,Material,105,1,Material,107,1,FALSE,材料→蜂蜜烤肉：2026-10-02 暂定禁用（材料暂不参与烹饪）
+4,405,1,Material,103,1,Material,101,1,FALSE,材料→月光浓汤：2026-10-02 暂定禁用（材料暂不参与烹饪）
+5,406,1,Material,106,1,Material,109,1,FALSE,材料→毒蛇杂烩：2026-10-02 暂定禁用（材料暂不参与烹饪）
+6,407,1,Material,104,1,Material,101,2,FALSE,材料→龙血藤药膳：2026-10-02 暂定禁用（材料暂不参与烹饪）
+7,408,1,Material,110,1,Material,103,1,FALSE,材料→凤凰羽羹：2026-10-02 暂定禁用（材料暂不参与烹饪）
+101,404,1,Food,403,2,,,1,TRUE,食物升级：烤蟾蜍 ×2 → 蜂蜜烤肉
+102,405,1,Food,402,2,,,1,TRUE,食物升级：香草炖菜 ×2 → 月光浓汤
+103,406,1,Food,403,1,Food,402,1,TRUE,食物升级：烤蟾蜍 + 香草炖菜 → 毒蛇杂烩
+104,407,1,Food,404,1,Food,405,1,TRUE,食物升级：蜂蜜烤肉 + 月光浓汤 → 龙血藤药膳
+105,408,1,Food,406,1,Food,405,1,TRUE,食物升级：毒蛇杂烩 + 月光浓汤 → 凤凰羽羹

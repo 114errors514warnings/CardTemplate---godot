@@ -17,7 +17,7 @@ public partial class BattlefieldView : Control
     public AxialHex? HoveredCell => hover;
     [Export] public float PlayerMoveCellsPerSecond = 5f;
     [Export] public float MonsterMoveCellsPerSecond = 4f;
-    [Export] public float AttackPresentationSeconds = 0.55f;
+    [Export] public float AttackPresentationSeconds = 0.66f;
     private sealed record PresentationStep(BattlefieldEntry Move, BattlefieldAttackEvent Attack);
     private readonly LinkedList<PresentationStep> presentationQueue = new();
     private BattlefieldEntry activeMove;
@@ -45,9 +45,31 @@ public partial class BattlefieldView : Control
     private static readonly Color HealthBarPlayerColor = new("6ee59c");
     private static readonly Color HealthBarEnemyColor = new("e0574f");
     private static readonly Color HealthBarLagColor = new(1f, 1f, 1f, .55f);
+    /// <summary>血条内生命数值文本：**纯黑**（2026-10-01 用户口径「文本颜色不明显」；原取单位圆颜色，与填充互相糊在一起）。</summary>
+    private static readonly Color HealthBarTextColor = new("000000");
+    /// <summary>生命数值文本的细描边：纯黑字跨到深色底条 / 浅色滞后条上时仍可读（字形填充仍是纯黑）。</summary>
+    private static readonly Color HealthBarTextOutlineColor = new("e8f2f5");
+    /// <summary>描边方向（上下左右各一份，先铺描边再压黑字）。</summary>
+    private static readonly Vector2[] HealthBarTextOutlineOffsets = { new(-1, 0), new(1, 0), new(0, -1), new(0, 1) };
     private static readonly Color ShieldBadgeFillColor = new("c7d0d8");
     private static readonly Color ShieldBadgeBorderColor = new("5f6f7d");
     private static readonly Color ShieldBadgeTextColor = new("16202a");
+    // 状态缩略图标行（血条案 §三「状态缩略」定稿下移一档 +48；形态 = 图标行，见 §二 与 9 月施工文档 §48）。
+    private const float StateIconSize = 15f;
+    private const float StateIconGap = 2f;
+    private const float StateIconTopOffset = 48f;
+    private const int StateIconMaxCount = 3;
+    private const float StateIconMinScaleForStacks = .70f;
+    private const string StateIconResourceDirectory = "res://Resources/Images/UI/Icons/States/";
+    private static readonly Color StateIconFillColor = new("1d2833");
+    private static readonly Color StateIconBorderColor = new("7f95a5");
+    private static readonly Color StateIconDebuffBorderColor = new("c9736b");
+    private static readonly Color StateIconTextColor = new("e8f2f5");
+    private static readonly Color StateIconStacksColor = new("f5d98c");
+    private static readonly Color StateIconEmptyTextColor = new("b7c5ce");
+    /// <summary>状态图标贴图缓存（`Resources/Images/UI/Icons/States/{状态名}.png`）；缺失的状态只探测一次，之后恒走代码绘制。</summary>
+    private readonly Dictionary<CardSimulator.StateType, Texture2D> stateIconTextures = new();
+    private readonly HashSet<CardSimulator.StateType> missingStateIconTextures = new();
     private Texture2D moveIntentIcon;
     private Texture2D attackIntentIcon;
     public event Action<string, Vector2> HoverDetails;
@@ -150,16 +172,10 @@ public partial class BattlefieldView : Control
         if (hasActiveAttack)
         {
             activeAttackElapsed += (float)delta;
-            if (!activeAttackImpactApplied && activeAttackElapsed >= AttackPresentationSeconds * .94f)
-            {
-                activeAttackImpactApplied = true;
-                foreach (int unitId in AffectedUnitIds(activeAttack))
-                {
-                    if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
-                        presentationStats[unitId] = (target.Unit.HP, target.Unit.Shield);
-                    if (characterRigs.TryGetValue(unitId, out var hitRig) && !hitRig.IsDead) hitRig.PlayHurt();
-                }
-            }
+            // Authored rigs emit their contact/release event. The timer covers enemies and missed frames.
+            float fallbackImpact = characterRigs.ContainsKey(activeAttack.SourceUnitId)
+                ? .42f : AttackPresentationSeconds * .56f;
+            if (!activeAttackImpactApplied && activeAttackElapsed >= fallbackImpact) ApplyAttackImpact();
             if (activeAttackElapsed >= AttackPresentationSeconds)
             {
                 foreach (int unitId in AffectedUnitIds(activeAttack)) presentationStats.Remove(unitId);
@@ -170,6 +186,18 @@ public partial class BattlefieldView : Control
         if (!hasActiveMove && !hasActiveAttack && presentationQueue.Count == 0) visualUnitPositions.Clear();
         SyncCharacterRigs((float)delta);
         QueueRedraw();
+    }
+
+    private void ApplyAttackImpact()
+    {
+        if (!hasActiveAttack || activeAttackImpactApplied) return;
+        activeAttackImpactApplied = true;
+        foreach (int unitId in AffectedUnitIds(activeAttack))
+        {
+            if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
+                presentationStats[unitId] = (target.Unit.HP, target.Unit.Shield);
+            if (characterRigs.TryGetValue(unitId, out var hitRig) && !hitRig.IsDead) hitRig.PlayHurt();
+        }
     }
 
     private void SyncCharacterRigs(float delta)
@@ -186,6 +214,11 @@ public partial class BattlefieldView : Control
                 rig = ResourceLoader.Load<PackedScene>(path).Instantiate<CharacterRig2D>();
                 rig.Name = $"CharacterRig_{id}";
                 rig.Scale = Vector2.One * .8f;
+                int sourceUnitId = id;
+                rig.AttackImpact += () =>
+                {
+                    if (hasActiveAttack && activeAttack.SourceUnitId == sourceUnitId) ApplyAttackImpact();
+                };
                 AddChild(rig);
                 characterRigs.Add(id, rig);
             }
@@ -194,7 +227,7 @@ public partial class BattlefieldView : Control
                 if (!defeatedRigSeconds.ContainsKey(id) && delta > 0 && !HasPendingPresentation)
                 { rig.PlayDeath(); defeatedRigSeconds[id] = 0; }
                 if (defeatedRigSeconds.TryGetValue(id, out float seconds))
-                { defeatedRigSeconds[id] = seconds + delta; rig.Visible = seconds < .85f; }
+                { defeatedRigSeconds[id] = seconds + delta; rig.Visible = seconds < 1.5f; }
                 continue;
             }
             defeatedRigSeconds.Remove(id);
@@ -409,7 +442,7 @@ public partial class BattlefieldView : Control
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
             if (!hasRig) CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
             var shownStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
-            DrawUnitHealthBar(center, p, shownStats, color, (float)Session.Definition.CellRadius / BaseCellRadius);
+            DrawUnitHealthBar(center, p, shownStats, (float)Session.Definition.CellRadius / BaseCellRadius);
             if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));
             if (p.Role == BattlefieldRole.Enemy)
             {
@@ -422,8 +455,7 @@ public partial class BattlefieldView : Control
                 else if (attackIntentIcon != null)
                     DrawTextureRect(attackIntentIcon, new Rect2(center + new Vector2(-31, -66), new Vector2(16, 16)), false);
             }
-            CenterText(center + new Vector2(0, 48), p.Unit.States.Count == 0 ? "无状态" :
-                string.Join(" ", p.Unit.States.Take(3).Select(x => $"{GetStateDefinition(x.Key).Name[..1]}{x.Value.Stacks}")), 12, new Color("b7c5ce"));
+            DrawUnitStateIcons(center, p, (float)Session.Definition.CellRadius / BaseCellRadius);
         }
         DrawCastPreview();
         DrawMovePath();
@@ -566,6 +598,21 @@ public partial class BattlefieldView : Control
         DrawString(font, baseline - new Vector2(font.GetStringSize(text, fontSize: size).X / 2, 0), text, fontSize: size, modulate: color);
     }
 
+    /// <summary>
+    /// 血条内生命数值：**纯黑**字 + 浅色细描边（血条案 §二 / §四，2026-10-01 用户口径）。
+    /// 描边只解决可读性 —— 黑字有一半会跨在 `#141c24` 底条或浅色滞后条上；字形填充仍是纯黑。
+    /// 描边宽随 `scale` 走（`CellRadius = 120` 时不止 1px），随条一起缩放、不溢到邻格。
+    /// </summary>
+    private void CenterTextOutlined(Vector2 baseline, string text, int size, float scale)
+    {
+        var font = ThemeDB.FallbackFont;
+        Vector2 origin = baseline - new Vector2(font.GetStringSize(text, fontSize: size).X / 2, 0);
+        float outline = Mathf.Max(1f, scale);
+        foreach (Vector2 offset in HealthBarTextOutlineOffsets)
+            DrawString(font, origin + offset * outline, text, fontSize: size, modulate: HealthBarTextOutlineColor);
+        DrawString(font, origin, text, fontSize: size, modulate: HealthBarTextColor);
+    }
+
     /// <summary>滞后条推进：到冲击帧才开始累加，之后独立走满 AttackPresentationSeconds（表现结束也继续走完），不引入独立计时器组件。</summary>
     private void UpdateDamageLag(float delta)
     {
@@ -584,8 +631,17 @@ public partial class BattlefieldView : Control
         }
     }
 
-    /// <summary>底条 + 生命填充 + 滞后条 + 左端护盾徽标。护盾不占条宽：条只表达生命，护盾另以徽标数值显示。</summary>
-    private void DrawUnitHealthBar(Vector2 center, BattleUnitPlacement unit, (int, int Shield) shownStats, Color textColor, float scale)
+    /// <summary>
+    /// 血条生命数值文本（血条案 §四）：玩家与怪物**同一格式** `当前/上限`（2026-10-01 用户口径 —— 怪物原先只显示当前值）。
+    /// 公开给 `--battlefield-smoke` 断言（血条属表现层，这是唯一可断言的口径）。
+    /// </summary>
+    public static string FormatHealthText(int hp, int maxHp) => $"{hp}/{maxHp}";
+
+    /// <summary>生命数值文本颜色（纯黑；烟测断言用）。</summary>
+    public static Color HealthTextColor => HealthBarTextColor;
+
+    /// <summary>底条 + 生命填充 + 滞后条 + 条内生命数值 + 左端护盾徽标。护盾不占条宽：条只表达生命，护盾另以徽标数值显示。</summary>
+    private void DrawUnitHealthBar(Vector2 center, BattleUnitPlacement unit, (int, int Shield) shownStats, float scale)
     {
         if (unit.Unit.Max_HP <= 0) return;
         float height = HealthBarHeight * scale;
@@ -604,8 +660,8 @@ public partial class BattlefieldView : Control
         if (shownRatio > 0f)
             DrawRect(new Rect2(left, top, width * shownRatio, height),
                 unit.Role == BattlefieldRole.Player ? HealthBarPlayerColor : HealthBarEnemyColor);
-        string text = unit.Role == BattlefieldRole.Player ? $"{shownStats.Item1}/{unit.Unit.Max_HP}" : shownStats.Item1.ToString();
-        CenterText(new Vector2(center.X, top + height - scale), text, Mathf.Max(8, Mathf.RoundToInt(11f * scale)), textColor);
+        string text = FormatHealthText(shownStats.Item1, unit.Unit.Max_HP);
+        CenterTextOutlined(new Vector2(center.X, top + height - scale), text, Mathf.Max(8, Mathf.RoundToInt(11f * scale)), scale);
         if (shownStats.Item2 > 0)
             DrawShieldBadge(new Vector2(left - ShieldBadgeWidth / 2f + ShieldBadgeOverlap * scale, top + height / 2f), shownStats.Item2, scale);
     }
@@ -627,6 +683,79 @@ public partial class BattlefieldView : Control
         string value = shield.ToString();
         int size = Mathf.Clamp(Mathf.RoundToInt(10f * scale) - (value.Length >= 3 ? 1 : 0), 7, 10);
         CenterText(center + new Vector2(0, h * .3f), value, size, ShieldBadgeTextColor);
+    }
+
+    /// <summary>
+    /// 状态缩略图标行（血条案 §三：状态缩略 +48）：每枚 = 方底 + 状态名首字 + 右下角层数，最多 3 枚、横排居中。
+    /// **资源优先**：`Resources/Images/UI/Icons/States/{状态名}.png` 存在则用图（层数仍由代码叠加），
+    /// 否则整枚代码绘制 —— 资源目录为空的当前状态下不依赖任何图片即可运行（B1 第 7 条后半）。
+    /// </summary>
+    private void DrawUnitStateIcons(Vector2 center, BattleUnitPlacement unit, float scale)
+    {
+        float top = center.Y + StateIconTopOffset * scale;
+        if (unit.Unit.States.Count == 0)
+        {
+            CenterText(new Vector2(center.X, top + StateIconSize * scale * .8f), "无状态",
+                Mathf.Max(9, Mathf.RoundToInt(12f * scale)), StateIconEmptyTextColor);
+            return;
+        }
+
+        KeyValuePair<CardSimulator.StateType, StateRuntimeData>[] states = unit.Unit.States.Take(StateIconMaxCount).ToArray();
+        float size = StateIconSize * scale;
+        float gap = StateIconGap * scale;
+        float left = center.X - (states.Length * size + (states.Length - 1) * gap) / 2f;
+        for (int i = 0; i < states.Length; i++)
+        {
+            CardSimulator.StateType key = states[i].Key;
+            StateDefinition definition = GetStateDefinition(key);
+            var rect = new Rect2(left + i * (size + gap), top, size, size);
+            Texture2D texture = ResolveStateIconTexture(key, definition);
+            if (texture != null)
+            {
+                DrawTextureRect(texture, rect, false);
+            }
+            else
+            {
+                // 代码绘制：方底 + 边框（减益用暖色边框区分，但不只靠颜色 —— 首字始终在）。
+                Vector2[] points =
+                {
+                    rect.Position, rect.Position + new Vector2(size, 0),
+                    rect.Position + new Vector2(size, size), rect.Position + new Vector2(0, size),
+                };
+                DrawColoredPolygon(points, StateIconFillColor);
+                Color border = definition.IsDebuff ? StateIconDebuffBorderColor : StateIconBorderColor;
+                for (int p = 0; p < points.Length; p++)
+                    DrawLine(points[p], points[(p + 1) % points.Length], border, Mathf.Max(1f, scale), true);
+            }
+
+            string name = string.IsNullOrEmpty(definition.Name) ? key.ToString() : definition.Name;
+            CenterText(rect.Position + new Vector2(size / 2f, size * .74f), name[..1],
+                Mathf.Max(8, Mathf.RoundToInt(11f * scale)), StateIconTextColor);
+            if (scale >= StateIconMinScaleForStacks)
+                CenterText(rect.Position + new Vector2(size - size * .28f, size * .96f), states[i].Value.Stacks.ToString(),
+                    Mathf.Max(7, Mathf.RoundToInt(9f * scale)), StateIconStacksColor);
+        }
+    }
+
+    /// <summary>状态图标贴图：按状态名查 `Resources/Images/UI/Icons/States/`；不存在返回 null（走代码绘制），缺失只探测一次。</summary>
+    private Texture2D ResolveStateIconTexture(CardSimulator.StateType key, StateDefinition definition)
+    {
+        if (stateIconTextures.TryGetValue(key, out Texture2D cached)) return cached;
+        if (missingStateIconTextures.Contains(key)) return null;
+        string fileName = string.IsNullOrEmpty(definition.Name) ? key.ToString() : definition.Name;
+        string path = $"{StateIconResourceDirectory}{fileName}.png";
+        if (ResourceLoader.Exists(path))
+        {
+            Texture2D texture = GD.Load<Texture2D>(path);
+            if (texture != null)
+            {
+                stateIconTextures[key] = texture;
+                return texture;
+            }
+        }
+
+        missingStateIconTextures.Add(key);
+        return null;
     }
 
     private static StateDefinition GetStateDefinition(CardSimulator.StateType type) =>

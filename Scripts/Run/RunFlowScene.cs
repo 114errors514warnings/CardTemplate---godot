@@ -18,6 +18,24 @@ public partial class RunFlowScene : Control
     private const int AttachMapRetryLimit = 180;
     private int attachMapRetries;
     private CanvasLayer contentLayer, worldMapLayer, badgeLayer, modalLayer, abandonLayer, globalButtonLayer;
+    // 常驻顶栏的底板层（`RunUiLayers.TopBarBackdrop = 32`）：不透明横条铺满第一行那一带，
+    // 把战场 / 世界地图挡在身后；层号压在内容层与世界地图之上、一切模态之下。
+    private CanvasLayer topBarBackdropLayer;
+    // 底板本体（`_Ready` 构建）：随常驻栏一起显隐（营地期间整条顶栏让位）。
+    private Panel topBarBackdrop;
+    // 营地（篝火休息）层：42 —— 压过结算模态、低于放弃确认与常驻按钮栏（RunUiLayers.Camp）。
+    private CanvasLayer campLayer;
+    // 营地实例（null = 未在营地）；「结束当天」与时间点不足的强制转场共用 OpenCamp。
+    private CampScene camp;
+    // 常驻栏左侧的时间点显示（第 9 条：天数 + 当天剩余，精度 0.1）与主动结束当天入口。
+    private HBoxContainer timeRow;
+    // 常驻栏右侧通用按钮行（地图 / 定位当前角色 / 调试 / 暂停，几何取自 RunUiLayout）：
+    // 提成字段是为了让烟测能直接读它的实际矩形，断言「为背包 / 装备预留的容量」真的落在屏幕上。
+    private HBoxContainer generalRow;
+    private Label timePointLabel;
+    private Button endDayButton;
+    // 每帧只做一次廉价比较，文案真的变了才写 Label（与剧情按钮行同一收敛口径）。
+    private string shownTimePointText = string.Empty;
     // 结算界面（结算面板 + 卡牌三选一 + 待领取浮窗 + 放弃确认弹窗）常驻在本场景：
     // 内容重建不丢浮窗，节点进入前的拦截与 `Esc` 分层也有唯一出口。
     private SettlementUi settlementUi;
@@ -25,6 +43,11 @@ public partial class RunFlowScene : Control
     private RunBattleScene activeContent;
     private byte[] runSaveBackup;
     private bool runSaveExisted;
+    // 食物 / 烹饪烟测（2026-10-02 批 C）在「添加食物」面板里规划的食物实例、过期实例与预期效果类型：
+    // 休息结算后按这些字段断言「草稿消耗 + 效果落档 + 跨天腐坏」，避免烟测里重写一份期望值。
+    private readonly List<string> campFoodPlanIds = new List<string>();
+    private readonly List<string> campFoodExpiredIds = new List<string>();
+    private readonly List<int> campFoodEffectTypes = new List<int>();
     private CardSimulator.Battlefield.HexBattleDebugPanel debugPanel;
     private Node debugPanelSource;
     public override void _Ready()
@@ -40,10 +63,12 @@ public partial class RunFlowScene : Control
 
         contentLayer = CreateLayer("ContentLayer", RunUiLayers.Content);
         worldMapLayer = CreateLayer("WorldMapLayer", RunUiLayers.WorldMap);
+        topBarBackdropLayer = CreateLayer("TopBarBackdropLayer", RunUiLayers.TopBarBackdrop);
         badgeLayer = CreateLayer("SettlementBadgeLayer", RunUiLayers.SettlementBadge);
         modalLayer = CreateLayer("ModalLayer", RunUiLayers.Modal);
         abandonLayer = CreateLayer("AbandonConfirmLayer", RunUiLayers.AbandonConfirm);
         globalButtonLayer = CreateLayer("GlobalButtonLayer", RunUiLayers.GlobalButton);
+        campLayer = CreateLayer("CampLayer", RunUiLayers.Camp);
 
         host = new Control { MouseFilter = MouseFilterEnum.Ignore };
         host.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -57,6 +82,8 @@ public partial class RunFlowScene : Control
         BuildGlobalTopBar();
         // 节点进入前置闸门（§7.1）：待领取态点任何类型节点都先弹放弃确认弹窗。
         map.EnterGate = OnNodeEnterRequested;
+        // 时间点不足（地图交互 §五）：地图侧不再改动任何状态，由这里接手营地转场。
+        map.RestRequested += OpenCamp;
         settlementUi = new SettlementUi();
         AddChild(settlementUi);
         settlementUi.Bind(modalLayer, badgeLayer, abandonLayer);
@@ -122,13 +149,32 @@ public partial class RunFlowScene : Control
     }
     // ── 结算界面与放弃闸门（交互案 §6 / §7 / §九） ────────────────────
 
-    /// <summary>结算已落档：按存档复现面板 / 浮窗（读档重进只看 `SettlementPanelClosed`，§6.5）。</summary>
+    /// <summary>
+    /// 结算已落档：按存档复现面板 / 浮窗（读档重进只看 `SettlementPanelClosed`，§6.5）。
+    /// 面板一出现就让战场转入战后操作态（2026-10-01 用户改判；原口径是「关闭面板之后才收」）。
+    /// </summary>
     private void OnSettlementReady(int refundedStolenGold)
     {
         if (settlementUi == null) return;
         settlementUi.RefundedStolenGold = refundedStolenGold;
         settlementUi.RefreshFromSave();
         if (settlementUi.IsPanelOpen) map.SetReadOnly(true);
+        EnterPostBattleStateForSettlement();
+    }
+
+    /// <summary>
+    /// 结算界面一出现就把战场转入战后操作态（交互案 §三，2026-10-01 用户改判：不必等关闭面板）：
+    /// 收起手牌槽 / 能量与额度面板 / 牌堆 / `结束回合`，并允许战后自由移动。
+    /// **未结束的战斗**（战斗途中事件发卡结算）由 `HexBattleScene.SetPostSettlementMode` 自行拒绝 ——
+    /// 那条路径若收掉手牌与结束回合就成软锁。读档重进结算界面时本方法多半是空跑（宿主还没挂上
+    /// `activeBattle`），那条路径由 `RunBattleScene.TryRestorePostBattleBattlefield` 自行进入战后态。
+    /// </summary>
+    private void EnterPostBattleStateForSettlement()
+    {
+        if (activeBattle == null || !GodotObject.IsInstanceValid(activeBattle)) return;
+        if (activeBattle.IsPostSettlementMode) return;
+        activeBattle.SetPostSettlementMode(true);
+        GD.Print("[RunFlow] 结算界面出现：战场转战后操作态（手牌 / 能量额度 / 牌堆 / 结束回合已收起）。");
     }
 
     /// <summary>
@@ -173,8 +219,9 @@ public partial class RunFlowScene : Control
         map.SetReadOnly(false);
         ConfigureGlobalTopBar(FindBattle(host));
         // 战后战场操作态（新案 §四 / §五）：只保留「切换角色」与「自由移动」，
-        // 隐藏手牌槽 / 能量 / 牌堆 / 结束回合。未结束的战斗由 HexBattleScene.SetPostSettlementMode 自行拒绝（防软锁）。
-        if (activeBattle != null && GodotObject.IsInstanceValid(activeBattle)) activeBattle.SetPostSettlementMode(true);
+        // 隐藏手牌槽 / 能量 / 牌堆 / 结束回合。战场的进入时机在**结算面板出现当刻**（见 `OnSettlementReady`），
+        // 这里再调一次是幂等兜底（覆盖「面板出现时战斗尚未结束而被拒绝、之后才结束」的边界）。
+        EnterPostBattleStateForSettlement();
     }
 
     /// <summary>面板打开时地图只读（§九）；待领取态 / 浮窗下地图可选。</summary>
@@ -284,7 +331,84 @@ public partial class RunFlowScene : Control
         SetWorldMapVisible(true);
         map.SetReadOnly(false);
         ConfigureGlobalTopBar(FindBattle(host));
+
+        // 当天已耗尽（战斗 / 移动跨过日界）时回到地图必须立刻进营地：否则玩家能在"新一天"继续走。
+        if (RunSession.Instance?.Current?.MapState.PendingRestDay == true)
+        {
+            CallDeferred(nameof(OpenCamp));
+        }
     }
+    // ── 营地（篝火休息）与时间点显示（第 9 / 11 条） ────────────────────
+
+    /// <summary>
+    /// 打开营地（休息界面）。两条入口共用：常驻栏「结束当天」（主动结束当天）与地图的时间点不足强制转场
+    /// （`MapScene.RestRequested`）。结算面板 / 放弃确认打开期间不转场（§九 输入层级）。
+    /// </summary>
+    private void OpenCamp()
+    {
+        if (camp != null && GodotObject.IsInstanceValid(camp)) return;
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null) return;
+        if (settlementUi != null && (settlementUi.IsPanelOpen || settlementUi.IsConfirmOpen)) return;
+        if (!mapSelectable)
+        {
+            // 内容进行中（战斗 / 事件 / 结算）没有"结束当天"：时间点只在选点态跨天。
+            GD.Print("[时间点] 当前内容进行中，不能进入营地休息。");
+            return;
+        }
+
+        PackedScene packed = GD.Load<PackedScene>("res://Scenes/Run/CampScene.tscn");
+        if (packed == null)
+        {
+            GD.PrintErr("[运行局] 无法加载 CampScene.tscn，放弃营地转场。");
+            return;
+        }
+
+        SetWorldMapVisible(false);
+        map.SetReadOnly(true);
+        // 交互案「营地基础画面」：营地期间只常驻四个营地按钮 —— 常驻栏整行隐藏（含地图 / 暂停入口）。
+        SetGlobalTopBarVisible(false);
+        camp = packed.Instantiate<CampScene>();
+        camp.EmbeddedMode = true;
+        camp.RestCompleted += OnCampRestCompleted;
+        campLayer.AddChild(camp);
+        GD.Print($"[时间点] 进入营地：第 {run.CurrentDay} 天，剩余 {RunTimePoints.Format(run.RemainingToday)} / {RunTimePoints.Format(RunTimePoints.PointsPerDay)}。");
+    }
+
+    /// <summary>营地休息结算完成（已淡出）：销毁营地、恢复常驻栏，并把地图交回可选态（交互案「休息」第 6 步）。</summary>
+    private void OnCampRestCompleted()
+    {
+        if (camp != null && GodotObject.IsInstanceValid(camp)) camp.QueueFree();
+        camp = null;
+        SetGlobalTopBarVisible(true);
+        RefreshTimePointText();
+        ReturnToSelectableMap();
+        RunSession run = RunSession.Instance;
+        GD.Print($"[时间点] 休息完成：第 {run?.CurrentDay ?? 1} 天，剩余 {RunTimePoints.Format(run?.RemainingToday ?? 0f)}。");
+    }
+
+    /// <summary>时间点显示刷新（天数 + 当天剩余，精度 0.1）；文案没变时不写 Label。</summary>
+    private void RefreshTimePointText()
+    {
+        RunSession run = RunSession.Instance;
+        string text = run?.Current == null
+            ? string.Empty
+            : RunTimePoints.FormatDayAndRemaining(run.Current.MapState.TimePoints);
+        if (timePointLabel != null && !string.Equals(shownTimePointText, text, StringComparison.Ordinal))
+        {
+            shownTimePointText = text;
+            timePointLabel.Text = text;
+        }
+
+        // 主动结束当天只在选点态可用（内容进行中 / 已在营地时不可点）。
+        if (endDayButton != null)
+        {
+            bool inCamp = camp != null && GodotObject.IsInstanceValid(camp);
+            endDayButton.Disabled = run?.Current == null || !mapSelectable || inCamp;
+        }
+    }
+
+
     private void ClearHost()
     {
         foreach (Node child in host.GetChildren()) { host.RemoveChild(child); child.QueueFree(); }
@@ -327,30 +451,87 @@ public partial class RunFlowScene : Control
         return layer;
     }
 
+    /// <summary>
+    /// 常驻顶栏的不透明底板：铺满第一行那一带（`RunUiLayout.TopRowTop → TopBarBackdropBottom`），
+    /// 让战场 / 世界地图的内容不再从按钮之间透出来；底边留一条细线分隔。
+    ///
+    /// 层级：`RunUiLayers.TopBarBackdrop = 32` —— 压过内容层（战场）与世界地图，**低于**结算浮标 /
+    /// 结算模态 / 营地 / 放弃确认 / 常驻按钮栏，所以任何弹窗都不会被它压住。
+    /// 输入：`MouseFilter = Ignore`，这一带照旧把点击透给战场与地图（按钮本体在 `GlobalButton` 层接收点击）。
+    /// </summary>
+    private void BuildTopBarBackdrop()
+    {
+        topBarBackdrop = new Panel { Name = "TopBarBackdrop", MouseFilter = MouseFilterEnum.Ignore };
+        topBarBackdrop.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+        {
+            BgColor = new Color("101820"),               // 不透明：与战场底色同料，按钮区自此不再透出地图
+            BorderColor = new Color("2b3a45"),
+            BorderWidthBottom = 2,
+        });
+        topBarBackdrop.AnchorLeft = 0f; topBarBackdrop.AnchorTop = RunUiLayout.TopRowTop;
+        topBarBackdrop.AnchorRight = 1f; topBarBackdrop.AnchorBottom = RunUiLayout.TopBarBackdropBottom;
+        topBarBackdrop.OffsetLeft = 0; topBarBackdrop.OffsetTop = 0;
+        topBarBackdrop.OffsetRight = 0; topBarBackdrop.OffsetBottom = 0;
+        topBarBackdropLayer.AddChild(topBarBackdrop);
+    }
+
+    /// <summary>常驻顶栏整体（按钮行 + 底板）显隐：营地期间两者一起让位，不能只藏按钮留下黑条。</summary>
+    private void SetGlobalTopBarVisible(bool visible)
+    {
+        globalButtonLayer.Visible = visible;
+        if (topBarBackdropLayer != null) topBarBackdropLayer.Visible = visible;
+    }
+
     private void BuildGlobalTopBar()
     {
+        // 常驻栏几何统一在 `RunUiLayout`（与战场 HUD 共用）：右组按「现有 4 + 预留 2（背包 / 装备）」的左沿起算，
+        // 左组（时间点）在右组左沿之前收住，两组无论按钮怎么增删都不重叠。
+        BuildTopBarBackdrop();
+
         // 通用按钮行：选点态也显示的常驻入口，放最上层位置。
-        HBoxContainer generalRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
-        generalRow.AddThemeConstantOverride("separation", 8);
-        generalRow.AnchorLeft = .64f; generalRow.AnchorTop = .025f; generalRow.AnchorRight = .98f; generalRow.AnchorBottom = .08f;
+        generalRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+        generalRow.AddThemeConstantOverride("separation", (int)RunUiLayout.TopButtonSeparation);
+        generalRow.AnchorLeft = RunUiLayout.GeneralRowLeft; generalRow.AnchorTop = RunUiLayout.TopRowTop;
+        generalRow.AnchorRight = RunUiLayout.GeneralRowRight; generalRow.AnchorBottom = RunUiLayout.TopRowBottom;
         globalButtonLayer.AddChild(generalRow);
         mapButton = AddTopButton(generalRow, "地图", ToggleMap);
+        // 「定位当前角色」按宽按钮计：右组容量断言（`--run-flow-ui-smoke`）读的就是这个宽度口径。
         focusButton = AddTopButton(generalRow, "定位当前角色", () => activeBattle?.CenterSelectedUnitFromGlobalTopBar());
+        focusButton.CustomMinimumSize = new Vector2(RunUiLayout.WideTopButtonWidth, RunUiLayout.TopButtonHeight);
         debugButton = AddTopButton(generalRow, "调试", ToggleDebugPanel);
         pauseButton = AddTopButton(generalRow, "暂停", () => activeBattle?.TogglePauseFromGlobalTopBar());
+
+        // 左侧：时间点显示（第 9 条） + 主动结束当天（地图交互 §五：尚有剩余时间点时也可进营地）。
+        timeRow = new HBoxContainer();
+        timeRow.AddThemeConstantOverride("separation", 10);
+        timeRow.AnchorLeft = RunUiLayout.TimeRowLeft; timeRow.AnchorTop = RunUiLayout.TopRowTop;
+        timeRow.AnchorRight = RunUiLayout.TimeRowRight; timeRow.AnchorBottom = RunUiLayout.TopRowBottom;
+        globalButtonLayer.AddChild(timeRow);
+        timePointLabel = new Label
+        {
+            Text = string.Empty,
+            VerticalAlignment = VerticalAlignment.Center,
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+        };
+        timePointLabel.AddThemeFontSizeOverride("font_size", 17);
+        timePointLabel.AddThemeColorOverride("font_color", new Color("f5d98c"));
+        timeRow.AddChild(timePointLabel);
+        endDayButton = AddTopButton(timeRow, "结束当天", OpenCamp);
 
         // 剧情专属按钮：左侧 Log / 隐藏 / Auto，右侧 跳过；都在通用行下方同一带内。
         storyRow = new HBoxContainer();
         storyRow.AddThemeConstantOverride("separation", 10);
-        storyRow.AnchorLeft = .02f; storyRow.AnchorTop = .09f; storyRow.AnchorRight = .37f; storyRow.AnchorBottom = .145f;
+        storyRow.AnchorLeft = RunUiLayout.TimeRowLeft; storyRow.AnchorTop = RunUiLayout.StoryRowTop;
+        storyRow.AnchorRight = .37f; storyRow.AnchorBottom = RunUiLayout.StoryRowBottom;
         globalButtonLayer.AddChild(storyRow);
         logButton = AddTopButton(storyRow, "Log", () => activeBattle?.ActiveStoryOverlay?.ToggleLogFromGlobalTopBar());
         hideButton = AddTopButton(storyRow, "隐藏", () => activeBattle?.ActiveStoryOverlay?.ToggleHiddenFromGlobalTopBar());
         autoButton = AddTopButton(storyRow, "Auto: 关闭", () => activeBattle?.ActiveStoryOverlay?.ToggleAutoFromGlobalTopBar());
 
         skipRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
-        skipRow.AddThemeConstantOverride("separation", 8);
-        skipRow.AnchorLeft = .64f; skipRow.AnchorTop = .09f; skipRow.AnchorRight = .98f; skipRow.AnchorBottom = .145f;
+        skipRow.AddThemeConstantOverride("separation", (int)RunUiLayout.TopButtonSeparation);
+        skipRow.AnchorLeft = RunUiLayout.GeneralRowLeft; skipRow.AnchorTop = RunUiLayout.StoryRowTop;
+        skipRow.AnchorRight = RunUiLayout.GeneralRowRight; skipRow.AnchorBottom = RunUiLayout.StoryRowBottom;
         globalButtonLayer.AddChild(skipRow);
         skipButton = AddTopButton(skipRow, "跳过", () => activeBattle?.ActiveStoryOverlay?.ToggleSkipFromGlobalTopBar());
         ConfigureGlobalTopBar(null);
@@ -358,7 +539,13 @@ public partial class RunFlowScene : Control
 
     private static Button AddTopButton(Control parent, string text, System.Action action)
     {
-        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(88, 38) };
+        Button button = new Button
+        {
+            Text = text,
+            CustomMinimumSize = new Vector2(RunUiLayout.TopButtonWidth, RunUiLayout.TopButtonHeight),
+            // 纵向居中于顶栏底板带（`RunUiLayout.TopRowTop → TopBarBackdropBottom`）。
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+        };
         button.Pressed += action;
         parent.AddChild(button);
         return button;
@@ -402,6 +589,8 @@ public partial class RunFlowScene : Control
     /// 这里每帧只做一次廉价比较，状态真的变了才重算可见性（不每帧写 Visible）。</summary>
     public override void _Process(double delta)
     {
+        // 时间点显示与「结束当天」可用性：每帧只做一次廉价比较（文案变了才写 Label）。
+        RefreshTimePointText();
         if (storyRow == null) return;
         EventStoryOverlay story = activeBattle?.ActiveStoryOverlay;
         bool show = story != null && !map.Visible;
@@ -472,6 +661,46 @@ public partial class RunFlowScene : Control
             Require(map.GetParent() == worldMapLayer, "世界地图必须属于 WorldMapLayer。");
             Require(contentLayer.Layer < worldMapLayer.Layer && worldMapLayer.Layer < modalLayer.Layer && modalLayer.Layer < globalButtonLayer.Layer,
                 "运行局 CanvasLayer 顺序错误。");
+
+            // 常驻栏几何（§49.1）：右组必须容得下「现有 4 + 预留 2（背包 / 装备）」——
+            // 这是「给装备系统 / 背包系统留位置」的机器判据；左右两组不得相交；战场 HUD 必须让开顶栏两行。
+            float viewportWidth = GetViewport().GetVisibleRect().Size.X;
+            Require(RunUiLayout.FitsReservedCluster(viewportWidth),
+                $"常驻栏右组容不下预留的「背包 / 装备」两个入口：需要 {RunUiLayout.ReservedClusterWidth:0} px，可用 {RunUiLayout.ClusterBandWidth(viewportWidth):0} px。");
+            Require(RunUiLayout.TimeRowRight <= RunUiLayout.GeneralRowLeft,
+                "常驻栏左右两组不得重叠：时间点行右沿必须 ≤ 通用按钮行左沿。");
+            Require(RunUiLayout.BattleHudTop >= RunUiLayout.StoryRowBottom,
+                "战场 HUD 最高可用比例必须让开常驻栏两行（否则关卡目标会压住时间点行）。");
+            Require(Math.Abs(generalRow.GetGlobalRect().Position.X - RunUiLayout.GeneralRowLeft * viewportWidth) < 2f,
+                $"常驻按钮行左沿必须取自 RunUiLayout（期望 {RunUiLayout.GeneralRowLeft * viewportWidth:0} px，实际 {generalRow.GetGlobalRect().Position.X:0} px）。");
+            Require(generalRow.GetGlobalRect().Position.X >= timeRow.GetGlobalRect().End.X - 1f,
+                "常驻栏左右两组不得重叠：通用按钮行必须整体位于时间点行之右。");
+
+            // 顶栏底板（`RunUiLayers.TopBarBackdrop = 32`）：不透明地铺满第一行那一带、遮住战斗地图，
+            // 但层号低于结算浮标与一切模态；按钮纵向居中于该带。
+            float viewportHeight = GetViewport().GetVisibleRect().Size.Y;
+            Require(topBarBackdropLayer != null && topBarBackdrop != null, "常驻顶栏应构建不透明底板。");
+            Require(topBarBackdropLayer.Layer > worldMapLayer.Layer && topBarBackdropLayer.Layer > contentLayer.Layer
+                && topBarBackdropLayer.Layer < badgeLayer.Layer && topBarBackdropLayer.Layer < modalLayer.Layer
+                && topBarBackdropLayer.Layer < globalButtonLayer.Layer,
+                $"顶栏底板层号必须压过战场与世界地图、低于结算浮标与一切模态，实际 {topBarBackdropLayer.Layer}。");
+            Color backdropColor = (topBarBackdrop.GetThemeStylebox("panel") as StyleBoxFlat)?.BgColor ?? new Color(0, 0, 0, 0);
+            Require(backdropColor.A >= 1f - 1e-3f, $"顶栏底板必须不透明，实际 alpha {backdropColor.A}。");
+            Rect2 backdropRect = topBarBackdrop.GetGlobalRect();
+            Require(backdropRect.Position.Y <= 1f, $"顶栏底板必须贴屏幕顶边，实际上沿 {backdropRect.Position.Y:0}。");
+            Require(Math.Abs(backdropRect.Size.Y - RunUiLayout.TopBarBackdropBottom * viewportHeight) < 2f,
+                $"顶栏底板高度应为 TopBarBackdropBottom × 视口高 = {RunUiLayout.TopBarBackdropBottom * viewportHeight:0} px，实际 {backdropRect.Size.Y:0}。");
+            float backdropCenter = backdropRect.GetCenter().Y;
+            foreach (Button top in new[] { mapButton, focusButton, debugButton, pauseButton, endDayButton })
+            {
+                Require(top != null && top.SizeFlagsVertical == SizeFlags.ShrinkCenter,
+                    $"顶栏按钮必须声明纵向居中（{top?.Text} 实际 {top?.SizeFlagsVertical}）。");
+                // 容器**不排布隐藏子节点**（无内容时「定位当前角色」「暂停」是隐藏的，矩形会停在初始值）：
+                // 所以「实际居中」只对当前可见的按钮核对，隐藏的靠上一条声明式断言兜住。
+                if (!top.IsVisibleInTree()) continue;
+                Require(Math.Abs(top.GetGlobalRect().GetCenter().Y - backdropCenter) <= 3f,
+                    $"顶栏按钮必须纵向居中于底板（{top.Text} 中心 {top.GetGlobalRect().GetCenter().Y:0} / 底板中心 {backdropCenter:0}）。");
+            }
 
             // 事件中的硬要求：除战场本身外不得显示任何战斗 UI（剧情 UI 在打开地图时让位）。
             void RequireOnlyBattlefieldVisible(HexBattleScene battle, string phase)
@@ -684,6 +913,14 @@ public partial class RunFlowScene : Control
             Require(FindButtonByName(this, "SettlementCloseButton")?.IsVisibleInTree() == true, "关卡胜利后应弹出结算面板。");
             Require(run.Current.SettlementCardPools.Count > 0, "关卡应给出至少一份卡牌奖励（每个角色槽位一份）。");
             Require(FindLabelContaining(modalLayer, "卡牌奖励减少") == null, "全歼（击败比例 100%）不应显示折损行。");
+            // 2026-10-01 用户改判：结算面板**一出现**就应收起战斗 HUD（不必等关闭面板）。
+            // 2026-10-02 追加：底部操作区底板（`bottomHudBackdrop`）随**手牌区**一起消失。
+            Require(realBattle.IsPostSettlementMode, "结算面板一出现，战场就应转入战后操作态（不必等关闭面板）。");
+            Require(realBattle.IsBottomHudBackdropHidden, "结算面板一出现，底部操作区底板就应随手牌区一起收起。");
+            Require(realBattle.PostSettlementUiCollapsed,
+                "结算面板一出现就应收起手牌槽 / 底部底板 / 能量与额度面板 / 结束回合，且移动按钮文案不含「能量」。");
+            GD.Print($"RUN_FLOW_UI_SMOKE_POST_SETTLEMENT_EARLY: post={realBattle.IsPostSettlementMode} " +
+                $"collapsed={realBattle.PostSettlementUiCollapsed} backdropHidden={realBattle.IsBottomHudBackdropHidden}");
             // 卡牌三选一：候选必须用 CardDisplayPrefab 展示，卡下方显示该份角色的显示名（§5.2 / §5.3）。
             Button realCardTab = FindButtonContaining(modalLayer, "将一张牌添加到你的牌组。· ");
             Require(realCardTab != null, "结算面板缺少卡牌 Tab。");
@@ -715,7 +952,14 @@ public partial class RunFlowScene : Control
             FindCardPickButton(modalLayer).EmitSignal(BaseButton.SignalName.Pressed);
             await WaitFrames(3);
             Require(SettlementRewardPresenter.IsCardPoolClaimed(run.Current, firstSlot), "选中候选后该份应落档为已领取。");
-            Require(FindButtonContaining(this, "已领取") != null, "领取后该份卡牌 Tab 应显示「已领取」。");
+            // 2026-10-02 用户口径：领取后该份卡牌 Tab **直接从列表消失**（不再转灰显示「已领取」）。
+            Require(FindButtonByName(modalLayer, SettlementUi.CardTabButtonNamePrefix + firstSlot)?.IsVisibleInTree() != true,
+                "领取后该份卡牌 Tab 应直接从面板列表消失。");
+            Require(FindButtonContaining(this, "已领取")?.IsVisibleInTree() != true,
+                "结算面板不应再出现「已领取」文案（改判：领后该条直接消失）。");
+            GD.Print($"RUN_FLOW_UI_SMOKE_SETTLEMENT_TABS_REMOVED: 卡牌份 Tab 领后消失 slot={firstSlot} " +
+                $"剩余卡牌份 Tab={CountButtonsByNamePrefix(modalLayer, SettlementUi.CardTabButtonNamePrefix)}");
+            await CaptureSmoke("res://Tests/run-flow-ui-smoke-settlement-claimed.png");
             // 关闭面板 → **停留战场**（新案 §二 / §三）：有实机战场时不自动打开世界地图，浮窗常驻、战场仍可见可点。
             FindButtonByName(this, "SettlementCloseButton").EmitSignal(BaseButton.SignalName.Pressed);
             await WaitFrames(3);
@@ -728,7 +972,7 @@ public partial class RunFlowScene : Control
             // 战后战场操作态（新案 §四 / §五 / §九 6–10）：只保留「切换角色」与「自由移动」。
             Require(realBattle.IsPostSettlementMode, "关闭结算面板后战场应进入战后战场操作态。");
             Require(realBattle.PostSettlementUiCollapsed,
-                "战后应隐藏手牌槽 / 能量与额度面板 / 结束回合，且移动按钮文案不含「能量」。");
+                "战后应隐藏手牌槽 / 底部底板 / 能量与额度面板 / 结束回合，且移动按钮文案不含「能量」。");
             int postMover = realBattle.Session.SelectedId;
             AxialHex moverFrom = realBattle.Session.Occupancy.Placements[postMover].Coord;
             int postEnergy = realBattle.Session.Occupancy.Placements[postMover].Unit.Energy;
@@ -886,19 +1130,28 @@ public partial class RunFlowScene : Control
             await WaitFrames(3);
             Require(!map.Visible && run.IsInSettlement, "点「返回」应回到战场并保持待领取态。");
             Require(FindButtonContaining(this, "未领取")?.IsVisibleInTree() == true, "回到战场后待领取浮窗应仍在。");
+            await CaptureSmoke("res://Tests/run-flow-ui-smoke-post-battle.png");
             // 点浮窗 → 重新打开结算面板，继续走领取流程。
             FindButtonContaining(this, "未领取").EmitSignal(BaseButton.SignalName.Pressed);
             await WaitFrames(3);
             Require(FindButtonByName(this, "SettlementCloseButton")?.IsVisibleInTree() == true, "点浮窗应重新打开结算面板。");
-            // 领完物品 Tab：点击即领取、面板会重建，因此每次都要重新查找（§四 / 验收 2）。
+            // 领完物品 Tab：点击即领取、面板会重建，且该条**直接从列表消失**（2026-10-02 口径），
+            // 因此每次都要重新查找（§四 / 验收 2）。
             int claimGuard = 0;
             while (SettlementRewardPresenter.CountUnclaimedItems(run.Current, LoadingSystem.DropTableEntries) > 0 && claimGuard++ < 12)
             {
                 Button itemTab = FindUnclaimedItemTab(modalLayer);
                 Require(itemTab != null, "有未领取物品 Tab 却找不到可点条目。");
+                int itemTabsBefore = CountUnclaimedItemTabs(modalLayer);
+                string claimedText = itemTab.Text;
                 itemTab.EmitSignal(BaseButton.SignalName.Pressed);
                 await WaitFrames(2);
+                int itemTabsAfter = CountUnclaimedItemTabs(modalLayer);
+                Require(itemTabsAfter == itemTabsBefore - 1,
+                    $"领取后物品 Tab 应直接从列表消失（不再显示「已领取」），实际 {itemTabsBefore} → {itemTabsAfter}（条目「{claimedText}」）。");
             }
+
+            GD.Print($"RUN_FLOW_UI_SMOKE_SETTLEMENT_TABS_REMOVED: 物品 Tab 领后消失（剩 {CountUnclaimedItemTabs(modalLayer)} 条）");
             // 把剩下的卡牌份也领掉，验证「全部领取后关闭 = 结算完成、无浮窗」（§7.3 / 验收 10）。
             int cardGuard = 0;
             while (SettlementRewardPresenter.CountUnclaimedCards(run.Current) > 0 && cardGuard++ < 6)
@@ -1052,7 +1305,9 @@ public partial class RunFlowScene : Control
             Require(!eventRun.IsInSettlement, "放弃事件未领取项后应转 OnMap。");
             Require(FindButtonContaining(this, "未领取") == null, "放弃后事件浮窗应消失。");
 
-            GD.Print("RUN_FLOW_UI_SMOKE_PASS: canvas layers, map modal input, debug close, map return after content");
+            await RunTimePointAndCampSmoke();
+            RunSessionReconstructionSmoke();
+            GD.Print("RUN_FLOW_UI_SMOKE_PASS: canvas layers, map modal input, debug close, map return after content, camp food/cook, run session reconstruction");
             RestoreRunSaveFile();
             GetTree().Quit();
         }
@@ -1063,8 +1318,624 @@ public partial class RunFlowScene : Control
             GetTree().Quit(1);
         }
     }
+    /// <summary>
+    /// 时间点系统与营地（第 8/9/10/11 条 + 第 27/29/30 条）的端到端断言（§九 11–16）：
+    /// ① 时间点不足 → 点可达格**不移动、不扣点**并转入营地；② 营地期间常驻栏隐藏、休息结算按公式回复并推进到新一天；
+    /// ③ 当天已耗尽（`PendingRestDay`）→ 同样禁止移动、转营地；④ 休息后时间点文案与常驻栏恢复。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunTimePointAndCampSmoke()
+    {
+        ReturnToSelectableMap();
+        await WaitFrames(2);
+        RunSession run = RunSession.Instance;
+        Require(run?.Current != null, "营地烟测需要一局进行中的本局。");
+        RunMapStateSave state = run.Current.MapState;
+
+        // ① 时间点不足（剩余 0.2 < 移动 0.3）：点可达格不得移动、不得扣点，且转营地。
+        foreach (RunCharacterSlotSave slot in run.Current.CharacterSlots) slot.CurrentHp = Math.Max(1, slot.MaxHp / 2);
+        state.TimePoints = 3.8f;
+        state.PendingRestDay = false;
+        run.Save();
+        RefreshTimePointText();
+        await WaitFrames(1);
+        Require(timePointLabel.Text.Contains("第 1 天") && timePointLabel.Text.Contains("0.2"),
+            $"常驻栏时间点显示应为「第 1 天 · 剩余 0.2 / 4.0」，实际 {timePointLabel.Text}。");
+
+        int nodeBefore = state.CurrentNodeId;
+        Require(map.SimulateClickReachableNode(), "地图上应存在一个可达格供时间点闸门用例点击。");
+        await WaitFrames(3);
+        Require(state.CurrentNodeId == nodeBefore && Math.Abs(state.TimePoints - 3.8f) < 1e-4f,
+            $"时间点不足时点可达格不得移动 / 不得扣时间点，实际 位置 {state.CurrentNodeId}、进程 {state.TimePoints}。");
+        Require(camp != null && GodotObject.IsInstanceValid(camp), "时间点不足应转入营地（CampScene）。");
+        Require(!globalButtonLayer.Visible, "营地期间常驻按钮栏必须隐藏（只常驻四个营地按钮）。");
+        Require(!topBarBackdropLayer.Visible, "营地期间顶栏底板必须随常驻栏一起隐藏（不能留一条黑边）。");
+
+        // ① 营地画面（§49.2）：等淡入**真正结束**再取色 / 截图 —— 中途截到的是半黑画面（旧产物即如此）。
+        int fadeFrames = 0;
+        while (!camp.FadeFinished && fadeFrames++ < 600) await WaitFrames(1);
+        Require(camp.FadeFinished, "营地淡入应在 600 帧内结束（转场黑幕不得常驻）。");
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        Image campShot = GetViewport().GetTexture().GetImage();
+        Require(MaxRedAround(campShot, camp.FireCenter, 4) > 0.6f,
+            "营地篝火必须可见：自绘火芯不得被背景子节点盖住（该点取色为暗底说明篝火被盖）。");
+
+        // ② 守夜行（§49.2）：标签单行 + 下拉框同行相邻，不得被容器压成一字一行后错位。
+        FindButton(camp, "守夜").EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(3);
+        Label watcherCaption = FindLabel(camp, "守夜角色");
+        Require(watcherCaption != null, "营地守夜面板应包含「守夜角色」标签。");
+        Require(watcherCaption.Size.Y <= 32f,
+            $"「守夜角色」标签必须单行显示，实际高度 {watcherCaption.Size.Y:0}（说明被容器压成一字一行）。");
+        OptionButton watcherBox = FindOptionButton(camp);
+        Require(watcherBox != null, "营地守夜面板应包含守夜角色下拉框。");
+        Require(Mathf.Abs((watcherBox.GlobalPosition.Y + watcherBox.Size.Y * .5f)
+                - (watcherCaption.GlobalPosition.Y + watcherCaption.Size.Y * .5f)) < 8f,
+            "「守夜角色」标签与下拉框必须同一行（竖直居中偏差 < 8 px）。");
+        Require(watcherBox.GlobalPosition.X >= watcherCaption.GlobalPosition.X + watcherCaption.Size.X - 1f,
+            "守夜角色下拉框必须排在标签右侧（不得与标签重叠）。");
+
+        // ② b 食物 / 烹饪面板（2026-10-02 批 C）：草稿制（未点休息不消耗）+ 效果饱食度上限 10 +
+        //     过期食物拒绝入篝火 + 本次休息烹饪 ≤ 2 次且只消耗食物。走完后面板里会留下本次休息要吃的食物。
+        await RunCampFoodPanelSmoke(run, camp);
+
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-camp.png");
+
+        // ② 休息结算：按「10% + 20% × 剩余 0.2/4」= 11% 回复，并推进到第 2 天（进程 3.8 → 4.0）。
+        int[] hpBefore = new int[run.Current.CharacterSlots.Count];
+        int[] expectedHeal = new int[run.Current.CharacterSlots.Count];
+        for (int i = 0; i < hpBefore.Length; i++)
+        {
+            hpBefore[i] = run.Current.CharacterSlots[i].CurrentHp;
+            expectedHeal[i] = RunRestResolver.PreviewHeal(run.Current, i, RunWatchMode.None, 0, camp.PlannedSatiety);
+        }
+
+        FindButton(camp, "休息").EmitSignal(BaseButton.SignalName.Pressed);
+        // 等营地**真的**销毁（淡出 0.35s 是秒级 Tween）：写死帧数在低帧率下会假失败（实测同一断言一次红一次绿）。
+        await WaitUntilCampDestroyed();
+        Require(camp == null || !GodotObject.IsInstanceValid(camp), "休息结算完成后营地必须销毁。");
+        Require(globalButtonLayer.Visible, "休息结算完成后常驻按钮栏必须恢复。");
+        Require(topBarBackdropLayer.Visible, "休息结算完成后顶栏底板必须随常驻栏一起恢复。");
+        Require(Math.Abs(state.TimePoints - 4f) < 1e-4f && state.CurrentDay == 2,
+            $"休息后应推进到第 2 天（进程 4.0），实际 {state.TimePoints} / 第 {state.CurrentDay} 天。");
+        Require(!state.PendingRestDay, "休息结算后「待休息」标记必须清除。");
+        bool anyHealed = false;
+        for (int i = 0; i < hpBefore.Length; i++)
+        {
+            int expected = Math.Min(run.Current.CharacterSlots[i].MaxHp, hpBefore[i] + expectedHeal[i]);
+            Require(run.Current.CharacterSlots[i].CurrentHp == expected,
+                $"休息回复量应按公式（槽 {i} 期望 {expected}，实际 {run.Current.CharacterSlots[i].CurrentHp}）。");
+            anyHealed |= run.Current.CharacterSlots[i].CurrentHp > hpBefore[i];
+        }
+
+        Require(anyHealed, "休息应至少回复一名有损生命的角色。");
+        Require(timePointLabel.Text.Contains("第 2 天") && timePointLabel.Text.Contains("4.0"),
+            $"休息后常驻栏时间点显示应更新为第 2 天满额，实际 {timePointLabel.Text}。");
+
+        // ② c 休息结算的食物侧（批 C）：草稿清空、规划的食物离包、效果按寿命轴落档、跨天腐坏、烹饪次数归零。
+        Require(campFoodPlanIds.Count > 0, "食物烟测应至少规划一件食物（上一段已放 3 件）。");
+        foreach (string instanceId in campFoodPlanIds)
+        {
+            Require(RunBagSystem.Find(run.Current, instanceId) == null,
+                $"休息结算后篝火里规划的食物实例必须离开背包：{instanceId}。");
+        }
+
+        foreach (string instanceId in campFoodExpiredIds)
+        {
+            Require(RunBagSystem.Find(run.Current, instanceId) == null,
+                $"跨天休息后过期的食物实例必须被移除：{instanceId}。");
+        }
+
+        List<int> effectTypes = run.Current.ActiveFoodEffects.Select(x => x.EffectType).ToList();
+        foreach (int expectedType in campFoodEffectTypes)
+        {
+            Require(effectTypes.Contains(expectedType),
+                $"休息后食物效果必须落档（期望含效果 {expectedType}，实际 {string.Join("/", effectTypes)}）。");
+        }
+
+        Require(run.Current.ActiveFoodEffects.All(x => x.DurationKind == (int)FoodEffectDurationKind.BattleCount && x.Remaining == 1f),
+            "三种烟测食物都是 BattleCount:1 → 落档后寿命轴剩余必须是 1（下一场战斗生效）。");
+        Require(run.Current.CookedThisRest == 0, "休息结算后本次休息的烹饪次数必须归零。");
+
+        // ③ 当天已耗尽（`PendingRestDay`，进程在战斗 / 移动中跨过日界）：同样禁止前往并转营地。
+        state.TimePoints = 4.2f;
+        state.PendingRestDay = true;
+        state.RestRemainingTimePoints = 0f; // 跨日界那一刻记下的"这一天"剩余
+        run.Save();
+        int nodeAfterRest = state.CurrentNodeId;
+        Require(map.SimulateClickReachableNode(), "地图上应存在一个可达格供「已耗尽」用例点击。");
+        await WaitFrames(3);
+        Require(state.CurrentNodeId == nodeAfterRest && Math.Abs(state.TimePoints - 4.2f) < 1e-4f,
+            "当天已耗尽时点可达格不得移动 / 不得扣时间点。");
+        Require(camp != null && GodotObject.IsInstanceValid(camp), "当天已耗尽应强制转入营地。");
+
+        // ④ 耗尽来源的休息：剩余记 0 → 只走基础 10%；结算后进入第 3 天。
+        int[] exhaustedBefore = new int[run.Current.CharacterSlots.Count];
+        int[] exhaustedExpected = new int[run.Current.CharacterSlots.Count];
+        for (int i = 0; i < exhaustedBefore.Length; i++)
+        {
+            exhaustedBefore[i] = run.Current.CharacterSlots[i].CurrentHp;
+            exhaustedExpected[i] = RunRestResolver.PreviewHeal(run.Current, i, RunWatchMode.None, 0, camp.PlannedSatiety);
+        }
+
+        FindButton(camp, "休息").EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitUntilCampDestroyed();
+        Require(camp == null || !GodotObject.IsInstanceValid(camp), "耗尽来源的休息结算后营地必须销毁。");
+        Require(Math.Abs(state.TimePoints - 8f) < 1e-4f && state.CurrentDay == 3,
+            $"耗尽来源的休息后应进入第 3 天（进程 8.0），实际 {state.TimePoints} / 第 {state.CurrentDay} 天。");
+        for (int i = 0; i < exhaustedBefore.Length; i++)
+        {
+            int expected = Math.Min(run.Current.CharacterSlots[i].MaxHp, exhaustedBefore[i] + exhaustedExpected[i]);
+            Require(run.Current.CharacterSlots[i].CurrentHp == expected,
+                $"耗尽来源的休息回复量应按基础 10%（槽 {i} 期望 {expected}，实际 {run.Current.CharacterSlots[i].CurrentHp}）。");
+        }
+
+        Require(!state.PendingRestDay && run.IsOnMap, "两次休息后应回到地图且不残留待休息标记。");
+        GD.Print($"RUN_FLOW_UI_SMOKE_CAMP: 时间点闸门 + 营地休息两轮通过（当前 {RunTimePoints.FormatDayAndRemaining(state.TimePoints)}）。");
+    }
+
+
+
+    /// <summary>
+    /// 营地食物 / 烹饪面板（2026-10-02 批 C）的端到端断言：
+    /// ① 两个入口按钮已开闸（不再是「常驻禁用」）；② 草稿制 —— 放进篝火不消耗背包，取回即撤销；
+    /// ③ 效果饱食度上限 10：首个越限者及其后只给饱食度（进度行与提示都要反映）；
+    /// ④ 过期食物拒绝放入；⑤ 烹饪：未放行配方拒绝、上限 2 次、只消耗食物、不消耗时间点。
+    /// 走出这里时篝火草稿里留 3 件食物（饱食 3+3+4 = 10），供 ② 段休息结算断言真实回复与效果落档。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunCampFoodPanelSmoke(RunSession run, CampScene camp)
+    {
+        Require(run?.Current != null && camp != null && GodotObject.IsInstanceValid(camp), "食物烟测需要营地与进行中的本局。");
+        Require(LoadingSystem.FoodDictionary.Count > 0 && LoadingSystem.FoodRecipeDictionary.Count > 0,
+            "食物烟测需要 Food.csv / FoodRecipe.csv 已加载（LoadingSystem.EnsureAllDataLoaded）。");
+        RunSaveData data = run.Current;
+
+        // ① 入口开闸：食物 / 烹饪按钮不再是「常驻禁用」。
+        Require(!camp.FoodButtonDisabled && !camp.CookButtonDisabled,
+            "「添加食物」「烹饪」按钮必须可用（2026-10-02 批 C 已接入食物系统与配方）。");
+        Require(!camp.FoodPanelVisible && !camp.CookPanelVisible, "营地初始不应展开食物 / 烹饪面板。");
+
+        // 备料：3 件有效（402 饱食 3 + 403 饱食 3 + 404 饱食 4 = 10，刚好到效果上限）、
+        // 1 件将腐坏（406，有效期 1 天）、1 件已过期（401 手工改成 0）。
+        List<int> plannedKeys = new List<int> { 402, 403, 404 };
+        foreach (int key in plannedKeys)
+        {
+            RunBagEntrySave entry = RunBagSystem.Add(data, BagCategory.Food, key, 1);
+            Require(entry != null, $"备料失败：食物 {key} 未能进入背包。");
+            campFoodPlanIds.Add(entry.InstanceId);
+        }
+
+        RunBagEntrySave spoiling = RunBagSystem.Add(data, BagCategory.Food, 406, 1);
+        Require(spoiling != null, "备料失败：食物 406 未能进入背包。");
+        campFoodExpiredIds.Add(spoiling.InstanceId);
+
+        RunBagEntrySave expired = RunBagSystem.Add(data, BagCategory.Food, 401, 1);
+        Require(expired != null, "备料失败：食物 401 未能进入背包。");
+        expired.ExpireDaysRemaining = 0;
+        run.Save();
+
+        // ② 打开面板（真点击），过期食物被拒绝、有效食物进草稿且**不消耗**背包。
+        FindButton(camp, CampScene.FoodButtonText).EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(2);
+        Require(camp.FoodPanelVisible, "点「添加食物」应展开食物面板。");
+
+        string expiredError = string.Empty;
+        bool expiredAdded = camp.TryAddFoodToCampFire(expired.InstanceId, out expiredError);
+        Require(!expiredAdded && expiredError.Contains("过期"),
+            $"过期食物不得放进篝火，实际：{expiredAdded} / {expiredError}。");
+        Require(camp.PlannedSatiety == 0 && RunBagSystem.CountOf(data, BagCategory.Food, 401) == 1,
+            "被拒绝的过期食物不得进入草稿，也不得离开背包。");
+
+        for (int i = 0; i < campFoodPlanIds.Count; i++)
+        {
+            string error = string.Empty;
+            Require(camp.TryAddFoodToCampFire(campFoodPlanIds[i], out error),
+                $"有效食物应能放进篝火，实际：{error}。");
+            Require(RunBagSystem.Find(data, campFoodPlanIds[i]) != null,
+                "草稿里的食物在点「休息」前必须仍在背包（未消耗）。");
+        }
+
+        Require(camp.PlannedEntryCount == 3 && camp.PlannedSatiety == 10 && camp.PlannedEffectiveSatiety == 10,
+            $"3 件食物（3+3+4）应刚好到效果上限：实际 件数 {camp.PlannedEntryCount}、"
+            + $"饱食 {camp.PlannedSatiety}、计入效果 {camp.PlannedEffectiveSatiety}。");
+        Require(camp.SatietyProgressText.Contains("10 / 10") && camp.SatietyProgressText.Contains("计入效果 10"),
+            $"饱食度进度行应显示 10 / 10（计入效果 10），实际 {camp.SatietyProgressText}。");
+
+        // ③ 越限：第 4 件（405 饱食 4）→ 累计 14 > 10：只给饱食度、不给效果。
+        RunBagEntrySave over = RunBagSystem.Add(data, BagCategory.Food, 405, 1);
+        string overError = string.Empty;
+        Require(camp.TryAddFoodToCampFire(over.InstanceId, out overError),
+            $"第 4 件食物应能放进篝火，实际：{overError}。");
+        Require(camp.PlannedSatiety == 14 && camp.PlannedEffectiveSatiety == 10,
+            $"首个越限者及其后只给饱食度：期望 14 / 计入 10，实际 {camp.PlannedSatiety} / {camp.PlannedEffectiveSatiety}。");
+        Require(camp.FoodHint.Contains("只给饱食度"), $"越限提示应说明只给饱食度，实际 {camp.FoodHint}。");
+
+        string duplicateError = string.Empty;
+        Require(!camp.TryAddFoodToCampFire(over.InstanceId, out duplicateError) && duplicateError.Contains("已经在篝火"),
+            $"同一件食物不得重复放进篝火，实际：{duplicateError}。");
+
+        string removeError = string.Empty;
+        Require(camp.TryRemoveFoodFromCampFire(over.InstanceId, out removeError),
+            $"应能把食物从篝火取回，实际：{removeError}。");
+        Require(camp.PlannedEntryCount == 3 && camp.PlannedSatiety == 10 && camp.PlannedEffectiveSatiety == 10,
+            $"取回越限食物后应回到 10 / 10，实际 {camp.PlannedSatiety} / {camp.PlannedEffectiveSatiety}。");
+        Require(RunBagSystem.Find(data, over.InstanceId) != null && RunBagSystem.CountOf(data, BagCategory.Food, 405) == 1,
+            "取回只撤销草稿：背包里的食物一件都不能少。");
+
+        // ④ 烹饪面板：5 条放行 + 7 条材料配方未放行（2026-10-02 口径 ①）；上限 2 次、只消耗食物、不消耗时间点。
+        FindButton(camp, CampScene.CookButtonText).EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(2);
+        Require(camp.CookPanelVisible && !camp.FoodPanelVisible,
+            "点「烹饪」应展开烹饪面板并收起食物面板（三块面板互斥）。");
+        Require(CampScene.EnabledRecipes().Count == 5,
+            $"FoodRecipe.csv 应放行 5 条食物配方，实际 {CampScene.EnabledRecipes().Count}。");
+        Require(LoadingSystem.FoodRecipeDictionary.Count == 12,
+            $"FoodRecipe.csv 应共 12 条（5 放行 + 7 条材料配方暂禁用），实际 {LoadingSystem.FoodRecipeDictionary.Count}。");
+
+        string lockedError = string.Empty;
+        Require(!camp.TryCookRecipe(1, out lockedError) && lockedError.Contains("未放行"),
+            $"未放行的材料配方不得合成，实际：{lockedError}。");
+        Require(camp.CookHint.Contains("未放行"), $"烹饪提示应说明材料配方未放行，实际 {camp.CookHint}。");
+
+        float timeBefore = data.MapState.TimePoints;
+        string reservedError = string.Empty;
+        Require(!camp.TryCookRecipe(101, out reservedError) && reservedError.Contains("不足"),
+            $"篝火草稿里的食物不能被当烹饪原料（101 需要烤蟾蜍 ×2，唯一一件已放进篝火），实际：{reservedError}。");
+
+        RunBagSystem.Add(data, BagCategory.Food, 403, 2); // 非草稿的烤蟾蜍 ×2 → 101（403×2 → 404）可合成
+        string cookError = string.Empty;
+        Require(camp.TryCookRecipe(101, out cookError), $"烤蟾蜍 ×2 应能合成蜂蜜烤肉，实际：{cookError}。");
+        Require(camp.CookedThisRest == 1, $"合成一次后本次休息次数应为 1，实际 {camp.CookedThisRest}。");
+        Require(RunBagSystem.CountOf(data, BagCategory.Food, 403) == 1 && RunBagSystem.CountOf(data, BagCategory.Food, 404) == 2,
+            $"合成应只扣非草稿输入并产出成菜（403 剩 1 = 草稿那件、404 共 2 件 = 草稿 1 + 成菜 1），"
+            + $"实际 403 {RunBagSystem.CountOf(data, BagCategory.Food, 403)}、404 {RunBagSystem.CountOf(data, BagCategory.Food, 404)}。");
+
+        RunBagSystem.Add(data, BagCategory.Food, 402, 2); // 非草稿的香草炖菜 ×2 → 102（402×2 → 405）
+        Require(camp.TryCookRecipe(102, out cookError), $"香草炖菜 ×2 应能合成月光浓汤，实际：{cookError}。");
+        Require(camp.CookedThisRest == 2, $"合成两次后本次休息次数应为 2，实际 {camp.CookedThisRest}。");
+
+        foreach (string instanceId in campFoodPlanIds)
+        {
+            Require(RunBagSystem.Find(data, instanceId) != null, "烹饪不得消耗篝火草稿里已规划的食物实例。");
+        }
+
+        string limitError = string.Empty;
+        Require(!camp.TryCookRecipe(105, out limitError) && limitError.Contains("最多合成 2 次"),
+            $"第 3 次合成必须被「每次休息 ≤ 2 次」拒绝，实际：{limitError}。");
+        Require(Math.Abs(data.MapState.TimePoints - timeBefore) < 1e-4f, "合成食物不得消耗时间点（交互案「烹饪」）。");
+        Require(camp.PlannedEntryCount == 3 && camp.PlannedSatiety == 10,
+            "烹饪不得改动篝火草稿（成菜只入背包，玩家可自己再加入）。");
+
+        // 预期效果类型（休息后要落进 ActiveFoodEffects）：直接取配表注册表，避免烟测里写死效果号。
+        foreach (int key in plannedKeys)
+        {
+            foreach (ItemEffectSpec spec in ItemNameResolver.FoodEffectsOf(key))
+            {
+                campFoodEffectTypes.Add((int)spec.Type);
+            }
+        }
+
+        // 收尾：回到「添加食物」面板，让截图留下一张新面板的可视记录（草稿仍是 3 件 / 10 点饱食度）。
+        FindButton(camp, CampScene.FoodButtonText).EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(2);
+        Require(camp.FoodPanelVisible && camp.PlannedEntryCount == 3, "收尾应回到食物面板且草稿保持 3 件食物。");
+        GD.Print($"RUN_FLOW_UI_SMOKE_CAMP_FOOD: 篝火饱食度 {camp.PlannedSatiety}/10（计入效果 {camp.PlannedEffectiveSatiety}）、"
+            + $"本次休息已烹饪 {camp.CookedThisRest}/2、已放行配方 {CampScene.EnabledRecipes().Count} 条。");
+    }
+
+    /// <summary>
+    /// `RunSession`（autoload 单例）存档面的运行时自查（2026-10-02 事故复盘：`RunSession.cs` 曾被文本改写截断，
+    /// 前缀由权重重写 —— 该文件的每个成员都必须有一个「真跑一遍运行时 + 真实文件 IO」的守护）。
+    /// ① `StartNewRun` 建档口径（HP / 默认卡组 / 初始武器 / 种子 / 背包初始态）；② `Save → ClearCurrent → LoadSave`
+    /// 的**逐字往返**（整份 DTO 序列化字符串相等 ⇒ 没有字段在重建时丢语义）；③ `GetSlot / GetSlotDeck /
+    /// AddCardToSlotDeck` 边界；④ `SetCurrentNode` 落档 + 已访问幂等 + 不改敌袭档位计数；⑤ `TryAddTimePoints /
+    /// TrySpendTimePoints` 的拒绝路径与食物 `TimePoint` 寿命轴联动；⑥ `BeginRestDay / ApplyRest(plan)` 的回复 /
+    /// 消耗 / 跨天腐坏 / `DayCount` 轴 / 烹饪次数归零；⑦ `AbortRun / DeleteSave` 真删文件与失败路径；
+    /// ⑧ v3 旧档 → v4 迁移 + `MigrateSettlementCompat` 的旧结算候选还原（走真实 `LoadSave`）。
+    /// </summary>
+    private void RunSessionReconstructionSmoke()
+    {
+        RunSession run = RunSession.Instance;
+        Require(run != null, "RunSession 自检需要 autoload 单例（project.godot 的 RunSession）。");
+
+        // 本段要反复覆盖 user:// 存档：先备份，结束时还原（RunFlowScene 收尾还会整体还原玩家档）。
+        byte[] backup = FileAccess.FileExists(RunSession.SavePath) ? FileAccess.GetFileAsBytes(RunSession.SavePath) : null;
+        try
+        {
+            // ① StartNewRun：3 名角色 + 固定种子
+            run.StartNewRun(new[] { 1002, 1003, 1004 }, 20261002);
+            Require(run.HasActiveRun && run.Current != null, "StartNewRun 后必须有进行中的本局。");
+            RunSaveData data = run.Current;
+            Require(data.SchemaVersion == RunSaveData.CurrentSchemaVersion
+                    && data.SchemaVersion.ToString() == RunSession.SaveSchemaVersion,
+                "存档版本号必须同步（RunSaveData.CurrentSchemaVersion 与 RunSession.SaveSchemaVersion），"
+                + $"实际 {data.SchemaVersion} / {RunSession.SaveSchemaVersion}。");
+            Require(data.GameMode == RunGameModes.OnMap && data.Gold == 0 && data.Keys == 0,
+                "新局应从 OnMap 起步、金币与钥匙归零。");
+            Require(data.MapState.Act == 1 && data.MapState.Seed == 20261002 && data.MapState.CurrentNodeId == -1,
+                $"新局应从第一层 / 给定种子 / 未落格起步，实际 Act {data.MapState.Act}、Seed {data.MapState.Seed}、"
+                + $"Node {data.MapState.CurrentNodeId}。");
+            Require(Math.Abs(data.MapState.TimePoints) < 1e-4f && Math.Abs(data.MapState.RemainingToday - 4f) < 1e-4f,
+                $"新局时间点进程应为 0（当天剩余 4.0），实际 {data.MapState.TimePoints} / {data.MapState.RemainingToday}。");
+            Require(run.CurrentDay == 1 && Math.Abs(run.RemainingToday - 4f) < 1e-4f, "新局应是第 1 天满额。");
+            Require(data.BagEntries.Count == 0 && data.ActiveFoodEffects.Count == 0 && data.CookedThisRest == 0,
+                "新局背包 / 食物效果 / 烹饪次数必须为空。");
+            Require(data.CarryItemSlots.Count == RunBagSystem.CarryItemSlotCount, "新局随身格必须补齐 3 格。");
+            Require(data.CharacterSlots.Count == 3 && data.DeckSlots.Count == 3, "新局应有 3 个角色槽与 3 副卡组。");
+
+            Dictionary<int, string> expectedWeapons = new Dictionary<int, string>
+            { [1002] = "双手剑", [1003] = "弓箭", [1004] = "法典" };
+            HashSet<string> weaponIds = LoadDefinitionIds("res://DataBase/Equipment/Weapon.csv");
+            for (int i = 0; i < data.CharacterSlots.Count; i++)
+            {
+                RunCharacterSlotSave slot = data.CharacterSlots[i];
+                Require(LoadingSystem.CharacterDictionary.TryGetValue(slot.CharacterId, out var template) && template != null,
+                    $"角色 {slot.CharacterId} 必须能在 Character.csv 里找到。");
+                Require(slot.MaxHp == template.MAX_HP && slot.CurrentHp == template.MAX_HP && slot.MaxHp > 0,
+                    $"槽 {i} 的 HP 应取 Character.csv 上限满血，实际 {slot.CurrentHp}/{slot.MaxHp}（表 {template.MAX_HP}）。");
+                Require(expectedWeapons.TryGetValue(slot.CharacterId, out string weapon) && slot.EquippedWeaponDefinitionId == weapon,
+                    $"槽 {i} 的初始武器应是 {weapon}，实际 {slot.EquippedWeaponDefinitionId}。");
+                Require(weaponIds.Contains(slot.EquippedWeaponDefinitionId),
+                    $"初始武器 {slot.EquippedWeaponDefinitionId} 必须能在 Weapon.csv 的 DefinitionId 里找到。");
+                List<int> defaults = LoadingSystem.GetCharacterDefaultCardIdListByKey(
+                    slot.CharacterId, LoadingSystem.CharacterDefaultDeckCsvPathKey, true);
+                Require(data.DeckSlots[i].Count == defaults.Count,
+                    $"槽 {i} 的默认卡组张数应等于 CharacterDefaultDeck.csv（{defaults.Count}），实际 {data.DeckSlots[i].Count}。");
+                for (int c = 0; c < defaults.Count; c++)
+                {
+                    Require(data.DeckSlots[i][c].CardId == defaults[c] && data.DeckSlots[i][c].PermanentUpgradeLevel == 0,
+                        $"槽 {i} 第 {c} 张默认卡应是 {defaults[c]}（0 级），实际 {data.DeckSlots[i][c].CardId}。");
+                }
+            }
+
+            // ② Save → ClearCurrent → LoadSave：整份 DTO 逐字往返（覆盖所有字段，不靠逐字段列举）
+            data.Gold = 17;
+            data.Keys = 2;
+            data.MapState.TimePoints = 1.7f;
+            data.BagEntries.Add(RunBagSystem.CreateEntry(data, BagCategory.Food, 402, 2, "smoke-food-a"));
+            data.CarryItemSlots[0] = "smoke-food-a";
+            ItemEffectSpec spec = ItemNameResolver.FoodEffectsOf(402).FirstOrDefault();
+            Require(spec != null, "自检需要一条可落档的食物效果（Food.csv 402 应带效果）。");
+            RunFoodEffectSave effect = RunFoodSystem.BuildEffectSave(spec, "香草炖菜");
+            effect.DurationKind = (int)FoodEffectDurationKind.TimePoint;
+            effect.Remaining = 0.3f;
+            data.ActiveFoodEffects.Add(effect);
+            run.Save();
+            string saved = FileAccess.GetFileAsString(RunSession.SavePath);
+            Require(RunSaveJson.Deserialize(saved) != null,
+                $"落档文件必须是可解析的 JSON（写坏存档是最坑的症状，实际 {saved.Length} 字节）。");
+            run.ClearCurrent();
+            Require(!run.HasActiveRun && run.Current == null, "ClearCurrent 后不得还有当前局。");
+            Require(RunSession.HasSave(), "ClearCurrent 不得删档。");
+            Require(run.LoadSave(), "LoadSave 应能从刚写下的存档读回来。");
+            Require(RunSaveJson.Serialize(run.Current) == saved,
+                "读档后的序列化必须与落档内容逐字一致（任何字段在重建时丢语义都会在这里暴露）。");
+            Require(run.Current.Gold == 17 && run.Current.Keys == 2 && Math.Abs(run.Current.MapState.TimePoints - 1.7f) < 1e-4f,
+                "读档后金币 / 钥匙 / 时间点必须原样恢复。");
+            Require(RunBagSystem.CountOf(run.Current, BagCategory.Food, 402) == 2
+                    && run.Current.CarryItemSlots[0] == "smoke-food-a"
+                    && run.Current.ActiveFoodEffects.Count == 1
+                    && Math.Abs(run.Current.ActiveFoodEffects[0].Remaining - 0.3f) < 1e-4f,
+                "读档后背包实例 / 随身格 / 食物效果寿命轴必须原样恢复。");
+
+            // ③ 角色槽 / 卡组 API 边界
+            Require(run.GetSlot(-1) == null && run.GetSlot(99) == null, "越界的角色槽必须返回 null。");
+            int deckBefore = run.GetSlotDeck(0).Count;
+            run.AddCardToSlotDeck(0, 0);        // 无效卡（≤ 0）不得入组
+            run.AddCardToSlotDeck(99, 1234);    // 越界槽不得写入、不得崩溃
+            Require(run.GetSlotDeck(0).Count == deckBefore, "无效卡 / 越界槽都不得改动卡组。");
+            run.AddCardToSlotDeck(0, 1234, 3);
+            Require(run.GetSlotDeck(0).Count == deckBefore + 1 && run.GetSlotDeck(0).Last().CardId == 1234
+                    && run.GetSlotDeck(0).Last().PermanentUpgradeLevel == 3,
+                "AddCardToSlotDeck 应把卡与永久升级级数追加到该槽。");
+            Require(run.GetSlotDeck(99).Count == 0, "越界槽的卡组应是空表（不是 null）。");
+
+            // ④ 位置落档 + 已访问幂等 + 不改普通敌袭档位计数（口径：战斗胜利时按 NormalCombat 增量）
+            run.SetCurrentNode(7);
+            Require(run.Current.MapState.CurrentNodeId == 7, "SetCurrentNode 应记录当前格点。");
+            Require(RunSaveJson.Deserialize(FileAccess.GetFileAsString(RunSession.SavePath)).MapState.CurrentNodeId == 7,
+                "SetCurrentNode 必须立刻落档（读文件核对）。");
+            run.MarkCurrentNodeVisitedAndAdvanceEncounter();
+            run.MarkCurrentNodeVisitedAndAdvanceEncounter();
+            run.MarkCurrentNodeVisitedAndAdvanceEncounter();
+            Require(run.Current.MapState.VisitedNodeIds.Count(x => x == 7) == 1,
+                $"已访问记录必须幂等（同一格点只记一次），实际记了 {run.Current.MapState.VisitedNodeIds.Count(x => x == 7)} 次。");
+            Require(run.Current.MapState.GetNormalEncounterCount(1) == 0,
+                "MarkCurrentNodeVisitedAndAdvanceEncounter 不得改普通敌袭档位计数（否则会重复计档）。");
+            run.Current.MapState.IncrementCurrentNormalEncounterCount();
+            run.MarkCurrentNodeVisitedAndAdvanceEncounter();
+            Require(run.Current.MapState.GetNormalEncounterCount(1) == 1, "敌袭档位计数应只由显式增量改动。");
+
+            // ⑤ 时间点：拒绝负向 / 不足一个计量单位；进账与支付都必须落档，并联动食物 TimePoint 寿命轴
+            run.Current.MapState.TimePoints = 0f;
+            Require(!run.TryAddTimePoints(-1f, out string negativeError)
+                    && Math.Abs(run.Current.MapState.TimePoints) < 1e-4f,
+                $"负向写入时间点必须被拒绝且不动档，实际：{negativeError}。");
+            Require(!run.TryAddTimePoints(0.04f, out _) && Math.Abs(run.Current.MapState.TimePoints) < 1e-4f,
+                "不足一个计量单位（0.04 → 0.0）的增量不得进账。");
+            Require(run.TryAddTimePoints(0.05f, out _) && Math.Abs(run.Current.MapState.TimePoints - 0.1f) < 1e-4f,
+                "0.05 按 MidpointRounding.AwayFromZero 进到 0.1（口径：对齐 0.1 计量单位）。");
+            run.Current.MapState.TimePoints = 0f;
+            Require(run.TryAddTimePoints(3.9f, out _) && Math.Abs(run.Current.MapState.TimePoints - 3.9f) < 1e-4f,
+                "3.9 时间点应正常进账（当天剩余 0.1）。");
+            Require(run.Current.ActiveFoodEffects.All(x => x.DurationKind != (int)FoodEffectDurationKind.TimePoint),
+                "3.9 时间点的进程应把 TimePoint 轴（0.3）扣尽并移除 —— 时间点变动确实接到了寿命轴上。");
+            Require(run.TryAddTimePoints(0.1f, out _), "跨日界的 0.1 应进账。");
+            Require(run.Current.MapState.PendingRestDay && Math.Abs(run.Current.MapState.RestRemainingTimePoints - 0.1f) < 1e-4f,
+                $"跨过日界必须记下当天剩余并置「待休息」，实际 {run.Current.MapState.RestRemainingTimePoints} / "
+                + $"{run.Current.MapState.PendingRestDay}。");
+
+            RunFoodEffectSave timed = RunFoodSystem.BuildEffectSave(spec, "香草炖菜");
+            timed.DurationKind = (int)FoodEffectDurationKind.TimePoint;
+            timed.Remaining = 0.2f;
+            run.Current.ActiveFoodEffects.Add(timed);
+            run.Current.MapState.TimePoints = 3.9f; // 烟测直接改档：当天只剩 0.1，用来验证「不足则整笔拒绝」
+            Require(!run.TrySpendTimePoints(0.2f, out string spendError) && timed.Remaining == 0.2f,
+                $"时间点不足时必须整笔拒绝、且不得扣食物寿命轴，实际：{spendError} / 剩余 {timed.Remaining}。");
+            run.Current.MapState.TimePoints = 0f; // 复位到当天满额（4.0），验证成功支付路径
+            Require(run.TrySpendTimePoints(0.1f, out _) && Math.Abs(timed.Remaining - 0.1f) < 1e-4f,
+                $"成功支付 0.1 时间点应把 TimePoint 轴扣到 0.1，实际 {timed.Remaining}。");
+            Require(run.TrySpendTimePoints(0.1f, out _) && !run.Current.ActiveFoodEffects.Contains(timed),
+                "TimePoint 轴用尽后该效果必须从存档里移除。");
+
+            // ⑥ BeginRestDay / ApplyRest(plan)：回复按真实饱食度、草稿消耗、跨天腐坏、DayCount 轴、烹饪次数归零
+            foreach (RunCharacterSlotSave slot in run.Current.CharacterSlots)
+            {
+                slot.CurrentHp = Math.Max(1, slot.MaxHp / 2);
+            }
+
+            // BeginRestDay 只在「尚不待休息」时记剩余（已在待休息态时保留跨日界那一刻的记录值）→ 先复位成确定态。
+            run.Current.MapState.TimePoints = 1f;
+            run.Current.MapState.PendingRestDay = false;
+            run.BeginRestDay();
+            Require(run.Current.MapState.PendingRestDay && Math.Abs(run.Current.MapState.RestRemainingTimePoints - 3f) < 1e-4f,
+                "BeginRestDay 应记下当刻的当天剩余（进程 1.0 → 剩余 3.0）并置「待休息」，实际 "
+                + $"{run.Current.MapState.RestRemainingTimePoints} / {run.Current.MapState.PendingRestDay}。");
+            RunBagEntrySave restFood = RunBagSystem.Add(run.Current, BagCategory.Food, 404, 1);   // 饱食 4、3 天
+            RunBagEntrySave spoiling = RunBagSystem.Add(run.Current, BagCategory.Food, 406, 1);  // 1 天 → 本次休息后腐坏
+            RunFoodEffectSave dayEffect = RunFoodSystem.BuildEffectSave(spec, "香草炖菜");
+            dayEffect.DurationKind = (int)FoodEffectDurationKind.DayCount;
+            dayEffect.Remaining = 2f;
+            run.Current.ActiveFoodEffects.Add(dayEffect);
+            run.Current.CookedThisRest = 2;
+            Require(RunFoodSystem.TryBuildPlan(run.Current, new[] { restFood.InstanceId },
+                    out RunFoodSystem.CampFirePlan plan, out string planError),
+                $"篝火草稿应能建起来，实际：{planError}。");
+            int[] hpBefore = run.Current.CharacterSlots.Select(x => x.CurrentHp).ToArray();
+            int[] healExpected = new int[hpBefore.Length];
+            for (int i = 0; i < hpBefore.Length; i++)
+            {
+                healExpected[i] = RunRestResolver.PreviewHeal(run.Current, i, RunWatchMode.None, 0, plan.TotalSatiety);
+            }
+
+            List<int> healed = run.ApplyRest(RunWatchMode.None, 0, plan);
+            Require(healed.Count == hpBefore.Length, "ApplyRest 必须按角色槽逐条返回回复量。");
+            for (int i = 0; i < hpBefore.Length; i++)
+            {
+                int expected = Math.Min(run.Current.CharacterSlots[i].MaxHp, hpBefore[i] + healExpected[i]);
+                Require(run.Current.CharacterSlots[i].CurrentHp == expected,
+                    $"ApplyRest 回复量应含篝火饱食度（槽 {i} 期望 {expected}，实际 {run.Current.CharacterSlots[i].CurrentHp}）。");
+            }
+
+            Require(RunBagSystem.Find(run.Current, restFood.InstanceId) == null, "休息结算应消耗草稿里的食物实例。");
+            Require(RunBagSystem.Find(run.Current, spoiling.InstanceId) == null, "跨天休息应移除有效期归零的食物。");
+            Require(run.Current.ActiveFoodEffects.Any(x => x.SourceFoodId == "蜂蜜烤肉"
+                    && x.DurationKind == (int)FoodEffectDurationKind.BattleCount && Math.Abs(x.Remaining - 1f) < 1e-4f),
+                "吃掉的 404 应把它的 BattleCount:1 效果写进存档。");
+            Require(Math.Abs(dayEffect.Remaining - 1f) < 1e-4f, $"跨天应扣 DayCount 轴（2 → 1），实际 {dayEffect.Remaining}。");
+            Require(run.Current.CookedThisRest == 0, "休息结算后本次休息的烹饪次数必须归零。");
+            Require(Math.Abs(run.Current.MapState.TimePoints - 4f) < 1e-4f && run.CurrentDay == 2 && !run.Current.MapState.PendingRestDay,
+                $"休息后应推进到第 2 天满额并清掉「待休息」，实际 {run.Current.MapState.TimePoints} / 第 {run.CurrentDay} 天。");
+
+            // ⑦ AbortRun / DeleteSave：真删文件；没有当前局时 Save 不得写档
+            run.AbortRun();
+            Require(!run.HasActiveRun && !RunSession.HasSave(), "AbortRun 必须删档并清掉当前局。");
+            Require(!run.LoadSave(), "存档不存在时 LoadSave 必须返回 false。");
+            Require(run.Current == null, "读档失败不得改动内存里的当前局。");
+            run.Save();
+            Require(!RunSession.HasSave(), "没有当前局时 Save 不得写出存档文件。");
+
+            // ⑧ v3 旧档 → v4 迁移 + 旧结算候选按「1 份」还原（走真实 LoadSave，不绕过读档路径）
+            run.StartNewRun(new[] { 1002, 1003, 1004 }, 777);
+            RunSaveData legacy = RunSaveJson.Deserialize(RunSaveJson.Serialize(run.Current));
+            legacy.SchemaVersion = 3;
+            legacy.BagEntries.Clear();
+            legacy.CarryItemSlots.Clear();
+            legacy.ActiveFoodEffects.Clear();
+            legacy.Materials[101] = 4;
+            legacy.Items[301] = 2;
+            legacy.Equipment[9001] = 1;
+            legacy.SettlementCandidateCardIds = new List<int> { 501, 502, 503 };
+            legacy.SettlementCardPools.Clear();
+            legacy.SettlementCardClaims.Clear();
+            legacy.MapState.NormalEncounterIndex = 2;
+            legacy.MapState.NormalEncounterCounts.Clear();
+            WriteRunSave(RunSaveJson.Serialize(legacy));
+
+            Require(run.LoadSave(), "v3 旧档必须能读进来（不弃档）。");
+            RunSaveData migrated = run.Current;
+            Require(migrated.SchemaVersion == RunSaveData.CurrentSchemaVersion, "读档后必须标到当前版本。");
+            Require(migrated.CarryItemSlots.Count == RunBagSystem.CarryItemSlotCount, "旧档随身格必须补齐 3 格。");
+            Require(RunBagSystem.CountOf(migrated, BagCategory.Material, 101) == 4
+                    && RunBagSystem.CountOf(migrated, BagCategory.Item, 301) == 2
+                    && RunBagSystem.CountOf(migrated, BagCategory.Equipment, 9001) == 1,
+                "旧档的三个计数字典必须原样展开成 BagEntries（不丢数）。");
+            Require(migrated.SettlementCardPools.Count == 1
+                    && migrated.SettlementCardPools[0].SlotIndex == SettlementRewardPresenter.LegacySlotIndex
+                    && migrated.SettlementCardPools[0].CandidateCardIds.SequenceEqual(new[] { 501, 502, 503 }),
+                "旧档的单份结算候选必须按「1 份」还原到 SettlementCardPools（MigrateSettlementCompat）。");
+            Require(migrated.MapState.NormalEncounterIndex == 0 && migrated.MapState.GetNormalEncounterCount(1) == 2,
+                "旧档全局敌袭计数必须迁入当前层并清零（P2-11）。");
+            // 迁移只在内存完成（`LoadSave` 不写档）→ 落档要等下一次 `Save()`；再读回应幂等（不二次展开）。
+            Require(RunSaveJson.Deserialize(FileAccess.GetFileAsString(RunSession.SavePath)).BagEntries.Count == 0,
+                "读档迁移不得改写存档文件（口径：迁移在内存完成，落档等下一次 Save）。");
+            run.Save();
+            RunSaveData roundTripped = RunSaveJson.Deserialize(FileAccess.GetFileAsString(RunSession.SavePath));
+            Require(roundTripped.BagEntries.Count == migrated.BagEntries.Count
+                    && RunBagSystem.CountOf(roundTripped, BagCategory.Equipment, 9001) == 1,
+                "迁移后落档应把展开出的 BagEntries 写进文件（读回数量与数量守恒一致）。");
+            run.ClearCurrent();
+            Require(run.LoadSave() && RunBagSystem.CountOf(run.Current, BagCategory.Material, 101) == 4,
+                "已是 v4 的档再读一次不得把旧字典二次展开（迁移幂等）。");
+            Require(run.Current.SettlementCardPools.Count == 1, "重读后结算候选份数不得翻倍（MigrateSettlementCompat 幂等）。");
+        }
+        finally
+        {
+            if (backup != null)
+            {
+                // 注意：写句柄必须**先关掉**再回读 —— FileAccess 有内部缓冲，未 Close 时另开的读句柄会读到旧内容
+                // （2026-10-02 实测：在 `using` 里直接 GetFileAsString 会稳定读到上一份更长的存档，误报「存档写坏」）。
+                using (FileAccess restore = FileAccess.Open(RunSession.SavePath, FileAccess.ModeFlags.Write))
+                {
+                    restore?.StoreBuffer(backup);
+                }
+
+                string restored = FileAccess.GetFileAsString(RunSession.SavePath);
+                bool parseable = true;
+                try
+                {
+                    parseable = RunSaveJson.Deserialize(restored) != null;
+                }
+                catch (Exception ex)
+                {
+                    parseable = false;
+                    GD.PrintErr($"[RunSession自检] 备份存档解析失败：{ex.Message}");
+                }
+
+                GD.Print($"[RunSession自检] 备份存档回写 {backup.Length} 字节（可解析={parseable}）。");
+                run.LoadSave();
+            }
+        }
+
+        GD.Print("RUN_SESSION_SMOKE_PASS: StartNewRun 建档 / Save-LoadSave 逐字往返 / ClearCurrent 不删档 / "
+            + "卡组边界 / SetCurrentNode+已访问幂等 / 时间点拒绝路径+寿命轴 / ApplyRest(plan) / AbortRun 删档");
+    }
+
+
+    /// <summary>读一张 CSV 的第 2 列（`DefinitionId`）集合：自检用它在不引入配表 API 的前提下校验初始武器名。</summary>
+    private static HashSet<string> LoadDefinitionIds(string resPath)
+    {
+        HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string line in LoadCsv.LoadCSVDataLines(resPath))
+        {
+            string[] fields = LoadCsv.ParseCSVFields(line);
+            if (fields.Length >= 2 && fields[1].Length > 0 && fields[1] != "DefinitionId")
+            {
+                ids.Add(fields[1]);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>把一段 JSON 直接写成运行局存档（`RunSession` 自检要伪造一份 v3 旧档）。</summary>
+    private static void WriteRunSave(string json)
+    {
+        using FileAccess file = FileAccess.Open(RunSession.SavePath, FileAccess.ModeFlags.Write);
+        file?.StoreString(json);
+    }
 
     private async System.Threading.Tasks.Task CaptureSmoke(string resPath)
+
     {
         await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         Require(GetViewport().GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath(resPath)) == Error.Ok, "无法保存运行局 UI 烟测截图：" + resPath);
@@ -1073,6 +1944,13 @@ public partial class RunFlowScene : Control
     private async System.Threading.Tasks.Task WaitFrames(int count)
     {
         for (int i = 0; i < count; i++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+    }
+
+    /// <summary>等营地休息流程把营地真的销毁（淡出是 0.35s 的秒级 Tween，不能按帧数死等）。</summary>
+    private async System.Threading.Tasks.Task WaitUntilCampDestroyed()
+    {
+        int frames = 0;
+        while (camp != null && GodotObject.IsInstanceValid(camp) && frames++ < 600) await WaitFrames(1);
     }
 
     /// <summary>烟测会新建本局并写档：先备份玩家存档，结束时还原，避免覆盖正式进度。</summary>
@@ -1182,6 +2060,20 @@ public partial class RunFlowScene : Control
         return null;
     }
 
+    /// <summary>
+    /// 数结算面板上**还看得见**的物品 Tab（2026-10-02 口径「领取后直接消失」的断言入口）：
+    /// 领取过的条目不再渲染，所以条数应随每次领取减一。
+    /// </summary>
+    private static int CountUnclaimedItemTabs(Node node)
+    {
+        int count = node is Button button && !button.Disabled && IsRewardLineText(button.Text) ? 1 : 0;
+        foreach (Node child in node.GetChildren())
+        {
+            count += CountUnclaimedItemTabs(child);
+        }
+        return count;
+    }
+
     private static bool IsRewardLineText(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
@@ -1235,6 +2127,34 @@ public partial class RunFlowScene : Control
             if (found != null) return found;
         }
         return null;
+    }
+
+    /// <summary>找第一个下拉框（营地守夜承担者）。</summary>
+    private static OptionButton FindOptionButton(Node node)
+    {
+        if (node is OptionButton option) return option;
+        foreach (Node child in node.GetChildren())
+        {
+            OptionButton found = FindOptionButton(child);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    /// <summary>取某点周围 r 像素内的最大红分量：判定自绘篝火是否真的画在了屏幕上（暗底 ≈ 0.04）。</summary>
+    private static float MaxRedAround(Image image, Vector2 center, int radius)
+    {
+        float max = 0f;
+        for (int dy = -radius; dy <= radius; dy++)
+        {
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                int x = Mathf.Clamp((int)center.X + dx, 0, image.GetWidth() - 1);
+                int y = Mathf.Clamp((int)center.Y + dy, 0, image.GetHeight() - 1);
+                max = Mathf.Max(max, image.GetPixel(x, y).R);
+            }
+        }
+        return max;
     }
 
     private static void Require(bool value, string message)

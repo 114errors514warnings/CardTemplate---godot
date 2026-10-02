@@ -36,14 +36,20 @@ public partial class HexBattleScene : Control
     /// <summary>是否处于移动规划态（战后烟测断言用）。</summary>
     public bool IsMovePlanning => movePlanning;
     /// <summary>
-    /// 烟测断言用（新案 §九 6）：战后操作态下，手牌槽 / 能量与额度面板 / 结束回合必须全部隐藏，
+    /// 烟测断言用（新案 §九 6）：战后操作态下，手牌槽 / 能量与额度面板 / 结束回合 / **底部操作区底板**必须全部隐藏，
     /// 且移动按钮文案不含「能量」。规划态下按钮文案是「取消移动」，该断言只在非规划态成立。
     /// </summary>
     public bool PostSettlementUiCollapsed => IsPostSettlementMode
         && handAreaNode != null && !handAreaNode.Visible
         && resPanelNode != null && !resPanelNode.Visible
         && endTurnButton != null && !endTurnButton.Visible
+        && bottomHudBackdropNode != null && !bottomHudBackdropNode.Visible
         && moveButton != null && moveButton.Text == "移动";
+
+    /// <summary>
+    /// 底部操作区底板（`bottomHudBackdrop`）是否已隐藏（2026-10-02 用户口径「底板随手牌区一起消失」）：烟测断言入口。
+    /// </summary>
+    public bool IsBottomHudBackdropHidden => bottomHudBackdropNode == null || !bottomHudBackdropNode.Visible;
     private Control handRow;
     private Control handPanelNode;
     private EventStoryOverlay storyOverlay;
@@ -62,6 +68,12 @@ public partial class HexBattleScene : Control
     private Label energyLabel;
     /// <summary>左下资源面板（角色名 / 能量 / 移动额度 / 三个牌堆按钮）：战后整块隐藏（新案 §四）。</summary>
     private PanelContainer resPanelNode;
+    /// <summary>
+    /// 底部操作区底板（HUD 最底层：衬托 HUD + 截获空白区域的鼠标输入）。
+    /// 战后**随手牌区一起消失**（2026-10-02 用户口径）：手牌收起了就不该留一条空底板；
+    /// 顺带把底部几行格点让回给战场（战后点选即移动，需要能点到它们）。
+    /// </summary>
+    private ColorRect bottomHudBackdropNode;
     /// <summary>结束回合按钮：战后隐藏，且不再触发敌人回合（新案 §四）。</summary>
     private Button endTurnButton;
     private bool victoryShown;
@@ -177,6 +189,15 @@ public partial class HexBattleScene : Control
             else if (!useSmokeFixture && UseRunSession) ConfigureRunDefinition(definition, level);
             Session = new BattlefieldSession(definition);
             if (UseRunSession) Session.RestoreRunState(RunSession.Instance.Current.CharacterSlots, RunSession.Instance.Current.DeckSlots);
+        // 食物效果（食物系统 §三 / 2026-10-02 口径 ②）：开局套用仍在寿命轴上的效果。
+        // 放在 RestoreRunState 之后（开局抽牌已完成）→ `DrawCard` 类效果是"额外多抽"，与设计口径一致。
+        if (UseRunSession && RunSession.Instance?.Current != null)
+        {
+            foreach (string foodLog in Session.ApplyBattleStartEffects(RunFoodSystem.ActiveForBattle(RunSession.Instance.Current)))
+            {
+                GD.Print($"[食物] 本场开场效果：{foodLog}");
+            }
+        }
             Session.Changed += RefreshHud;
             Session.Message += ShowMessage;
             if (ShowBuiltInResult) Session.Finished += ShowResult;
@@ -386,6 +407,9 @@ public partial class HexBattleScene : Control
                 if (effect == null) continue;
                 if (effect.Type == "HpDelta" && effect.Target == "SelectedPlayer") ApplyStoryHpDelta(effect.Value);
                 else if (effect.Type == "GoldDelta" && effect.Target == "Run") ApplyStoryGoldDelta(effect.Value);
+                // 时间点代价（事件系统 §2.2 / 代码需求清单 P0-3）：`value` = 回合数，1 回合 = 0.1 时间点（"0.5 时间点（5 回合）"）。
+                // 规范效果名 = `TimePointDelta`（`TimePoint` 为等价别名，便于早期配置直接写）。
+                else if ((effect.Type == "TimePointDelta" || effect.Type == "TimePoint") && effect.Target == "Run") ApplyStoryTimePointDelta(effect.Value);
                 else if (effect.Type == EventCardReward.EffectTypeCardAdd) continue; // 已由 TryEnterEventCardSettlement 处理
                 else ShowMessage($"剧情效果暂未支持：{effect.Type} / {effect.Target}");
             }
@@ -463,6 +487,36 @@ public partial class HexBattleScene : Control
         player.HP = Math.Clamp(player.HP + delta, 0, player.Max_HP);
         RefreshHud();
         ShowMessage($"剧情结果：{Session.Selected.Name} 生命 {before}→{player.HP}。");
+    }
+
+    /// <summary>
+    /// 事件选项的时间点代价（事件系统 §2.2）：`value` = 回合数（1 回合 = 0.1 时间点），
+    /// 等价写法「0.5 时间点（5 回合）」。时间点**只能消耗、不能回复**：value ≤ 0 一律拒绝；
+    /// 不足时整笔不做（选项在界面上应保持可见但禁用 —— 禁用预览属遗留，见 9 月施工文档 §48）。
+    /// </summary>
+    private void ApplyStoryTimePointDelta(int rounds)
+    {
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null)
+        {
+            ShowMessage("剧情结果：时间点变化（测试战场未加载局内存档，未落档）。");
+            return;
+        }
+
+        if (rounds <= 0)
+        {
+            ShowMessage($"剧情结果：时间点代价必须是正的回合数（收到 {rounds}）—— 时间点不能回复。");
+            return;
+        }
+
+        float cost = rounds * RunTimePoints.Step;
+        if (!run.TrySpendTimePoints(cost, out string error))
+        {
+            ShowMessage($"剧情结果：{error}");
+            return;
+        }
+
+        ShowMessage($"剧情结果：消耗 {RunTimePoints.FormatWithRounds(cost)}，当天剩余 {RunTimePoints.Format(run.RemainingToday)}。");
     }
 
     private void ApplyStoryGoldDelta(int delta)
@@ -554,17 +608,22 @@ public partial class HexBattleScene : Control
 
         // 底部操作区的最底层：既衬托 HUD，也必须截获空白区域的鼠标输入，
         // 避免手牌/装备/行动按钮之间的空隙把点击穿透到战场地图。
-        var bottomHudBackdrop = new ColorRect
+        // 战后（`SetPostSettlementMode`）整条底板**随手牌区一起隐藏**（2026-10-02 用户口径）：
+        // 手牌都收起了还留着一条空底板没有意义，且收起后底部几行格点能直接被点到（战后点选即移动）。
+        bottomHudBackdropNode = new ColorRect
         {
             Color = new Color(0.035f, 0.055f, 0.075f, 0.82f),
             MouseFilter = MouseFilterEnum.Stop,
         };
-        Place(bottomHudBackdrop, 0f, 0.68f, 1f, 1f);
-        AddChild(bottomHudBackdrop);
+        Place(bottomHudBackdropNode, 0f, 0.68f, 1f, 1f);
+        AddChild(bottomHudBackdropNode);
 
         // ── 左上：关卡目标 ──
+        // 顶边必须让开常驻顶部按钮栏（`RunUiLayout`：第一行 0.025–0.08，剧情行 0.09–0.145）：
+        // 曾用 0.02 起排，与常驻栏左侧的时间点行（`第 N 天 · 剩余 X.X / 4.0`）完全重叠。
+        // 面板本身 MouseFilter = Ignore，下移只为不遮挡，不影响点击穿透。
         var goal = MakePanel();
-        Place(goal, 0.02f, 0.02f, 0.17f, 0.22f);
+        Place(goal, 0.02f, RunUiLayout.BattleHudTop, 0.17f, RunUiLayout.BattleHudTop + 0.14f);
         AddChild(goal);
         var goalBox = new VBoxContainer(); goalBox.AddThemeConstantOverride("separation", 6); goal.AddChild(goalBox);
         goalBox.AddChild(Label("关卡目标", 18, Colors.White));
@@ -1009,12 +1068,15 @@ public partial class HexBattleScene : Control
     }
 
     /// <summary>
-    /// 战后表现收口（新案 §四）：手牌槽 / 能量与额度 / 牌堆 / 结束回合整块隐藏；
+    /// 战后表现收口（新案 §四）：手牌槽 / 底部操作区底板 / 能量与额度 / 牌堆 / 结束回合整块隐藏；
     /// 角色 Tab 行、左右手装备槽、当前格与随身道具槽保留（只读，不响应拖拽）。
+    /// **底部底板随手牌区一起消失是 2026-10-02 用户口径**（原来只收手牌槽、底板留着）；
+    /// 回改方式：删掉下面这一行 + `PostSettlementUiCollapsed` 里的对应条件即可（其余不变）。
     /// </summary>
     private void ApplyPostSettlementVisibility()
     {
         if (handAreaNode != null) handAreaNode.Visible = !IsPostSettlementMode;
+        if (bottomHudBackdropNode != null) bottomHudBackdropNode.Visible = !IsPostSettlementMode;
         if (resPanelNode != null) resPanelNode.Visible = !IsPostSettlementMode;
         if (endTurnButton != null) endTurnButton.Visible = !IsPostSettlementMode;
         if (moveButton != null) moveButton.Visible = true;

@@ -87,6 +87,10 @@ public static class LoadDropTableCsv
 		{
 			return DropCategory.Key;
 		}
+		if (string.Equals(trimmed, "食物", StringComparison.Ordinal) || trimmed.IndexOf("食物", StringComparison.Ordinal) >= 0)
+		{
+			return DropCategory.Food;
+		}
 
 		return Enum.TryParse(trimmed, true, out DropCategory category) ? category : DropCategory.Card;
 	}

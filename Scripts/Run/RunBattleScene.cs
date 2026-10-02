@@ -98,7 +98,34 @@ public partial class RunBattleScene : Control
 		battleView.BattleFinished += OnHexBattleFinished;
 		battleView.PostBattleStateChanged += OnPostBattleStateChanged;
 		AddChild(battleView); // AddChild 同步跑 HexBattleScene._Ready：BattleReady 已在上一行的事件处回填 battlefield
+		// 战斗回合计点（地图玩法 §5.1）：订阅必须在 AddChild 之后 —— BattleReady 在 _Ready 内触发，此时才有 Session。
+		if (battlefield != null)
+		{
+			battlefield.PlayerRoundStarted += OnPlayerRoundStarted;
+		}
+
 		return true;
+	}
+
+	/// <summary>
+	/// 战斗回合计点：每经过 1 个战斗中的回合 +0.1 时间点（10 回合 = 1 时间点）。
+	/// 战后操作态没有回合推进（`IsPostSettlementMode`，交互案 §四），因此不会继续计点。
+	/// </summary>
+	private void OnPlayerRoundStarted(int round)
+	{
+		RunSession session = RunSession.Instance;
+		if (session?.Current == null || battleView?.IsPostSettlementMode == true)
+		{
+			return;
+		}
+
+		if (!session.TryAddTimePoints(RunTimePoints.BattleRoundCost, out _))
+		{
+			return;
+		}
+
+		GD.Print($"[时间点] 战斗回合 {round}：+{RunTimePoints.Format(RunTimePoints.BattleRoundCost)}，"
+			+ $"当天剩余 {RunTimePoints.Format(session.RemainingToday)}。");
 	}
 
 	/// <summary>
@@ -177,6 +204,13 @@ public partial class RunBattleScene : Control
 
 		// 结算被窃金币：只返还被击杀怪物偷走的部分，其余清账（未被击杀的不返还）。
 		refundedStolenGold = RefundStolenGold(session);
+
+		// 食物效果的 `BattleCount` 寿命轴：一场战斗打完扣 1（用尽即移除，食物系统 §三 / 2026-10-02 口径 ②）。
+		// 放在结算落档之前 —— 本场已经吃到效果，下一场才会少一层。
+		foreach (RunFoodEffectSave expiredFoodEffect in RunFoodSystem.TickBattleEnd(session.Current))
+		{
+			GD.Print($"[食物] 效果用尽：{RunFoodSystem.DescribeEffect(expiredFoodEffect)}（来源：{expiredFoodEffect.SourceFoodId}）。");
+		}
 
 		StageEncounterRow row = session.PendingEncounter;
 		int dropTableId = row != null ? row.DropTableId : session.Current.PendingDropTableId;
