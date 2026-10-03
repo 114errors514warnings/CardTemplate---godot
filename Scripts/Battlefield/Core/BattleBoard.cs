@@ -43,7 +43,14 @@ public sealed class GroundObject
     public bool NeedsTarget => SpatialShape != ItemSpatialShape.None;
 }
 
-/// <summary>Terrain states are independent of unit states. Trigger effects are wired in a later batch.</summary>
+/// <summary>
+/// 格点上的地形状态（与单位状态分别记录，玩法 §2.3 / §6.2）：`DefinitionId` 指向
+/// `DataBase/Battlefield/AreaObject.csv` 的区域物 / 格点效果行，`SourceUnitId` 是效果来源（施法者，0 = 无来源），
+/// `Stacks` 是地形自身层数，`RemainingTriggers` 是还需触发几次（0 = 无限次）。
+/// **2026-10-04（T3 + T8）起生效**：写入 / 移除走 <see cref="BattleBoard.TryAddTerrainState"/> 等三个 API，
+/// 进入触发在 `BattlefieldSession.OnEntered`、停留 / 回合末结算在 `BattlefieldSession.EndCurrentTurn`（每回合一次）。
+/// 战后快照仍不含地形状态（沿用「不落档」，见施工文档 §26 的存档口径）。
+/// </summary>
 public sealed record BattleTerrainState(string InstanceId, string DefinitionId, int SourceUnitId,
     int Stacks, int RemainingTriggers);
 
@@ -119,6 +126,83 @@ public sealed class BattleBoard
             removed = cell.MutableItems[index]; cell.MutableItems.RemoveAt(index);
         }
         objectIds.Remove(instanceId); Changed(cell); return true;
+    }
+
+    // ── 地形状态（格点效果）通道：2026-10-04（T3 + T8）新增 ──
+    // 与物件互斥无关（玩法 §6.3：地形状态可与单位、合法物件共存）；写入同样走 Changed(cell)（Revision++ 与 CellChanged 同口径）。
+
+    /// <summary>在格点上写入一条地形状态；同 `instanceId` 已存在时替换（幂等重放）。</summary>
+    public bool TryAddTerrainState(AxialHex coord, BattleTerrainState state, out string error)
+    {
+        error = "";
+        if (state == null || string.IsNullOrWhiteSpace(state.InstanceId) || string.IsNullOrWhiteSpace(state.DefinitionId))
+        {
+            error = "地形状态为空或缺少实例 / 定义 ID。";
+            return false;
+        }
+
+        if (!cells.TryGetValue(coord, out var cell)) { error = "格点不存在。"; return false; }
+        cell.MutableStates.RemoveAll(x => x.InstanceId == state.InstanceId);
+        cell.MutableStates.Add(state);
+        Changed(cell);
+        return true;
+    }
+
+    /// <summary>移除格点上的地形状态（触发次数耗尽或回合末衰减归零时调用）。</summary>
+    public bool TryRemoveTerrainState(AxialHex coord, string instanceId, out BattleTerrainState removed)
+    {
+        removed = null;
+        if (!cells.TryGetValue(coord, out var cell)) return false;
+        int index = cell.MutableStates.FindIndex(x => x.InstanceId == instanceId);
+        if (index < 0) return false;
+        removed = cell.MutableStates[index];
+        cell.MutableStates.RemoveAt(index);
+        Changed(cell);
+        return true;
+    }
+
+    /// <summary>
+    /// 触发一次地形状态：`RemainingTriggers > 0` 时 −1，减到 0 即从格点移除并返回 `removed = true`；
+    /// `RemainingTriggers == 0`（无限次）时不做任何改动。回传的 <paramref name="remaining"/> 是触发后的状态。
+    /// </summary>
+    public bool TryConsumeTerrainTrigger(AxialHex coord, string instanceId, out BattleTerrainState remaining, out bool removed)
+    {
+        remaining = null;
+        removed = false;
+        if (!cells.TryGetValue(coord, out var cell)) return false;
+        int index = cell.MutableStates.FindIndex(x => x.InstanceId == instanceId);
+        if (index < 0) return false;
+        BattleTerrainState state = cell.MutableStates[index];
+        if (state.RemainingTriggers <= 0)
+        {
+            remaining = state;
+            return true;
+        }
+
+        remaining = state with { RemainingTriggers = state.RemainingTriggers - 1 };
+        if (remaining.RemainingTriggers <= 0)
+        {
+            cell.MutableStates.RemoveAt(index);
+            removed = true;
+        }
+        else
+        {
+            cell.MutableStates[index] = remaining;
+        }
+
+        Changed(cell);
+        return true;
+    }
+
+    /// <summary>直接替换地形状态（回合末衰减层数用）；层数归零由调用方改用 <see cref="TryRemoveTerrainState"/>。</summary>
+    public bool TryReplaceTerrainState(AxialHex coord, string instanceId, BattleTerrainState updated)
+    {
+        if (updated == null || !cells.TryGetValue(coord, out var cell)) return false;
+        int index = cell.MutableStates.FindIndex(x => x.InstanceId == instanceId);
+        if (index < 0) return false;
+        cell.MutableStates[index] = updated;
+        Changed(cell);
+        return true;
     }
 
     private void Changed(BattleCell cell)

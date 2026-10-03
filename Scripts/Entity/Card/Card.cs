@@ -149,6 +149,13 @@ public partial class Card : Resource
 	[Export]
 	public CardKeyWord CardKeyWord { get; set; } = CardKeyWord.None; // 卡牌关键词（CSV固有）
 
+	/// <summary>
+	/// 卡牌价值等级（卡表 `CardTier` 列；[P1-6](../../README/施工文档/2026/2026.09/玩法/代码需求清单.md) 最小版 / 施工清单 T9）。
+	/// 列缺失或为空 = <see cref="CardTier.None"/>（无等级数据 → 掉落过滤不拦截该牌，并由加载侧打一次告警）。
+	/// </summary>
+	[Export]
+	public CardTier Tier { get; set; } = CardTier.None;
+
 	public List<AppliedKeywordEntry> AppliedKeywords { get; set; } = new List<AppliedKeywordEntry>(); // 运行时附加关键词
 
 	public CardConditionType[] ConditionParams { get; set; } = Array.Empty<CardConditionType>();
@@ -314,6 +321,12 @@ public partial class Card : Resource
 					if (result.EffectResult != null)
 						accumulatedShield += result.EffectResult.ShieldGained;
 					break;
+				case EffectType.ShieldByAttack:
+					// 「法术护盾」（法师，2026-10-03）：获得等同自身攻击力的格挡。
+					result = ApplyShieldByAttackEffect(source, resolvedTargets, effectArgs);
+					if (result.EffectResult != null)
+						accumulatedShield += result.EffectResult.ShieldGained;
+					break;
 				case EffectType.AddState:
 					result = ApplyAddStateEffect(source, target, resolvedTargets, effectArgs);
 					break;
@@ -375,7 +388,8 @@ public partial class Card : Resource
 
 	private static bool IsCardOperationEffect(EffectType effectType)
 	{
-		return effectType == EffectType.UpgradeBattleCard || effectType == EffectType.UpgradePermanentCard || effectType == EffectType.AddKeyword;
+		return effectType == EffectType.UpgradeBattleCard || effectType == EffectType.UpgradePermanentCard
+			|| effectType == EffectType.AddKeyword || effectType == EffectType.ConsumeSelectedHandCard;
 	}
 
 	private CardApplyResult ApplyDamageEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
@@ -568,6 +582,29 @@ public partial class Card : Resource
 			lastEffectResult = EffectSystem.ApplyHpLoss(resolvedTarget, hpLoss);
 			effectResults.Add(lastEffectResult);
 		}
+		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
+	}
+
+	private CardApplyResult ApplyShieldByAttackEffect(IUnitInstance source, List<IUnitInstance> resolvedTargets, int[] effectArgs)
+	{
+		int[] finalEffectArgs = GetShieldBaseArguments(effectArgs);
+		List<EffectResult> effectResults = new List<EffectResult>();
+		Dictionary<int, ShieldTargetSummary> targetSummaries = new Dictionary<int, ShieldTargetSummary>();
+		EffectResult lastEffectResult = null;
+		IUnitInstance lastTarget = null;
+		foreach (IUnitInstance resolvedTarget in resolvedTargets)
+		{
+			lastTarget = resolvedTarget;
+			lastEffectResult = EffectSystem.ApplyShieldByAttack(resolvedTarget, finalEffectArgs);
+			effectResults.Add(lastEffectResult);
+			AccumulateShieldSummary(targetSummaries, resolvedTarget, lastEffectResult);
+		}
+
+		if (effectResults.Count > 1)
+		{
+			lastEffectResult = BuildAggregatedShieldEffectResult(source, effectResults, targetSummaries);
+		}
+
 		return new CardApplyResult(true, this, source, lastTarget, lastEffectResult);
 	}
 

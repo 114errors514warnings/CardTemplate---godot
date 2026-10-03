@@ -5,8 +5,9 @@ using System.Linq;
 using CardSimulator;
 using CardSimulator.Battlefield;
 
-/// <summary>Run in Godot with -- --battlefield-smoke. Never instantiated by the .NET-only tests.</summary>
-public static class BattlefieldSceneSmoke
+/// <summary>Run in Godot with -- --battlefield-smoke. Never instantiated by the .NET-only tests.
+/// 2026-10-04 起拆成 partial：本批（T3–T9）的断言在同目录 `BattlefieldSceneSmoke.Cards.cs`。</summary>
+public static partial class BattlefieldSceneSmoke
 {
     public static async void Run(HexBattleScene scene)
     {
@@ -23,6 +24,16 @@ public static class BattlefieldSceneSmoke
             VerifyMonsterInitialStates();
             VerifyLevelConfigs();
             VerifyMonsterTableColumns();
+            VerifyCardSpatialTables();
+            VerifyNewSpatialCardGeometry();
+            VerifyTrapLanding();
+            VerifyAreaObjectTriggers();
+            VerifyTerrainStates();
+            VerifyIgniteTurnTick();
+            VerifyAllAlliesScope();
+            VerifySpatialFactionFilter();
+            VerifyHandCostConsume();
+            VerifyRewardTierFilter();
             VerifyItemTables();
             VerifyBattleRules();
             VerifyStateEnumNames();
@@ -639,6 +650,150 @@ public static class BattlefieldSceneSmoke
             "IsMinion=1 parses into Monster.IsMinion");
         Check(new MonsterInstance(probe[0]).IsMinion, "MonsterInstance inherits IsMinion");
         GD.Print($"BATTLEFIELD_MONSTER_TABLE_PASS: Monster.csv 的 IsMinion 列 = 第 {isMinionColumn + 1} 列，当前标记为爪牙的怪物 {minionRows} 只");
+    }
+
+    /// <summary>卡表的空间列是否真的进了内存字典（P2-29 / 2026-10-04）：只读自查，不改战场状态。
+    /// 用意是把「配表写了、程序读不到」的**静默退化**变成红灯；准入条件与 BattleCardSpatialRepository 一致 ——
+    /// 只有声明 <c>SpatialShape</c> 列的表才进字典（未声明的表进了字典会让攻击牌退化成 Shape=None）。
+    /// 另：判断表类型必须用 <c>LoadCsv.LoadCSVLines</c>（含表头），<c>LoadCSVDataLines</c> 会跳过表头。</summary>
+    private static void VerifyCardSpatialTables()
+    {
+        Dictionary<int, CardSpatialSpec> specs = BattleCardSpatialRepository.LoadAll();
+
+        CardSpatialSpec arrow = BattleCardSpatialRepository.ForCard(11003001);   // 精灵 穿林箭
+        Check(arrow != null && arrow.Shape == CardSpatialShape.Line && arrow.MaxRange == 5 && arrow.Length == 5 && arrow.Penetrates,
+            $"精灵卡表的空间列进了内存字典（穿林箭 {arrow?.Shape} / 射程 {arrow?.MaxRange} / 穿透 {arrow?.Penetrates}）");
+
+        CardSpatialSpec meteor = BattleCardSpatialRepository.ForCard(11004001);  // 法师 陨星投掷
+        Check(meteor != null && meteor.Shape == CardSpatialShape.Burst && meteor.MaxRange == 4 && meteor.Radius == 1,
+            $"法师卡表的空间列进了内存字典（陨星投掷 {meteor?.Shape} / 半径 {meteor?.Radius}）");
+
+        Check(BattleCardSpatialRepository.ForCard(21003003)?.TrapId == "vine_sentinel"
+            && BattleCardSpatialRepository.ForCard(21004003)?.TrapId == "frost_field",
+            "两张 Trap 卡的 TrapId 进了内存字典");
+
+        // 勇士表（既有空间卡）行为不变。
+        Check(BattleCardSpatialRepository.ForCard(11001002)?.Shape == CardSpatialShape.Fan
+            && BattleCardSpatialRepository.ForCard(11001003)?.AttackMode == WeaponAttackMode.Thrust
+            && BattleCardSpatialRepository.ForCard(21001005)?.TrapId == "test_trap", "勇士空间卡规格不变");
+
+        // 未声明空间列的表不得进字典：否则它们的攻击牌会拿到 Shape=None（而不是回落 Single）。
+        Check(BattleCardSpatialRepository.ForCard(10000001) == null && BattleCardSpatialRepository.ForCard(11002001) == null,
+            "未声明空间列的表（通用 / 重剑手）不进空间字典");
+
+        GD.Print($"BATTLEFIELD_CARD_SPATIAL_PASS: 空间卡表已进内存字典（共 {specs.Count} 张）：穿林箭 Line+穿透、陨星投掷 Burst 半径 1、古树哨卫 / 寒霜之地 TrapId 就位；通用 / 重剑手表按「未声明空间列」处理");
+    }
+
+    /// <summary>两张新空间牌的实机几何（P2-29 验收）：穿林箭「沿直线命中线上所有敌人」靠 Line+Pierce，
+    /// 陨星投掷「以目标格为中心半径 1 内的敌人」靠 Burst+Radius。都自建一场、不依赖主流程。</summary>
+    private static void VerifyNewSpatialCardGeometry()
+    {
+        const int arrowCardId = 11003001;    // 精灵 穿林箭：Line，Range=5;Length=5;Pierce
+        const int meteorCardId = 11004001;   // 法师 陨星投掷：Burst，Range=4;Radius=1
+
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        var definition = BattleMapDefinition.Parse(file.GetAsText());
+        definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        definition.MonsterIds = new List<int> { 3101 };
+        var battle = new BattlefieldSession(definition);
+        var slots = new List<RunCharacterSlotSave>
+        {
+            new() { CharacterId = 1002, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "长刀" },
+            new() { CharacterId = 1003, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "弓箭" },
+            new() { CharacterId = 1004, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "法典" },
+        };
+        List<RunDeckEntry> spatialDeck() => new() { new() { CardId = arrowCardId }, new() { CardId = meteorCardId } };
+        var decks = new List<List<RunDeckEntry>> { spatialDeck(), spatialDeck(), spatialDeck() };
+        battle.RestoreRunState(slots, decks);
+
+        // 1) 精灵 + 弓箭：找一段两格的空直线通道，把第一个敌人放到近格 —— 穿透生效则远格仍在受影响集合里。
+        battle.Select(battle.PlayerIds[1]);
+        AxialHex origin = battle.Selected.Coord;
+        AxialHex near = default, far = default;
+        bool foundLane = false;
+        foreach (AxialHex direction in BattleRangeResolver.SixNeighborOffsets)
+        {
+            AxialHex first = new(origin.Q + direction.Q, origin.R + direction.R);
+            AxialHex second = new(origin.Q + direction.Q * 2, origin.R + direction.R * 2);
+            if (battle.Board.IsWalkable(first) && battle.Board.IsWalkable(second)
+                && battle.Occupancy.At(first) == null && battle.Occupancy.At(second) == null)
+            {
+                near = first; far = second; foundLane = true; break;
+            }
+        }
+
+        Check(foundLane, "穿林箭穿透需要一段两格的空直线通道");
+        BattleUnitPlacement blocker = battle.Occupancy.Placements.Values
+            .First(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active);
+        battle.Occupancy.CommitMove(blocker, near);
+        IReadOnlyCollection<AxialHex> arrowCells = battle.GetAffectedCells(arrowCardId, near);
+        Check(arrowCells.Contains(near) && arrowCells.Contains(far),
+            $"穿林箭穿透：直线上的第一个敌人不截断（受影响格 {arrowCells.Count}，近格 {near.Q},{near.R}，远格 {far.Q},{far.R}）");
+
+        // 2) 法师 + 法典：陨星投掷的受影响集合 = 目标格 + 半径 1 邻域。
+        battle.Select(battle.PlayerIds[2]);
+        AxialHex center = battle.GetCastCandidates(meteorCardId).First(x => x != battle.Selected.Coord);
+        IReadOnlyCollection<AxialHex> meteorCells = battle.GetAffectedCells(meteorCardId, center);
+        Check(meteorCells.Contains(center) && BattleRangeResolver.Neighbors(center).Any(meteorCells.Contains),
+            $"陨星投掷覆盖半径 1（中心格 {center.Q},{center.R}，受影响格 {meteorCells.Count}）");
+
+        GD.Print("BATTLEFIELD_NEW_CARD_GEOMETRY_PASS: 穿林箭沿直线穿过首个敌人（Line+Pierce），陨星投掷覆盖目标格与半径 1 邻域（Burst+Radius=1）");
+    }
+
+    /// <summary>陷阱卡的两种落物语义（P2-30 前半 / 2026-10-04）：带落物结算的卡（寒霜之地）落物时按
+    /// EffectType/Params 打该格上的敌方单位并把物留在该格；纯落物卡（埋设陷阱）只在空格落物、不结算效果。</summary>
+    private static void VerifyTrapLanding()
+    {
+        const int frostCardId = 21004003;    // 法师 寒霜之地：Damage|AddState + 2;0|2;2;1，Trap/Range=4/frost_field
+        const int testTrapCardId = 21001005; // 勇士 埋设陷阱：EffectType=None，Trap/Range=1/test_trap
+
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        var definition = BattleMapDefinition.Parse(file.GetAsText());
+        definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        definition.MonsterIds = new List<int> { 3101 };
+        var battle = new BattlefieldSession(definition);
+        var slots = new List<RunCharacterSlotSave>
+        {
+            new() { CharacterId = 1002, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "长刀" },
+            new() { CharacterId = 1003, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "弓箭" },
+            new() { CharacterId = 1004, CurrentHp = 30, MaxHp = 30, EquippedWeaponDefinitionId = "法典" },
+        };
+        var decks = new List<List<RunDeckEntry>>
+        {
+            new() { new() { CardId = testTrapCardId } },
+            new() { new() { CardId = frostCardId } },
+            new() { new() { CardId = frostCardId } },
+        };
+        battle.RestoreRunState(slots, decks);
+
+        // 1) 寒霜之地：把敌人挪到射程内的目标格 → 落物即结算（一次攻击 + 1 层虚弱），再把 frost_field 留在该格。
+        battle.Select(battle.PlayerIds[2]);   // 法师 + 法典（射程 4）
+        BattleUnitPlacement victim = battle.Occupancy.Placements.Values
+            .First(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active);
+        AxialHex frostCell = battle.GetCastCandidates(frostCardId).First(cell => cell != battle.Selected.Coord);
+        battle.Occupancy.CommitMove(victim, frostCell);
+        int hpBefore = victim.Unit.HP, shieldBefore = victim.Unit.Shield, energyBefore = battle.Selected.Unit.Energy;
+        Check(battle.GetCastCandidates(frostCardId).Contains(frostCell), "带落物结算的陷阱卡可以瞄准站着敌人的格");
+        Check(battle.TryCastCard(frostCardId, frostCell, out string frostError), "寒霜之地出牌：" + frostError);
+        Check(victim.Unit.HP + victim.Unit.Shield < hpBefore + shieldBefore,
+            $"寒霜之地落物时该格敌方挨了一次攻击（HP {hpBefore}→{victim.Unit.HP}，护盾 {shieldBefore}→{victim.Unit.Shield}）");
+        Check(StateSystem.TryGetStateStacks(victim.Unit, StateType.Weak, out int weak) && weak >= 1,
+            "寒霜之地落物时该格敌方被施加 1 层虚弱");
+        Check(battle.Board.Cells[frostCell].Trigger?.DefinitionId == "frost_field", "寒霜之地留在该格（TrapId=frost_field）");
+        Check(battle.Selected.Unit.Energy == energyBefore - 1, "寒霜之地按费用消耗能量");
+
+        // 2) 埋设陷阱（纯落物卡）：目标格必须为空，只落物、不结算效果（与改动前一致）。
+        battle.Select(battle.PlayerIds[0]);   // 勇士 + 长刀（射程 2）
+        AxialHex emptyCell = BattleRangeResolver.Neighbors(battle.Selected.Coord)
+            .First(cell => battle.Board.IsWalkable(cell) && battle.Occupancy.At(cell) == null && battle.Board.Cells[cell].Items.Count == 0);
+        int trapEnergyBefore = battle.Selected.Unit.Energy;
+        Check(battle.TryCastCard(testTrapCardId, emptyCell, out string trapError), "埋设陷阱出牌：" + trapError);
+        Check(battle.Board.Cells[emptyCell].Trigger?.DefinitionId == "test_trap", "埋设陷阱仍在目标格落物（definitionId 不变）");
+        Check(battle.Selected.Unit.Energy == trapEnergyBefore - 1, "埋设陷阱按费用消耗能量");
+
+        GD.Print("BATTLEFIELD_TRAP_LANDING_PASS: 寒霜之地落物即结算（一次攻击 + 1 层虚弱 + frost_field 留场），埋设陷阱维持「空格落物、不结算效果」");
     }
 
     /// <summary>关卡级战斗规则（`BattleRule` 列）：枚举解析、规则挂载、意图批次节奏，以及逃跑行为的离场。</summary>

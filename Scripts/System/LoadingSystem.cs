@@ -72,6 +72,9 @@ public partial class LoadingSystem : Node
 	/// <summary>
 	/// 缓存角色卡池来源行（CharacterRewardPool.csv）
 	/// </summary>
+	/// <summary>「该表没有 CardTier 等级数据」告警去重（每种来源只打一次，2026-10-04 / T9）。</summary>
+	private static readonly HashSet<string> missingTierWarnedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
 	private static List<CharacterRewardSource> characterRewardPoolCache = new List<CharacterRewardSource>();
 
 	/// <summary>
@@ -393,13 +396,19 @@ public partial class LoadingSystem : Node
 		cardCache.Clear();
 		List<string> csvPaths = new List<string>();
 		CollectCsvFiles(folderPath, csvPaths);
+		// DirAccess 的枚举顺序不保证稳定：先排序再合并，保证「同 CardId 哪个文件先到」在每台机器上一致。
+		csvPaths.Sort(StringComparer.Ordinal);
 		foreach (string path in csvPaths)
 		{
 			MergeCardsFromCsvIntoCache(path);
 		}
 	}
 
-	private static void CollectCsvFiles(string folderPath, List<string> result)
+	/// <summary>
+	/// 递归收集文件夹（含子文件夹）下的全部 .csv 路径。不保证顺序，调用方需要确定性时自行排序
+	/// （见 LoadAllCardsFromFolder 与 BattleCardSpatialRepository.LoadAll）。
+	/// </summary>
+	public static void CollectCsvFiles(string folderPath, List<string> result)
 	{
 		DirAccess dir = DirAccess.Open(folderPath);
 		if (dir == null)
@@ -894,7 +903,13 @@ public partial class LoadingSystem : Node
 		return string.Empty;
 	}
 
-	/// <summary>获取某角色可获得的卡牌模板 id 集合（通用 + 角色专属，来源 CharacterRewardPool.csv）。</summary>
+	/// <summary>
+	/// 获取某角色可获得的卡牌模板 id 集合。
+	/// **归属规则**（[总体卡牌设计](../../README/玩法说明文档/系统规则/卡牌系统/总体卡牌设计.md)「卡牌归属与掉落」，
+	/// 2026-10-03 用户口径）：战斗中掉落的牌**必须是该角色的专有牌**（`DataBase/Card/&lt;角色名&gt;Card.csv`），
+	/// **不包含通用牌**（`DataBase/Card/通用/通用Card.csv`）；`CharacterRewardPool.csv` 只登记候选来源。
+	/// 「留个口」＝ <see cref="CardRewardOwnership.IncludeGenericSources"/>：特殊装备效果落地时按装备放行通用来源。
+	/// </summary>
 	public static List<int> GetCharacterRewardCardIds(int characterId)
 	{
 		if (characterRewardPoolCache.Count == 0)
@@ -910,14 +925,38 @@ public partial class LoadingSystem : Node
 				continue;
 			}
 
+			if (CardRewardOwnership.IsGenericSource(source.CardSource) && !CardRewardOwnership.IncludeGenericSources)
+			{
+				continue; // 通用牌不属于任何角色专有 —— 默认不作掉落候选。
+			}
+
 			string path = "res://DataBase/Card/" + source.CardSource.TrimStart('/');
 			Card[] cards = LoadCardCsv.LoadCardsFromCSV(path);
+			bool missingTierWarned = false;
 			foreach (Card card in cards)
 			{
-				if (card != null && !ids.Contains(card.CardId))
+				if (card == null || ids.Contains(card.CardId))
 				{
-					ids.Add(card.CardId);
+					continue;
 				}
+
+				// 等级条件（2026-10-04 用户口径 / T9）：只含该角色 B–S 级专属牌，C / D 级初始牌不算掉落。
+				// 缺等级数据（CardTier.None）时不拦截，只在该表第一次遇到时告警一次（不静默丢牌）。
+				if (card.Tier == CardTier.None && !missingTierWarned)
+				{
+					missingTierWarned = true;
+					if (missingTierWarnedSources.Add(path))
+					{
+						GD.PrintErr($"[掉落候选] {source.CardSource} 没有 CardTier 等级数据 —— 该表按「不过滤等级」处理（见施工文档 T9）。");
+					}
+				}
+
+				if (!CardRewardOwnership.IsCardEligibleForReward(card))
+				{
+					continue;
+				}
+
+				ids.Add(card.CardId);
 			}
 		}
 

@@ -297,6 +297,30 @@ public static class StateSystem
 		return removedStacks;
 	}
 
+	/// <summary>
+	/// 屏障（Barrier）：消耗 1 层把**该次攻击伤害**降为 0（多段攻击每段各消耗 1 层）。
+	/// 由攻击结算路径（<c>AttackEffect</c> / <c>ShieldSlamEffect</c>）在扣护盾与写 HP **之前**调用。
+	/// 完整语义（连带免除该次攻击附带的效果）尚未实现，见 2026-10-03 的 10 月施工文档 §20。
+	/// </summary>
+	public static bool TryConsumeBarrier(IUnitInstance target, out int remainingStacks)
+	{
+		remainingStacks = 0;
+		if (target == null)
+		{
+			return false;
+		}
+
+		if (!TryGetStateStacks(target, StateType.Barrier, out int stacks) || stacks <= 0)
+		{
+			return false;
+		}
+
+		RemoveStateStacks(target, StateType.Barrier, 1);
+		TryGetStateStacks(target, StateType.Barrier, out remainingStacks);
+		AppendConsoleInfo($"{GetUnitLabel(target)} 的屏障抵消一次攻击伤害（剩余 {remainingStacks} 层）。");
+		return true;
+	}
+
 	public static bool TryRemoveFirstNormalDebuff(IUnitInstance unit, out StateType removedStateType)
 	{
 		removedStateType = StateType.None;
@@ -467,6 +491,34 @@ public static class StateSystem
 			AddOrUpdateState(unit, StateType.AddAttack, stacks);
 			AppendConsoleInfo($"{GetUnitLabel(unit)} 失去 {lostAmount} 生命，GainAttackOnHpLoss 触发，+{stacks} 攻击（AddAttack）。");
 		}
+	}
+
+	/// <summary>
+	/// 燃烧（Ignite）回合结算 DoT（2026-10-04 / T7，拍板取「方案 A：DoT」）：
+	/// 每层 1 点**平伤**（先吃护盾，不吃攻击力 / 虚弱），结算后层数 −1（归零即移除）。
+	/// 调用点是战场每个单位的回合开始（`BattlefieldSession` 的玩家回合入口 / `TryBeginNextMonsterAction`），
+	/// 与既有 `OnTurnStart → StateDecayProcessor.ProcessDecayAtTiming(OnTurnStart)` **顺序并列**，
+	/// 不改动既有顺序（见 问题分析与解决规范 §顺序铁律）。返回本次实际造成的伤害（0 = 没燃烧）。
+	/// </summary>
+	public static int ProcessIgniteTick(IUnitInstance unit)
+	{
+		if (unit == null || !TryGetStateStacks(unit, StateType.Ignite, out int stacks) || stacks <= 0)
+		{
+			return 0;
+		}
+
+		int damage = stacks;   // 1 层 = 1 点
+		int absorbed = Math.Min(unit.Shield, damage);
+		unit.Shield -= absorbed;
+		int hpLoss = damage - absorbed;
+		if (hpLoss > 0)
+		{
+			unit.HP = Math.Max(0, unit.HP - hpLoss);
+		}
+
+		RemoveStateStacks(unit, StateType.Ignite, 1);
+		AppendConsoleInfo($"{GetUnitLabel(unit)} 燃烧结算：受到 {damage} 点伤害（护盾吸收 {absorbed}），燃烧层数 −1。");
+		return damage;
 	}
 
 	public static void OnMonsterAttackPlayer(IUnitInstance attacker, IUnitInstance target)

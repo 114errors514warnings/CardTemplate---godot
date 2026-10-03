@@ -35,6 +35,22 @@ namespace CardSimulator
 		public KeywordFlag Flags;
 	}
 
+/// <summary>
+/// 卡牌价值等级（[卡牌数值平衡标准](../../../../README/玩法说明文档/系统规则/数值平衡/卡牌数值平衡标准.md) §4.3）。
+/// 2026-10-04（P1-6 最小版 / 施工清单 T9）：运行时卡表新增 `CardTier` 列，只服务「掉落候选仅含该角色 B–S 级专属牌」。
+/// 次序有意义：`Tier >= B` = 允许进掉落候选；`None` = 该行没有等级数据（按「不过滤」处理并告警，不静默丢牌）。
+/// </summary>
+public enum CardTier
+{
+	None = 0,   // 未落表 / 无等级数据源
+	D = 1,
+	C = 2,      // 角色初始牌档（不进掉落候选）
+	B = 3,
+	A = 4,
+	S = 5,
+}
+
+
 	public enum CardConditionType
 	{
 		None = 0,
@@ -66,6 +82,8 @@ namespace CardSimulator
 		// ── 食物系统专用（2026-10-02 新增，见 食物系统 §三）──
 		ShieldOnFirstHit = 18,      // 本场战斗首次受到伤害时额外获得护盾（参数 0 = 护盾值）；食物「烤蟾蜍」用
 		SurviveFatalOnce = 19,      // 本场战斗首次生命降至 0 时按最大生命百分比回复（参数 0 = 百分比）；食物「凤凰羽羹」用
+		ShieldByAttack = 20,        // 获得等同自身攻击力的格挡（参数 0 = 额外护盾）；法师「法术护盾」用（2026-10-03）
+		ConsumeSelectedHandCard = 21, // 消耗选定的一张手牌（选牌通道；参数 0 = 目标类型、参数 1 = 张数，默认 1）；精灵「林间抚慰」「净化」用（2026-10-04，T6）
 	}
 
 	public enum CardOperationTargetType
@@ -101,6 +119,7 @@ namespace CardSimulator
 		DrawLock = 19,             // 战术支援：本回合不能再抽牌
 		NextBattleCardFree = 20,   // 统一战线：下一张战斗牌免费
 		Steal = 21,                // 窃取：怪物自身状态，层数 = 每次攻击窃取的金币数（已接入 RunGoldLedger，余额不足扣到归零）
+		Barrier = 22,              // 屏障：层数 = 还能抵挡的攻击次数；受到攻击伤害时消耗 1 层并把该次伤害降为 0（精灵「敏捷闪躲」用，2026-10-03）
 	}
 
 	/// <summary>TurnStartEffect 状态下，回合开始时获得的资源类型</summary>

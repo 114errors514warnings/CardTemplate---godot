@@ -82,6 +82,10 @@ public sealed partial class BattlefieldSession : IDisposable
         public int PlayerId;
         public Card SourceCard;
         public readonly List<(EffectType Effect, int[] Params)> Operations = new();
+        /// <summary>该选牌是「消耗 1 张手牌」成本（T6：`EffectType.ConsumeSelectedHandCard`），而非卡牌操作。</summary>
+        public bool ConsumeSelectedCard;
+        /// <summary>还需消耗几张（默认 1）。</summary>
+        public int ConsumeCount = 1;
     }
 
     /// <summary>One monster's action is deliberately advanced one visual beat at a time.</summary>
@@ -132,7 +136,14 @@ public sealed partial class BattlefieldSession : IDisposable
         CardSpatialSpec spec = GetSpatialSpec(cardId); var origin = Selected.Coord;
         if (spec.Shape == CardSpatialShape.SelfMove) return Movement.LegalDestinations(SelectedId);
         if (spec.Shape == CardSpatialShape.Trap)   // 陷阱不是攻击：射程仍用卡牌配置
-            return BattleRangeResolver.CellsWithinRange(origin, spec.MaxRange).Where(x => x != origin && Board.Cells.TryGetValue(x, out var c) && c.Walkable && c.Trigger == null && c.Items.Count == 0 && Occupancy.At(x) == null).ToArray();
+        {
+            // 带落物结算的陷阱卡（如寒霜之地）可以瞄准「站着敌人」的格 —— 落物时按卡的 EffectType/Params 打该格上的敌方单位；
+            // 纯落物卡（埋设陷阱 / 古树哨卫）维持「目标格必须为空」的既定规则（2026-10-04，P2-30 前半）。
+            bool resolvesOnLanding = CardResolvesOnLanding(cardId);
+            return BattleRangeResolver.CellsWithinRange(origin, spec.MaxRange).Where(x => x != origin && Board.Cells.TryGetValue(x, out var c) && c.Walkable
+                && c.Trigger == null && c.Items.Count == 0
+                && (Occupancy.At(x) == null || (resolvesOnLanding && Occupancy.At(x).Role != Selected.Role))).ToArray();
+        }
         if (spec.Shape == CardSpatialShape.None) return new[] { origin };
         // 攻击范围类数值（射程 / 直线长度 / 扇形半径）一律取武器攻击距离；爆炸半径与突刺位移格数保留卡牌值。
         CardSpatialSpec effective = EffectiveSpec(spec);
@@ -1113,6 +1124,9 @@ public sealed partial class BattlefieldSession : IDisposable
             }
             StateDecayProcessor.ProcessDecayAtTiming(character, DecayTrigger.OnTurnEnd);
         }
+
+        // 格点地形状态的「停留 / 回合末」结算（T8，2026-10-04）：一回合一次，放在怪物行动之前。
+        ResolveTerrainTurnEnd();
         monsterTurnQueue.Clear();
         activeMonsterAction = null;
         foreach (var enemy in Occupancy.Placements.Values.Where(x => x.Role == BattlefieldRole.Enemy && x.Presence == BattlefieldPresence.Active).OrderBy(x => x.UnitId))
@@ -1374,6 +1388,14 @@ public sealed partial class BattlefieldSession : IDisposable
             if (!Occupancy.Placements.TryGetValue(nextId, out var enemy) || enemy.Presence != BattlefieldPresence.Active) continue;
             StateSystem.OnTurnStart(enemy.Unit);
             StateDecayProcessor.ProcessDecayAtTiming(enemy.Unit, DecayTrigger.OnTurnStart);
+            // 燃烧回合结算（T7，2026-10-04）：与角色回合同一口径；烧死则跳过本次行动（胜负在下次评估收敛）。
+            if (StateSystem.ProcessIgniteTick(enemy.Unit) > 0)
+            {
+                Message?.Invoke($"{enemy.Name} 的燃烧结算完成。");
+                Occupancy.SyncDeaths(); EvaluateOutcome();
+                if (enemy.Presence != BattlefieldPresence.Active || enemy.Unit.HP <= 0) continue;
+            }
+
             MonsterInstance monster = enemy.Unit as MonsterInstance;
             EnemyIntentSpec spec = BattleEnemyIntentCatalog.Resolve(monster);
             // 逃跑行为不索敌：直接按"朝最近边界"规划，不走攻击管线。
@@ -1655,6 +1677,12 @@ public sealed partial class BattlefieldSession : IDisposable
             if (character.Shield > 0 && !StateSystem.TryGetStateStacks(character, StateType.ShieldCapEqualsHP, out _)) character.Shield = 0;
             StateSystem.OnTurnStart(character);
             StateDecayProcessor.ProcessDecayAtTiming(character, DecayTrigger.OnTurnStart);
+            // 燃烧回合结算（T7，2026-10-04）：挂在既有「OnTurnStart → ProcessDecay」之后，不改动既有顺序。
+            if (StateSystem.ProcessIgniteTick(character) > 0)
+            {
+                Message?.Invoke($"{p.Name} 的燃烧结算完成。");
+            }
+
             character.Energy = character.Max_costs;
             DrawCards(playerId, drawCardCount(p));
         }
@@ -1724,6 +1752,17 @@ public sealed partial class BattlefieldSession : IDisposable
         return false;
     }
 
+    /// <summary>陷阱 / 场地卡是否有「落物即结算」的效果（EffectType 里存在非 None 的项）。</summary>
+    private bool CardResolvesOnLanding(int cardId) => CardResolvesOnLanding(ResolveCardTemplate(cardId));
+
+    private static bool CardResolvesOnLanding(Card card) =>
+        card != null && card.EffectTypes != null && card.EffectTypes.Any(x => x != EffectType.None);
+
+    /// <summary>按 CardId 取卡模板：先手牌实例（带上限升级等运行时状态），再回落全局卡表。</summary>
+    private Card ResolveCardTemplate(int cardId) =>
+        hands.Values.SelectMany(x => x).FirstOrDefault(x => x != null && x.CardId == cardId)
+        ?? LoadingSystem.CardDictionary.GetValueOrDefault(cardId);
+
     public bool TryCastCard(int cardId, AxialHex target, out string error)
     {
         error = string.Empty;
@@ -1762,17 +1801,45 @@ public sealed partial class BattlefieldSession : IDisposable
                 return true;
 
             case CardSpatialShape.Trap:
+            {
                 if (BattleRangeResolver.Distance(p.Coord, target) > spec.MaxRange || !Board.Cells.ContainsKey(target)) { error = "超出陷阱射程或目标不存在。"; return false; }
                 if (!Board.IsWalkable(target)) { error = "陷阱只能放在可通行的格子上。"; return false; }
+                bool resolvesOnLanding = CardResolvesOnLanding(handCard);
+                BattleUnitPlacement standing = Occupancy.At(target);
+                if (Board.Cells[target].Items.Count > 0) { error = "陷阱目标必须没有单位或物品。"; return false; }
+                if (standing != null && !resolvesOnLanding) { error = "陷阱只能放在空格上（这张牌没有落物结算效果）。"; return false; }
+                if (standing != null && standing.Role == p.Role) { error = "不能对友方单位施放场地效果。"; return false; }
                 var trap = new GroundObject($"trap-{p.UnitId}-{Guid.NewGuid():N}".Substring(0, 20),
                     string.IsNullOrEmpty(spec.TrapId) ? "test_trap" : spec.TrapId, GroundObjectKind.Trap, EntryTriggerMode.EveryEntry);
-                if (Occupancy.At(target) != null || Board.Cells[target].Items.Count > 0 || !Board.TryAddObject(target, trap, out error))
-                { if (error.Length == 0) error = "陷阱目标必须没有单位或物品。"; return false; }
+                if (resolvesOnLanding)
+                {
+                    // 落物即结算：受影响格 = 目标格，结算目标 = 该格上的敌方单位。
+                    // 走既有出牌管线（费用 / 卡牌去向 / 打出记账 / 生命账本 / 胜负判定 / 消息都与其他卡同源），失败时不落物。
+                    var landingTargets = standing != null && standing.Presence == BattlefieldPresence.Active
+                        ? new[] { standing } : Array.Empty<BattleUnitPlacement>();
+                    if (!ApplyCardThroughExistingPipeline(p, handCard, standing, landingTargets, actualCost, out error)) return false;
+                    if (!Board.TryAddObject(target, trap, out string placeError))
+                    {
+                        error = string.IsNullOrEmpty(placeError) ? "陷阱落物失败。" : "陷阱落物失败：" + placeError;
+                        return false;
+                    }
+
+                    // 持续地形（T8，2026-10-04）：TriggerTiming 含 OnTurnEnd 的定义同时写成格点地形状态。
+                    WriteLandingTerrainState(trap, target, p);
+                    Message?.Invoke($"在 ({target.Q},{target.R}) 布下 {trap.DefinitionId}" +
+                        (landingTargets.Length > 0 ? $"（{standing.Name} 触发落物结算）。" : "。"));
+                    return true;
+                }
+
+                // 纯落物卡（埋设陷阱 / 古树哨卫）：没有可结算效果 → 沿用原有「落物 + 扣费 + 卡牌去向 + 提示」路径（进入触发内容待 P2-30 后半）。
+                if (!Board.TryAddObject(target, trap, out error)) { if (error.Length == 0) error = "陷阱目标必须没有单位或物品。"; return false; }
+                WriteLandingTerrainState(trap, target, p);
                 p.Unit.Energy -= actualCost;
                 CompleteCardLifecycle(p, handCard);
                 Notify();
-                Message?.Invoke($"在 ({target.Q},{target.R}) 埋设了陷阱：{trap.DefinitionId}（效果待接入）。");
+                Message?.Invoke($"在 ({target.Q},{target.R}) 埋设了陷阱：{trap.DefinitionId}（进入触发按 AreaObject.csv 结算）。");
                 return true;
+            }
 
             case CardSpatialShape.Single:
             case CardSpatialShape.Burst:
@@ -1793,7 +1860,13 @@ public sealed partial class BattlefieldSession : IDisposable
                 foreach (var cell in affected)
                 {
                     var unit = Occupancy.At(cell);
-                    if (unit != null && unit.Presence == BattlefieldPresence.Active && seen.Add(unit.UnitId)) affectedTargets.Add(unit);
+                    // 敌我过滤（T5，2026-10-04）：空间受影响集合只留**敌方** —— 此前横扫 / 烈闪突 / 陨星投掷 / 穿林箭
+                    // 会把友军一起打进真实伤害（D6）。与六边形交互案 §八「会命中友军的行动要求再次确认」的冲突
+                    // 按「误伤是 bug」处理，记录见施工文档 §26；打空语义不变（集合为空照常消耗卡牌）。
+                    if (unit != null && unit.Presence == BattlefieldPresence.Active && unit.Role != p.Role && seen.Add(unit.UnitId))
+                    {
+                        affectedTargets.Add(unit);
+                    }
                 }
                 // 允许“对空格/无敌人区域”出牌（打空）：卡牌照常消耗，伤害落空，其余效果仍结算。
                 // 目标格只需在射程内即可（无论其中是否存在单位）；无敌人时传入 null 目标并让效果层跳过空目标。
@@ -1824,7 +1897,7 @@ public sealed partial class BattlefieldSession : IDisposable
             default:
             {
                 // 无空间形状：自身目标卡（抽牌 / 护盾 / 自身状态）
-                var allies = ActiveAlliesWithin(p, 1);
+                var allies = ActiveAlliesOnField(p);
                 return ApplyCardThroughExistingPipeline(p, handCard, p, Array.Empty<BattleUnitPlacement>(), actualCost, out error, allies);
             }
         }
@@ -1835,7 +1908,7 @@ public sealed partial class BattlefieldSession : IDisposable
         IReadOnlyCollection<AxialHex> affectedCells = null, AxialHex? presentationCenter = null)
     {
         error = "";
-        var allyList = allies ?? ActiveAlliesWithin(source, 1);
+        var allyList = allies ?? ActiveAlliesOnField(source);
         var tracked = Occupancy.Placements.Values.Where(x => x.Presence == BattlefieldPresence.Active).ToArray();
         var beforeHp = tracked.ToDictionary(x => x.UnitId, x => x.Unit.HP);
         var beforeShield = tracked.ToDictionary(x => x.UnitId, x => x.Unit.Shield);
@@ -1930,9 +2003,8 @@ public sealed partial class BattlefieldSession : IDisposable
             : $"{source.Name} 的突进被单位、障碍或边界阻挡。" );
     }
 
-    private IReadOnlyList<BattleUnitPlacement> ActiveAlliesWithin(BattleUnitPlacement source, int range) =>
-        Occupancy.Placements.Values.Where(x => x.Role == source.Role && x.Presence == BattlefieldPresence.Active &&
-            AxialHex.Distance(source.Coord, x.Coord) <= range).ToArray();
+    private IReadOnlyList<BattleUnitPlacement> ActiveAlliesOnField(BattleUnitPlacement source) =>
+        Occupancy.Placements.Values.Where(x => x.Role == source.Role && x.Presence == BattlefieldPresence.Active).ToArray();
 
     private void BuildPendingOperations(BattleUnitPlacement source, Card card, Card.CardApplyResult result)
     {
@@ -1955,18 +2027,35 @@ public sealed partial class BattlefieldSession : IDisposable
                 choice ??= new PendingHandChoice { PlayerId = source.UnitId, SourceCard = card };
                 choice.Operations.Add((type, raw));
             }
+            else if (type == EffectType.ConsumeSelectedHandCard)
+            {
+                // 消耗成本（T6，2026-10-04）：林间抚慰 / 净化 的「消耗任意友军 1 张手牌」。
+                // 口径 = **仅施法者自己的手牌**（跨角色选牌要改 PendingHandChoice 结构与选牌 UI，本轮不做，见施工文档 §26）；
+                // 选中牌进消耗堆（与卡面关键词 Exhaust 同源）；没有别的牌可选时跳过成本、不阻塞回合。
+                choice ??= new PendingHandChoice { PlayerId = source.UnitId, SourceCard = card };
+                choice.ConsumeSelectedCard = true;
+                choice.ConsumeCount = raw.Length > 1 && raw[1] > 0 ? raw[1] : 1;
+            }
         }
-        if (choice != null && hands[choice.PlayerId].Count > 0)
+        // 候选牌要排除本牌自身（选牌发生在卡牌离手之前）：只剩本牌时视为「无人可选」→ 直接跳过成本。
+        if (choice != null && hands[choice.PlayerId].Any(x => x != null && !ReferenceEquals(x, choice.SourceCard)))
         {
             pendingChoice = choice;
-            Message?.Invoke("请选择一张手牌完成卡牌效果。");
+            Message?.Invoke(choice.ConsumeSelectedCard ? "请选择一张手牌作为消耗成本。" : "请选择一张手牌完成卡牌效果。");
         }
     }
 
     public bool TryChooseHandCard(Card target, out string message)
     {
         message = "";
-        if (pendingChoice == null || target == null || !hands[pendingChoice.PlayerId].Contains(target)) { message = "该牌不能用于当前选择。"; return false; }
+        if (pendingChoice == null || target == null || !hands[pendingChoice.PlayerId].Contains(target)
+            || (pendingChoice.ConsumeSelectedCard && ReferenceEquals(target, pendingChoice.SourceCard)))
+        {
+            message = "该牌不能用于当前选择。";
+            return false;
+        }
+
+        int operationCount = pendingChoice.Operations.Count;
         foreach (var operation in pendingChoice.Operations)
         {
             if (operation.Effect == EffectType.UpgradeBattleCard) target.BattleUpgradeLevel++;
@@ -1977,7 +2066,29 @@ public sealed partial class BattlefieldSession : IDisposable
                 if (keyword != CardKeyWord.None) target.AppliedKeywords.Add(new AppliedKeywordEntry { Keyword = keyword, Flags = flags });
             }
         }
-        message = $"已对 {target.CardName} 完成 {pendingChoice.Operations.Count} 项卡牌操作。";
+
+        if (!pendingChoice.ConsumeSelectedCard)
+        {
+            message = $"已对 {target.CardName} 完成 {operationCount} 项卡牌操作。";
+            pendingChoice = null; Notify(); return true;
+        }
+
+        // 消耗：从手牌移出并放进消耗堆。
+        hands[pendingChoice.PlayerId].Remove(target);
+        Occupancy.Placements[pendingChoice.PlayerId].Unit.ExhaustPile.Add(target);
+        int remainingNeeded = pendingChoice.ConsumeCount - 1;
+        bool anotherAvailable = remainingNeeded > 0 && hands[pendingChoice.PlayerId]
+            .Any(x => x != null && !ReferenceEquals(x, pendingChoice.SourceCard));
+        if (anotherAvailable)
+        {
+            pendingChoice.ConsumeCount = remainingNeeded;
+            message = $"已消耗 {target.CardName}，还需消耗 {remainingNeeded} 张。";
+            Message?.Invoke(message);
+            Notify();
+            return true;
+        }
+
+        message = $"已消耗 {target.CardName}（成本已支付）。";
         pendingChoice = null; Notify(); return true;
     }
 
@@ -2032,6 +2143,9 @@ public sealed partial class BattlefieldSession : IDisposable
         Phase = outcome; Movement.PlayerTurn = false; Notify(); Message?.Invoke(reason); Finished?.Invoke(outcome);
     }
 
+    /// <summary>未登记在 `AreaObject.csv` 的 TrapId 的兜底伤害（= 改动前写死的 3 点）。</summary>
+    private const int LegacyTrapFallbackDamage = 3;
+
     private void OnEntered(BattlefieldEntry entry)
     {
         UnitEntered?.Invoke(entry);
@@ -2041,25 +2155,252 @@ public sealed partial class BattlefieldSession : IDisposable
             : $"{p.Name} 进入 ({entry.To.Q},{entry.To.R})。";
         if (entry.Trigger != null)
         {
-            if (entry.Trigger.Kind == GroundObjectKind.Trap)
+            if (entry.Trigger.Kind is GroundObjectKind.Trap or GroundObjectKind.Mechanism)
             {
-                int before = p.Unit.HP;
-                int trapDamage = 3;
-                int absorbed = Math.Min(p.Unit.Shield, trapDamage);
-                p.Unit.Shield -= absorbed;
-                int hpLoss = trapDamage - absorbed;
-                if (hpLoss > 0) p.Unit.HP = Math.Max(0, p.Unit.HP - hpLoss);
-                TrackHpLoss(p.Unit, before);
-                text += $" 触发陷阱 {entry.Trigger.DefinitionId}，受到 {hpLoss + absorbed} 点伤害（护盾吸收 {absorbed}）。";
+                text += ResolveAreaObjectOnEnter(entry.Trigger, entry.To);
             }
             else
             {
-                text += $" 进入物件：{entry.Trigger.DefinitionId}（机关效果后续批次）。";
+                text += $" 进入物件：{entry.Trigger.DefinitionId}（效果待接入）。";
             }
         }
+
+        // 格点地形状态（T8）：与物件互斥无关，进入该格时按表结算 OnEnter 效果（触发次数由地形状态自身扣减）。
+        text += ResolveTerrainStates(entry.To, AreaTriggerTiming.OnEnter);
         Message?.Invoke(text);
         Occupancy.SyncDeaths(); EvaluateOutcome(); Notify();
     }
+
+    /// <summary>
+    /// 区域物（陷阱 / 机关）进入触发：按 `TrapId` 查 `DataBase/Battlefield/AreaObject.csv` 结算
+    /// （T3 = D2 后半 / P2-30 后半，2026-10-04）。未登记的定义保留「3 点伤害」兜底，保住
+    /// `debug.battle.place_trap` 等自定义 TrapId 的既有手感。
+    /// </summary>
+    private string ResolveAreaObjectOnEnter(GroundObject trigger, AxialHex cell)
+    {
+        AreaObjectSpec spec = BattlefieldAreaObjectRepository.ForId(trigger.DefinitionId);
+        if (spec == null)
+        {
+            int damage = ApplyFlatAreaDamage(Occupancy.At(cell), LegacyTrapFallbackDamage);
+            return $" 触发陷阱 {trigger.DefinitionId}，受到 {damage} 点伤害（该 TrapId 未登记 AreaObject.csv，按旧 3 点伤害兜底）。";
+        }
+
+        if (!spec.TriggersOnEnter)
+        {
+            return $" 进入 {spec.Name}（{spec.TrapId}）：触发时机不含「进入」，本次无效果。";
+        }
+
+        List<string> applied = ApplyAreaObjectEffects(spec, cell, sourcePlacement: null, out string targetName);
+        return applied.Count == 0
+            ? $" 进入 {spec.Name}（{spec.TrapId}）：对 {targetName} 未生效（SideFilter={spec.SideFilter}）。"
+            : $" 进入 {spec.Name}（{spec.TrapId}）：{targetName} {string.Join("、", applied)}。";
+    }
+
+    /// <summary>
+    /// 格点地形状态触发（T8）：`OnEnter` 挂在进入事件、`OnTurnEnd` 挂在回合末（<see cref="EndCurrentTurn"/>，一回合一次）。
+    /// 与陷阱物件共用同一张表与同一套结算。
+    /// </summary>
+    private string ResolveTerrainStates(AxialHex cell, AreaTriggerTiming timing)
+    {
+        if (!Board.Cells.TryGetValue(cell, out BattleCell battleCell) || battleCell.TerrainStates.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        List<string> notes = new List<string>();
+        foreach (BattleTerrainState state in battleCell.TerrainStates.ToArray())
+        {
+            AreaObjectSpec spec = BattlefieldAreaObjectRepository.ForId(state.DefinitionId);
+            if (spec == null)
+            {
+                notes.Add($"地形 {state.DefinitionId} 未登记 AreaObject.csv");
+                continue;
+            }
+
+            if ((spec.Timing & timing) == 0)
+            {
+                continue;
+            }
+
+            BattleUnitPlacement source = state.SourceUnitId != 0 && Occupancy.Placements.TryGetValue(state.SourceUnitId, out BattleUnitPlacement origin)
+                ? origin : null;
+            List<string> applied = ApplyAreaObjectEffects(spec, cell, source, out string targetName);
+            notes.Add(applied.Count == 0
+                ? $"{spec.Name}（{spec.TrapId}）对 {targetName} 未生效"
+                : $"{spec.Name}（{spec.TrapId}）对 {targetName} {string.Join("、", applied)}");
+            Board.TryConsumeTerrainTrigger(cell, state.InstanceId, out _, out _);
+        }
+
+        return notes.Count == 0 ? string.Empty : " 格点效果：" + string.Join("；", notes) + "。";
+    }
+
+    /// <summary>
+    /// 按表结算一次格点效果（进入 / 回合末共用）：目标 = 该格上的单位，按 <see cref="AreaObjectSpec.SideFilter"/> 过滤敌我。
+    /// 结算复用现成层 —— 伤害为**表值平伤**（先吃护盾，与改动前的陷阱口径一致，不吃攻击力 / 虚弱），
+    /// 状态走 `StateSystem.AddOrUpdateState`（**buff 与 debuff 同一条通道**，不为增益另开枚举，T8 口径）。
+    /// </summary>
+    private List<string> ApplyAreaObjectEffects(AreaObjectSpec spec, AxialHex cell, BattleUnitPlacement sourcePlacement, out string targetName)
+    {
+        List<string> applied = new List<string>();
+        BattleUnitPlacement target = Occupancy.At(cell);
+        targetName = target?.Name ?? "该格";
+        if (target == null || target.Presence != BattlefieldPresence.Active || target.Unit.HP <= 0)
+        {
+            targetName = "格上无单位";
+            return applied;
+        }
+
+        if (!PassesSideFilter(spec.SideFilter, sourcePlacement, target))
+        {
+            return applied;
+        }
+
+        for (int i = 0; i < spec.EffectTypes.Length; i++)
+        {
+            int[] args = spec.Params != null && i < spec.Params.Length ? spec.Params[i] : Array.Empty<int>();
+            int value = args.Length > 1 ? Math.Max(0, args[1]) : 1;
+            switch (spec.EffectTypes[i])
+            {
+                case EffectType.Damage:
+                    applied.Add($"受到 {ApplyFlatAreaDamage(target, value)} 点伤害");
+                    break;
+                case EffectType.HpLoss:
+                    EffectSystem.ApplyHpLoss(target.Unit, value);
+                    applied.Add($"失去 {value} 点生命（无视护盾）");
+                    break;
+                case EffectType.Heal:
+                {
+                    int healed = Math.Min(value, Math.Max(0, target.Unit.Max_HP - target.Unit.HP));
+                    target.Unit.HP += healed;
+                    applied.Add($"恢复 {healed} 点生命");
+                    break;
+                }
+                case EffectType.Shield:
+                    EffectSystem.ApplyShield(target.Unit, new[] { value });
+                    applied.Add($"获得 {value} 点护盾");
+                    break;
+                case EffectType.AddState:
+                {
+                    if (args.Length < 2 || !Enum.IsDefined(typeof(StateType), args[1]))
+                    {
+                        applied.Add("状态参数无效（已跳过）");
+                        break;
+                    }
+
+                    StateType stateType = (StateType)args[1];
+                    int stacks = args.Length > 2 && args[2] > 0 ? args[2] : 1;
+                    StateSystem.AddOrUpdateState(target.Unit, stateType, stacks, ownerUnit: sourcePlacement?.Unit);
+                    applied.Add($"获得 {stacks} 层 {stateType}");
+                    break;
+                }
+                default:
+                    applied.Add($"未支持的效果 {spec.EffectTypes[i]}（已跳过）");
+                    break;
+            }
+        }
+
+        if (applied.Count > 0)
+        {
+            Occupancy.SyncDeaths();
+        }
+
+        return applied;
+    }
+
+    /// <summary>格点效果的作用对象过滤：`Triggerer` = 格上单位本人；`Enemy` / `Ally` 相对来源单位（无来源时按「触发者」处理，即不过滤）。</summary>
+    private static bool PassesSideFilter(CellEffectSideFilter filter, BattleUnitPlacement source, BattleUnitPlacement target)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        return filter switch
+        {
+            CellEffectSideFilter.Enemy => source == null || target.Role != source.Role,
+            CellEffectSideFilter.Ally => source == null || target.Role == source.Role,
+            CellEffectSideFilter.All => true,
+            _ => true,   // Triggerer：结算目标本就是该格上的单位
+        };
+    }
+
+    /// <summary>表值平伤：先吃护盾再扣生命（与改动前 `OnEntered` 的陷阱伤害同口径），并登记生命账本。</summary>
+    private int ApplyFlatAreaDamage(BattleUnitPlacement target, int amount)
+    {
+        if (target == null || amount <= 0 || target.Unit.HP <= 0)
+        {
+            return 0;
+        }
+
+        int before = target.Unit.HP;
+        int absorbed = Math.Min(target.Unit.Shield, amount);
+        target.Unit.Shield -= absorbed;
+        int hpLoss = amount - absorbed;
+        if (hpLoss > 0)
+        {
+            target.Unit.HP = Math.Max(0, target.Unit.HP - hpLoss);
+        }
+
+        TrackHpLoss(target.Unit, before);
+        return absorbed + hpLoss;
+    }
+
+    /// <summary>
+    /// 回合末的格点效果结算（T8）：**每次玩家结束回合只跑一遍**（不按角色各扫一次，执行方案 §2.7 明确
+    /// 「避免三角色每人调用一次导致衰减三次」）；结算 `TriggerTiming` 含 `OnTurnEnd` 的地形状态，
+    /// 再按 `DecayTiming` 衰减层数（归零即移除）。
+    /// </summary>
+    private void ResolveTerrainTurnEnd()
+    {
+        foreach (BattleCell cell in Board.Cells.Values.ToArray())
+        {
+            if (cell.TerrainStates.Count == 0)
+            {
+                continue;
+            }
+
+            string note = ResolveTerrainStates(cell.Coord, AreaTriggerTiming.OnTurnEnd);
+            foreach (BattleTerrainState state in cell.TerrainStates.ToArray())
+            {
+                AreaObjectSpec spec = BattlefieldAreaObjectRepository.ForId(state.DefinitionId);
+                if (spec == null || spec.DecayTiming != TerrainDecayTiming.OnTurnEnd)
+                {
+                    continue;
+                }
+
+                int stacks = state.Stacks - 1;
+                if (stacks <= 0) Board.TryRemoveTerrainState(cell.Coord, state.InstanceId, out _);
+                else Board.TryReplaceTerrainState(cell.Coord, state.InstanceId, state with { Stacks = stacks });
+            }
+
+            if (note.Length > 0)
+            {
+                Message?.Invoke(note.Trim());
+            }
+        }
+    }
+
+    /// <summary>
+    /// 落物时写入「持续地形」状态（T8）：只有 `TriggerTiming` 含 `OnTurnEnd` 的定义才写 ——
+    /// `OnEnter` 由物件本体承载，避免同一次进入被结算两次。
+    /// </summary>
+    private void WriteLandingTerrainState(GroundObject trap, AxialHex cell, BattleUnitPlacement source)
+    {
+        AreaObjectSpec spec = BattlefieldAreaObjectRepository.ForId(trap.DefinitionId);
+        if (spec == null || !spec.TriggersOnTurnEnd)
+        {
+            return;
+        }
+
+        string instanceId = $"terrain-{source.UnitId}-{Guid.NewGuid():N}";
+        var state = new BattleTerrainState(instanceId.Substring(0, Math.Min(24, instanceId.Length)), spec.TrapId,
+            source.UnitId, 1, spec.MaxTriggers);
+        if (!Board.TryAddTerrainState(cell, state, out string error))
+        {
+            Message?.Invoke($"地形状态写入失败：{error}");
+        }
+    }
+
     private void OnCellChanged(AxialHex coord) => Notify();
     private void Notify() => Changed?.Invoke();
 

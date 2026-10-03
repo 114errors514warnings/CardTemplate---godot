@@ -28,6 +28,8 @@ public partial class LoadCardCsv : Node
 	public static Card[] LoadCardsFromCSV(string filePath)
 	{
 		string[] dataLines = LoadCsv.LoadCSVDataLines(filePath);
+		// 等级列（`CardTier`，P1-6 最小版 / T9）：按**表头**定位，缺列返回 -1（老表零影响）。
+		int tierColumn = ResolveTierColumnIndex(filePath);
 
 		if (dataLines.Length == 0)
 		{
@@ -42,7 +44,7 @@ public partial class LoadCardCsv : Node
 			if (string.IsNullOrWhiteSpace(line))
 				continue;
 
-			Card card = ParseCardFromCSVLine(line);
+			Card card = ParseCardFromCSVLine(line, tierColumn);
 			if (card != null)
 			{
 				cardList.Add(card);
@@ -53,12 +55,55 @@ public partial class LoadCardCsv : Node
 		return cardList.ToArray();
 	}
 
+	/// <summary>定位表头里的 `CardTier` 列下标；没有表头 / 没有该列时返回 -1（= 该表无等级数据）。</summary>
+	private static int ResolveTierColumnIndex(string filePath)
+	{
+		foreach (string line in LoadCsv.LoadCSVLines(filePath))
+		{
+			if (string.IsNullOrWhiteSpace(line))
+			{
+				continue;
+			}
+
+			string[] header = LoadCsv.ParseCSVFields(line);
+			for (int i = 0; i < header.Length; i++)
+			{
+				if ((header[i] ?? string.Empty).Trim().TrimStart('\uFEFF').Equals("CardTier", StringComparison.OrdinalIgnoreCase))
+				{
+					return i;
+				}
+			}
+
+			return -1;   // 首行不是表头 → 视为无等级列
+		}
+
+		return -1;
+	}
+
+	/// <summary>解析等级列：空 / 未知值 → <see cref="CardTier.None"/>（并按「不过滤」处理）。</summary>
+	private static CardTier ParseTier(string raw)
+	{
+		if (string.IsNullOrWhiteSpace(raw))
+		{
+			return CardTier.None;
+		}
+
+		string trimmed = raw.Trim();
+		if (Enum.TryParse(trimmed, true, out CardTier tier) && Enum.IsDefined(typeof(CardTier), tier))
+		{
+			return tier;
+		}
+
+		GD.PrintErr($"[CardTier] 无法识别的等级值：{raw}（按「无等级数据」处理）");
+		return CardTier.None;
+	}
+
 	/// <summary>
 	/// 解析单个CSV行为卡牌对象
 	/// </summary>
 	/// <param name="line">CSV行</param>
 	/// <returns>解析后的卡牌对象，失败返回null</returns>
-	private static Card ParseCardFromCSVLine(string line)
+	private static Card ParseCardFromCSVLine(string line, int tierColumn = -1)
 	{
 		try
 		{
@@ -92,7 +137,10 @@ public partial class LoadCardCsv : Node
 			CardCategory category = (CardCategory)Enum.Parse(typeof(CardCategory), categoryStr, ignoreCase: true);
 
 			// NeedTarget 自动从 Params 中推导，无需CSV配置
-			return new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName, cardKeyWord, conditionParams);
+			Card parsed = new Card(cardId, string.Empty, energyCost, category, effectTypes, effectDescription, cardParams, cardName, cardKeyWord, conditionParams);
+			// 等级列（CardTier，P1-6 最小版 / T9）：按表头下标取；缺列 / 越界 / 空值 = None（掉落过滤不拦截）。
+			parsed.Tier = tierColumn >= 0 && tierColumn < fields.Length ? ParseTier(fields[tierColumn]) : CardTier.None;
+			return parsed;
 		}
 		catch (Exception ex)
 		{
