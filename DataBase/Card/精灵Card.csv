@@ -1,0 +1,8 @@
+CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord,ConditionParams,SpatialShape,SpatialArgs,TrapId,CardTier
+11003001,穿林箭,Attack,1,Damage,沿选定方向射出一支穿透的箭，命中直线上所有敌人，额外造成1点伤害,2;1,,,Line,Range=5;Length=5;Pierce,,B
+21003001,敏捷闪躲,Skill,1,AddState,获得1层屏障,1;22;1,,,None,,,B
+21003002,林间抚慰,Skill,1,ConsumeSelectedHandCard|Heal|ClearFirstNormalDebuff,消耗任意友军1张手牌；自身恢复6点生命，并清除自身的1个普通弱化,1;1|1|1;1,,,None,,,A
+21003003,古树哨卫,Skill,2,None,在射程内一格召唤藤蔓哨卫；敌人每次进入该格时受到2点伤害并被施加1层虚弱, ,Exhaust,,Trap,Range=1,vine_sentinel,S
+21003004,净化,Skill,1,ConsumeSelectedHandCard|DrawCard,消耗任意友军1张手牌，抽3张牌,1;1|1;3,,,None,,,B
+21003005,水源,Skill,3,AddCost,获得2点能量；消耗时也可以打出,1;2,,,None,,,B
+21003006,通灵,Skill,2,ClearAllStates,清除所有友方单位的负面效果,5,,,None,,,S

@@ -1,0 +1,5 @@
+TrapId,Name,TriggerTiming,SideFilter,MaxTriggers,DecayTiming,EffectType,Params
+test_trap,测试陷阱,OnEnter,Triggerer,0,Never,Damage,2;3
+vine_sentinel,藤蔓哨卫,OnEnter,Triggerer,0,Never,Damage|AddState,2;2|2;2;1
+frost_field,寒霜之地,OnEnter,Triggerer,0,Never,AddState,2;2;1
+blessed_ground,庇护之地,OnEnter|OnTurnEnd,Ally,0,Never,AddState,2;6;1

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dx6kbqolf7xm"
+
+[deps]
+
+files=["res://DataBase/Card/精灵Card.CardName.translation", "res://DataBase/Card/精灵Card.CardType.translation", "res://DataBase/Card/精灵Card.EnergyCost.translation", "res://DataBase/Card/精灵Card.EffectType.translation", "res://DataBase/Card/精灵Card.EffectDesc.translation", "res://DataBase/Card/精灵Card.Params.translation", "res://DataBase/Card/精灵Card.CardKeyWord.translation", "res://DataBase/Card/精灵Card.en.translation", "res://DataBase/Card/精灵Card.SpatialShape.translation", "res://DataBase/Card/精灵Card.SpatialArgs.translation", "res://DataBase/Card/精灵Card.TrapId.translation"]
+
+source_file="res://DataBase/Card/精灵Card.csv"
+dest_files=["res://DataBase/Card/精灵Card.CardName.translation", "res://DataBase/Card/精灵Card.CardType.translation", "res://DataBase/Card/精灵Card.EnergyCost.translation", "res://DataBase/Card/精灵Card.EffectType.translation", "res://DataBase/Card/精灵Card.EffectDesc.translation", "res://DataBase/Card/精灵Card.Params.translation", "res://DataBase/Card/精灵Card.CardKeyWord.translation", "res://DataBase/Card/精灵Card.en.translation", "res://DataBase/Card/精灵Card.SpatialShape.translation", "res://DataBase/Card/精灵Card.SpatialArgs.translation", "res://DataBase/Card/精灵Card.TrapId.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

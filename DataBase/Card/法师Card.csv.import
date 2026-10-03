@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://v342r2lt2prm"
+
+[deps]
+
+files=["res://DataBase/Card/法师Card.CardName.translation", "res://DataBase/Card/法师Card.CardType.translation", "res://DataBase/Card/法师Card.EnergyCost.translation", "res://DataBase/Card/法师Card.EffectType.translation", "res://DataBase/Card/法师Card.EffectDesc.translation", "res://DataBase/Card/法师Card.Params.translation", "res://DataBase/Card/法师Card.CardKeyWord.translation", "res://DataBase/Card/法师Card.en.translation", "res://DataBase/Card/法师Card.SpatialShape.translation", "res://DataBase/Card/法师Card.SpatialArgs.translation", "res://DataBase/Card/法师Card.TrapId.translation"]
+
+source_file="res://DataBase/Card/法师Card.csv"
+dest_files=["res://DataBase/Card/法师Card.CardName.translation", "res://DataBase/Card/法师Card.CardType.translation", "res://DataBase/Card/法师Card.EnergyCost.translation", "res://DataBase/Card/法师Card.EffectType.translation", "res://DataBase/Card/法师Card.EffectDesc.translation", "res://DataBase/Card/法师Card.Params.translation", "res://DataBase/Card/法师Card.CardKeyWord.translation", "res://DataBase/Card/法师Card.en.translation", "res://DataBase/Card/法师Card.SpatialShape.translation", "res://DataBase/Card/法师Card.SpatialArgs.translation", "res://DataBase/Card/法师Card.TrapId.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

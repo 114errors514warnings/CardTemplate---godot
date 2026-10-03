@@ -1,0 +1,8 @@
+CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord,ConditionParams,SpatialShape,SpatialArgs,TrapId,CardTier
+11004001,陨星投掷,Attack,2,Damage|AddState,向射程内任意一格投掷陨星；以该格为中心半径1内的敌方单位受到一次攻击并额外承受6点伤害，并被施加1层燃烧,2;6|2;3;1,Exhaust,,Burst,Range=4;Radius=1,,S
+21004001,法术护盾,Skill,1,ShieldByAttack,获得等同于攻击力的格挡,1;0,,,None,,,B
+21004002,法术共鸣,Skill,1,AddState,自身与全体友方各获得1层增加攻击力,5;6;1,,,None,,,B
+21004003,寒霜之地,Skill,1,Damage|AddState,在射程内一格降下寒霜：该格上的敌方单位受到一次攻击并被施加1层虚弱；该格成为寒霜之地，敌人每次进入时被施加1层虚弱,2;0|2;2;1,,,Trap,Range=4,frost_field,A
+21004004,咒术准备,Skill,1,DrawCard,抽2张牌，使其中的第一张牌耗能为0,1;2,,,None,,,B
+21004005,法力涌流,Skill,0,AddCost,获得2点能量，将一张“疲劳”放入你的抽牌堆,1;2,,,None,,,B
+21004006,法术结界,Skill,2,None,全体友军在2回合内免疫负面效果, ,,,None,,,S
