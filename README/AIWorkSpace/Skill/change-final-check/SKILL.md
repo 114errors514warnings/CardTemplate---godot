@@ -1,0 +1,73 @@
+---
+name: change-final-check
+description: "当改动要交付或提交前使用（Use when finishing a change）。用可执行检查代替看起来没问题：按改动类型分级的体检表、通用四步（diff 抽查、抽读文件、链接体检、临时产物清理）、实测可用的链接体检脚本与已知误报基线、跑测后存档哈希核对、文档侧收尾。关键词：收尾、体检、断链、numstat、临时产物、存档哈希。"
+---
+
+
+# 改动收尾体检
+
+> 交付 / 提交前跑一遍：**用可执行检查代替「看起来没问题」**。
+
+## 一、按改动类型分级（细则见 [编译验证规则.md](../../../Skill/编译验证规则.md)）
+
+| 改动类型 | 必做体检 |
+|---|---|
+| C# 代码（`Scripts/**`、`Tests/**`） | `dotnet build` 0 警告 0 错误 → `dotnet test` 失败 0 → 相关烟测 / API 点打（见 [烟测选择](../smoke-test-choice/SKILL.md)） |
+| 配置（`DataBase/**`） | 定向 `--filter` 测试；「能否进场」类改动加跑 `--battlefield-smoke` |
+| 文档（`README/**`、`*.md`） | 链接体检（§三）+ 行尾 / 编码抽查 |
+| 场景 / 资源（`Scenes/**`、`Resources/**`、`*.tscn`） | 相关场景烟测；Godot 生成的 `.import` / `.translation` 边车是否齐 |
+
+## 二、通用四步
+
+1. `git status --short` + `git --no-pager diff --numstat -- <本次文件>`：只应出现本次动过的文件、行数与预期同量级（异常 = 静默污染 → 整体回滚重做）。
+2. 抽 1~2 个改过的文件**实际读一遍**内容，不要只看统计。
+3. 链接体检（§三）——**文档改动必跑**。
+4. 临时产物清理（§五）。
+
+## 三、链接体检（2026-10-03 实测可用）
+
+```powershell
+$bad=@(); $files=@(Get-ChildItem -Recurse -File -Filter '*.md' -Path 'README')
+foreach($f in $files){ $dir=$f.DirectoryName; $i=0
+  foreach($l in [IO.File]::ReadAllLines($f.FullName)){ $i++
+    foreach($m in [regex]::Matches($l,'\]\(([^)]+)\)')){
+      $t=($m.Groups[1].Value -split '#')[0].Trim()
+      if([string]::IsNullOrEmpty($t)){continue}
+      if($t -match '^[a-zA-Z]+:'){continue}                       # 跳过 http / file:// 绝对链接
+      if($t.Contains('*') -or $t.Contains('|') -or $t.Contains('?')){continue}   # 跳过正则示例
+      if(-not (Test-Path -LiteralPath (Join-Path $dir $t))){ $bad+=($f.FullName + ':' + $i + ' -> ' + $t) }
+    } } }
+'badlinks=' + $bad.Count; $bad
+```
+
+**已知误报基线（6 条，属示例占位，不要去改）**：`AgentOps/命名规范.md`（归档块模板里的 `新位置.md` 占位）、`AgentOps/工作守则.md` 与 `AgentOps/问题分析与解决规范.md`（各 1 条 `x` 占位示意）、`AgentOps/示例/8月施工文档.md` 三条示意链接。
+→ 判据：**除基线外应为 0**；新增的断链必须修（含顺带发现的既有断链）。
+链接写法与搬迁流程见 [文档编写规则 §十一](../../AgentOps/文档编写规则.md)。
+
+> **临时校验脚本用什么写（2026-10-05 实测）**：几何 / 集合 / 组合类自查（枚举格点、BFS 连通性、逐格不变量）用 **Python**（本机 `python` = 3.14 可用，脚本放 `_tmp/xxx.py` 直接 `python _tmp/xxx.py`）。同一件事在 **PowerShell 5.1** 里极易翻车，两个已实测的坑：① 嵌套数组语义 —— `@($a[0], $a[1])` / `@(, $t)` 在参数传递中会被展平，取出的「坐标」变成字符串，`[Math]::Abs($a[0])` 报 `Cannot index into a null array`，配合 `while` 会变成**刷屏死循环**（本次冲出 29 万行报错，须 `Stop-Process` 手动终止；注意**别** `Get-Process powershell | Stop-Process` 盲杀 —— 会连带杀掉 IDE 的 shell 进程池，只杀自己起的那个 PID）；② 编码 —— 编辑器写出的 `.ps1` 是 **UTF-8 无 BOM**，PS 5.1 按 GBK 解码 → 中文乱码甚至 `ParserError`（要么脚本里只用 ASCII 输出，要么先把文件转成 UTF-8 **带 BOM** 再 `-File` 跑）。
+
+## 四、跑测后的存档核对
+
+```powershell
+$save = Join-Path $env:APPDATA 'Godot\app_userdata\卡牌模拟器\run_save_v1.json'
+(Get-FileHash $save).Hash    # 与跑测前记录的哈希比对：一致 = 跑测自己还原干净
+```
+
+2026-10-03 实测：`--run-flow-ui-smoke` 整套 / 单段跑完，玩家存档哈希**不变**（烟测内部 `BackupRunSaveFile` / `RestoreRunSaveFile` 生效）。
+
+## 五、临时产物清理
+
+| 产物 | 处理 |
+|---|---|
+| `Tests/*.txt` 烟测日志、`Tests/*.png` 截图、`Tests/ApiCaptures/*` | 已被 `.gitignore` 忽略，但**无引用的用完就清**（`Move-Item` 到 `_tmp/`） |
+| `*.apibak` 存档备份 | 确认已还原后清掉 |
+| 临时 `.ps1` / 中间 json | 同上；不要留在仓库根或 `Tests/` |
+
+**删文件不走 `Remove-Item`**（硬安全策略，2026-10-05 又犯一次）：一律 `Move-Item` 到 `_tmp/` 或 `Rename-Item` 加 `.discard`，见 [工作守则 §二](../../AgentOps/工作守则.md)。
+
+> **写前自检（2026-10-05 复盘后补）**：发出任何「清理 / 删除 / 杀进程」命令前，先扫命令文本里有没有 `Remove-Item` / `del` / `erase` / `rm` / `Stop-Process` 字面量 —— 有就改写：删文件 → `Move-Item <path> _tmp\`（或 `Rename-Item <path> <path>.discard`）；停进程 → `Stop-Process -Id <自己 Start-Process -PassThru 的 PID>`，**任何进程名管道进 `Stop-Process` 都禁止**。判据：命令文本零命中上述字面量。归因（规则已落档却仍犯 = 触发面错配）与模板见 [进程纪律](../verify-chain/SKILL.md) §三。
+
+## 六、文档侧
+
+- 完成情况要写两处（案文件顶部 + 当月施工文档新增 `## §N`）→ 见 [文档回写地图](../doc-writeback-map/SKILL.md) §五。
+- 新增 / 改名文档后，别忘了同步所在目录的 `README.md` 索引。

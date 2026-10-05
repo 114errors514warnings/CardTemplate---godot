@@ -1,0 +1,12 @@
+# 本项目 AI 协作入口（常驻规则）
+
+> 本文件是常驻锚点：不依赖任何一次会话的记忆，开工必读。
+
+1. **动手前**：先读 `README/AIWorkSpace/Skill/README.md`（操作 skill 索引），按「我要干什么」挑 **1 条** skill 打开照着做；不要一次全读。
+2. **必须遵守什么**看 `README/AIWorkSpace/AgentOps/README.md`（规范 / 边界 / 安全策略）；与 skill 冲突时**以 AgentOps 为准**。
+3. **改文本文件**：只用编辑器工具改内容，脚本只做只读检查 —— 见 `README/AIWorkSpace/Skill/text-file-edit/SKILL.md`。
+4. **收尾**：按 `README/AIWorkSpace/Skill/change-final-check/SKILL.md` 做可执行体检；**提交**按 `README/AIWorkSpace/Skill/commit-discipline/SKILL.md`（只提交自己改过的内容，遇到漂移先报告）。
+5. **踩到新坑或查实新工具事实**：就地补进对应 skill，不要只留在会话里。
+6. **工具优先级（能用 MCP / 内置工具就不开 shell）**：读内容/定位用 `read_files`（多文件并行、可带行区间）→ 搜文本、引用、旧路径残留用 `search_codebase`（一次可多 pattern）→ 查历史结论与项目规矩用 `hil__search_project_memory` / `hil__get_project_context`。**只有没有等价物时才 exec**（git、`dotnet build`/`test`、烟测、字节级体检 BOM/CRLF、文件移动），且一次调用批量合并、**不重复跑同一份体检**、不做重复验证。详见 `README/AIWorkSpace/Skill/code-search/SKILL.md` §一。
+
+7. **两条命令铁律（2026-10-05 事故后入锚点）**：① 命令里**不得出现** `Remove-Item` / `del` / `erase` / `rm` —— 清理一律 `Move-Item` 到 `_tmp/` 或 `Rename-Item` 加 `.discard`；② **不得把进程名管道进 `Stop-Process`**（`Get-Process powershell | Stop-Process` 会杀穿 IDE 的 shell 进程池）—— 只杀自己 `Start-Process -PassThru` 拿到的 `-Id`。归因与写前自检见 `README/AIWorkSpace/Skill/verify-chain/SKILL.md` §三。
