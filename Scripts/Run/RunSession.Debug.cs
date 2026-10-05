@@ -123,6 +123,31 @@ public partial class RunSession
     /// <summary>存档路径（`debug.run` 侧回读/清档提示用）。</summary>
     public static string DebugSavePath => SavePath;
 
+    /// <summary>
+    /// 直接写金币（**允许任意值**，含 0）：商人 / 旅馆这类「金币侧验收」需要先摆出指定的钱包状态
+    /// （村庄与商人交互案的验收都要求「金币为 0 时给原因」「金币够时能买」两态可复现）。
+    /// </summary>
+    public bool DebugSetGold(int value, out string error)
+    {
+        error = string.Empty;
+        if (Current == null) { error = "没有进行中的本局。"; return false; }
+        if (value < 0) { error = "金币不能为负。"; return false; }
+        Current.Gold = value;
+        Save();
+        return true;
+    }
+
+    /// <summary>直接加钥匙（**绕过战斗掉落**）：商人钥匙格的验收与 Boss 门槛（≥2 把）的夹具。</summary>
+    public bool DebugAddKeys(int amount, out string error)
+    {
+        error = string.Empty;
+        if (Current == null) { error = "没有进行中的本局。"; return false; }
+        if (amount == 0) { error = "钥匙增量不能为 0。"; return false; }
+        Current.Keys = Math.Max(0, Current.Keys + amount);
+        Save();
+        return true;
+    }
+
     /// <summary>清档（等于删掉本局进度；调用方通常随后 `debug.run.new_run`）。</summary>
     public static void DebugDeleteSave() => DeleteSave();
 

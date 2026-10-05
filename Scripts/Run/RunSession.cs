@@ -275,6 +275,125 @@ public partial class RunSession : Node
 		});
 	}
 
+	// ── 商人「卡牌相关操作」四项的卡组读 / 写（2026-10-05 阻断项清理；规则与文案见 `DeckOps`）──
+
+	/// <summary>从该槽的永久卡组删除一张（下标按卡组列顺序）。规则：卡组至少保留 1 张 + 下标合法；成功即落档。</summary>
+	public bool TryRemoveCardFromSlotDeck(int slotIndex, int deckIndex, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!TryGetDeck(slotIndex, out List<RunDeckEntry> deck))
+		{
+			error = "该角色的卡组当前不可写入。";
+			return false;
+		}
+
+		if (!DeckOps.CanRemoveCard(deck.Count, deckIndex, out error))
+		{
+			return false;
+		}
+
+		deck.RemoveAt(deckIndex);
+		Save();
+		return true;
+	}
+
+	/// <summary>该槽卡组里某张卡的永久升级级数 +1（上限 <see cref="DeckOps.MaxPermanentUpgradeLevel"/>）；成功即落档。</summary>
+	public bool TryUpgradeSlotDeckCard(int slotIndex, int deckIndex, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!TryGetDeck(slotIndex, out List<RunDeckEntry> deck) || deckIndex < 0 || deckIndex >= deck.Count)
+		{
+			error = "该卡不在卡组中（下标越界）。";
+			return false;
+		}
+
+		RunDeckEntry entry = deck[deckIndex];
+		if (!DeckOps.CanUpgradeCard(entry.PermanentUpgradeLevel, out error))
+		{
+			return false;
+		}
+
+		entry.PermanentUpgradeLevel += 1;
+		Save();
+		return true;
+	}
+
+	/// <summary>
+	/// 把该槽的一张卡转移到另一个槽的卡组（**保留永久升级级数**）。规则：源卡可移除 + 目标槽合法 + 目标卡组非空；成功即落档。
+	/// </summary>
+	public bool TryTransferDeckCard(int fromSlot, int deckIndex, int toSlot, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!TryGetDeck(fromSlot, out List<RunDeckEntry> source) || !TryGetDeck(toSlot, out List<RunDeckEntry> target))
+		{
+			error = "该角色的卡组当前不可写入。";
+			return false;
+		}
+
+		if (!DeckOps.CanTransferCard(source.Count, deckIndex, Current.DeckSlots.Count, toSlot, target.Count, out error))
+		{
+			return false;
+		}
+
+		RunDeckEntry entry = source[deckIndex];
+		source.RemoveAt(deckIndex);
+		target.Add(new RunDeckEntry { CardId = entry.CardId, PermanentUpgradeLevel = entry.PermanentUpgradeLevel });
+		Save();
+		return true;
+	}
+
+	/// <summary>加钥匙（商人购买 / 掉落入账共用）。数量必须为正；成功即落档。</summary>
+	public bool TryAddKeys(int amount, out string error)
+	{
+		error = string.Empty;
+		if (Current == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (amount <= 0)
+		{
+			error = $"钥匙数量必须是正数（收到 {amount}）。";
+			return false;
+		}
+
+		Current.Keys += amount;
+		Save();
+		return true;
+	}
+
+	/// <summary>取该槽的永久卡组（活引用）；越界 / 没有本局时返回 false。</summary>
+	private bool TryGetDeck(int slotIndex, out List<RunDeckEntry> deck)
+	{
+		deck = null;
+		if (Current?.DeckSlots == null || slotIndex < 0 || slotIndex >= Current.DeckSlots.Count)
+		{
+			return false;
+		}
+
+		deck = Current.DeckSlots[slotIndex];
+		return deck != null;
+	}
+
 	/// <summary>记录当前位置格点（移动到达 / 进入节点时调用）并落档。</summary>
 	public void SetCurrentNode(int nodeId)
 	{

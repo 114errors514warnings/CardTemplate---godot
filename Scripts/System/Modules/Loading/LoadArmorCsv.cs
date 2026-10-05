@@ -13,11 +13,14 @@ public static class LoadArmorCsv
 {
 	private const string TableName = "Armor";
 
-	/// <summary>固定表头（9 列，顺序即列序）。</summary>
+	/// <summary>固定表头（10 列，顺序即列序）；末列 `Rarity` 为 2026-10-05 新增（阻断项清理），留空 = 普通。</summary>
 	private static readonly string[] Columns =
 	{
-		"ArmorId", "DefinitionId", "Slot", "HandsRequired", "DefenseValue", "DamageBonus", "MoveBonus", "ResourceCost", "Load",
+		"ArmorId", "DefinitionId", "Slot", "HandsRequired", "DefenseValue", "DamageBonus", "MoveBonus", "ResourceCost", "Load", "Rarity",
 	};
+
+	/// <summary>`Rarity` 列序（0 起）。</summary>
+	private const int RarityColumn = 9;
 
 	public static Dictionary<int, ArmorDefinition> LoadFromCSV(string filePath)
 	{
@@ -39,6 +42,7 @@ public static class LoadArmorCsv
 				MoveBonus = ItemCsvSchema.ParseNonNegativeInt(ItemCsvSchema.Field(fields, 6), context),
 				ResourceCost = ItemCsvSchema.ParseNonNegativeInt(ItemCsvSchema.Field(fields, 7), context),
 				Load = ParseRequiredLoad(ItemCsvSchema.Field(fields, 8), context),
+				Rarity = ParseOptionalRarity(ItemCsvSchema.Field(fields, RarityColumn), context),
 			};
 
 			ItemCsvSchema.EnsureUnique(seenIds, definition.ArmorId, context);
@@ -51,6 +55,13 @@ public static class LoadArmorCsv
 		});
 
 		return result;
+	}
+
+	/// <summary>稀有度（可选）：留空 = 普通；填了就必须是「普通 / 罕见 / 稀有」。</summary>
+	private static ItemRarity ParseOptionalRarity(string raw, string context)
+	{
+		string text = (raw ?? string.Empty).Trim();
+		return text.Length == 0 ? ItemRarity.Common : ItemCsvSchema.ParseRarity(text, context);
 	}
 
 	/// <summary>部位：只能是 Head / Body / Feet / Accessory（大小写不敏感）。</summary>

@@ -12,9 +12,11 @@ public partial class LoadStateCsv : Node
 	/// [5] DecayTiming, [6] DecayMode, [7] StacksToRemove, [8] EffectDescription, [9] EnumName
 	/// [9] EnumName 记录该行对应的 `StateType` 枚举名（如 `Steal`）；留空时按数字列自动取枚举名，
 	/// 填写时必须与 [0] 的数字一致，否则整行报错丢弃。
+	/// [10] BlocksGuesthouse（可选，2026-10-05 新增）：该状态是否封住村庄民宿的门；留空 = FALSE。
 	/// </summary>
 	private const int MinFieldCount = 5;
 	private const int EnumNameFieldIndex = 9;
+	private const int BlocksGuesthouseFieldIndex = 10;
 
 	public static StateDefinition[] LoadStatesFromCSV(string filePath)
 	{
@@ -133,6 +135,15 @@ public partial class LoadStateCsv : Node
 			}
 			if (enumName.Length == 0) enumName = StateTypeNames.NameOf(stateType);
 
+			// BlocksGuesthouse（第 11 列，可空）：留空 = FALSE；填了就必须是布尔写法（与其它列同口径，不静默降级）。
+			bool blocksGuesthouse = false;
+			if (fields.Length > BlocksGuesthouseFieldIndex && !string.IsNullOrWhiteSpace(fields[BlocksGuesthouseFieldIndex])
+				&& !TryParseBoolean(fields[BlocksGuesthouseFieldIndex], out blocksGuesthouse))
+			{
+				GD.PrintErr($"Invalid BlocksGuesthouse value: {fields[BlocksGuesthouseFieldIndex]}");
+				return null;
+			}
+
 			return new StateDefinition(
 				stateType,
 				fields[1],
@@ -143,7 +154,8 @@ public partial class LoadStateCsv : Node
 				isDebuff,
 				isElite,
 				effectDescription,
-				enumName);
+				enumName,
+				blocksGuesthouse);
 		}
 		catch (Exception ex)
 		{

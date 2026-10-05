@@ -51,5 +51,6 @@ public class StateTypeNamesTests
         // 与 通用State.csv 的 StateType 列保持一致：改枚举必须同步改表（加载器会校验 EnumName 列）。
         Assert.Equal(20, (int)StateType.NextBattleCardFree);
         Assert.Equal(21, (int)StateType.Steal);
+        Assert.Equal(22, (int)StateType.Barrier);
     }
 }

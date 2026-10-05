@@ -238,7 +238,7 @@ public class ItemTableFileTests
 	{
 		string[] rows = ReadTable(Path.Combine("Equipment", "Armor.csv"));
 		AssertHeader(Cells(rows[0]), "ArmorId", "DefinitionId", "Slot", "HandsRequired", "DefenseValue", "DamageBonus",
-			"MoveBonus", "ResourceCost", "Load");
+			"MoveBonus", "ResourceCost", "Load", "Rarity");
 
 		List<int> ids = new List<int>();
 		List<string> names = new List<string>();
@@ -261,6 +261,9 @@ public class ItemTableFileTests
 			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 6), row);
 			ItemCsvSchema.ParseNonNegativeInt(Cell(cells, 7), row);
 			Assert.True(ItemCsvSchema.ParseNonNegativeFloat(Cell(cells, 8), row) > 0f, $"Armor 表的 Load 必填：{row}");
+			// 稀有度（2026-10-05 阻断项清理）：商人装备货架分档与锻铁铺费用档共用；留空 = 普通。
+			string rarity = Cell(cells, 9);
+			Assert.Equal(ItemRarity.Common, rarity.Length == 0 ? ItemRarity.Common : ItemCsvSchema.ParseRarity(rarity, row));
 
 			Assert.DoesNotContain(id, ids);
 			ids.Add(id);

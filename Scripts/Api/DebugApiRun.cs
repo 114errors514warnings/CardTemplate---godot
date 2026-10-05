@@ -28,10 +28,13 @@ public sealed class DebugApiRun : IApiDomain
         new("debug.run.next_combat", ApiLane.Debug, "一键跳关：进入最近的**未访问战斗格**（无视可达与只读闸门）。"),
         new("debug.run.enter_node", ApiLane.Debug, "无视可达与只读闸门，直接进入指定格。", false, "nodeId"),
         new("debug.run.skip_node", ApiLane.Debug, "把当前格标成已访问并推进层内遭遇计数（不打架直接过一关）。"),
+        new("debug.run.complete_level", ApiLane.Debug, "**完成关卡**：把当前**战斗关卡**直接判胜并按正常战斗流程结算（事件 / 没有内容一律拒绝）。"),
         new("debug.run.back_to_map", ApiLane.Debug, "放弃当前内容并回到可选地图（不结算、不领取；模块级验证的「随时回地图」捷径）。"),
         new("debug.run.map_state", ApiLane.Debug, "全图节点：类型 / 是否已访问 / 是否可达 / 当前所在 / 起终点。", true),
         new("debug.run.set_time_points", ApiLane.Debug, "直接设时间点（**允许负向**，可把当天耗光触发营地转场）。", false, "value"),
         new("debug.run.add_time_points", ApiLane.Debug, "加时间点（正向，走正式入口）。", false, "amount"),
+        new("debug.run.set_gold", ApiLane.Debug, "直接写金币（含 0；村庄设施与商人购买的验收夹具）。", false, "amount"),
+        new("debug.run.add_key", ApiLane.Debug, "直接加钥匙（绕过战斗掉落；商人钥匙格与 Boss 门槛 ≥2 把的夹具）。", false, "amount"),
         new("debug.run.set_slot_hp", ApiLane.Debug, "直接写角色槽血量（可同时改上限）。", false, "slotIndex,hp,maxHp"),
         new("debug.run.set_hand", ApiLane.Debug, "直接写左右手装备定义名（不校验部位组合）。", false, "slotIndex,hand,definitionId"),
         new("debug.run.add_bag_item", ApiLane.Debug, "直接塞一件背包物品（不做负荷校验）。", false, "category,definitionKey,count"),
@@ -59,10 +62,13 @@ public sealed class DebugApiRun : IApiDomain
             ["debug.run.next_combat"] = NextCombat,
             ["debug.run.enter_node"] = EnterNode,
             ["debug.run.skip_node"] = SkipNode,
+            ["debug.run.complete_level"] = CompleteLevel,
             ["debug.run.back_to_map"] = BackToMap,
             ["debug.run.map_state"] = request => Ok(request, "地图全景读取成功。", Scene.Map?.ApiMapState()),
             ["debug.run.set_time_points"] = SetTimePoints,
             ["debug.run.add_time_points"] = AddTimePoints,
+            ["debug.run.set_gold"] = SetGold,
+            ["debug.run.add_key"] = AddKey,
             ["debug.run.set_slot_hp"] = SetSlotHp,
             ["debug.run.set_hand"] = SetHand,
             ["debug.run.add_bag_item"] = AddBagItem,
@@ -168,6 +174,13 @@ public sealed class DebugApiRun : IApiDomain
         return Done(request, $"已把格 {nodeId} 标成已完成并推进层内遭遇计数。");
     }
 
+    /// <summary>完成关卡：当前战斗关卡直接判胜（照常走结算）；事件 / 没有内容一律拒绝。</summary>
+    private ApiResult CompleteLevel(ApiRequest request)
+    {
+        if (!Scene.DebugCompleteLevel(out string error)) return Fail(request, "COMPLETE_LEVEL_REJECTED", error);
+        return Done(request, "当前战斗关卡已判胜，按正常战斗流程结算（面板 / 选卡 / 回地图）。");
+    }
+
     /// <summary>放弃当前内容回到可选地图（调试捷径：模块级验证不必先打完一场）。</summary>
     private ApiResult BackToMap(ApiRequest request)
     {
@@ -187,6 +200,20 @@ public sealed class DebugApiRun : IApiDomain
     {
         if (!Session.TryAddTimePoints(request.Amount, out string error)) return Fail(request, "ADD_TIME_REJECTED", error);
         return Done(request, $"已加 {request.Amount} 时间点（剩余 {RunTimePoints.Format(Session.RemainingToday)}）。");
+    }
+
+    /// <summary>直接写金币（含 0）：村庄设施 / 商人购买的「金币不足」与「买得起」两态夹具。</summary>
+    private ApiResult SetGold(ApiRequest request)
+    {
+        if (!Session.DebugSetGold(request.Amount, out string error)) return Fail(request, "SET_GOLD_REJECTED", error);
+        return Done(request, $"金币已写为 {Session.Current.Gold}。");
+    }
+
+    /// <summary>直接加钥匙（绕过战斗掉落）。</summary>
+    private ApiResult AddKey(ApiRequest request)
+    {
+        if (!Session.DebugAddKeys(request.Amount, out string error)) return Fail(request, "ADD_KEY_REJECTED", error);
+        return Done(request, $"钥匙已加 {request.Amount}（当前 {Session.Current.Keys} 把）。");
     }
 
     private ApiResult SetSlotHp(ApiRequest request)

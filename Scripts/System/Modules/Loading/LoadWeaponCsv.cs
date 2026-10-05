@@ -22,8 +22,9 @@ public static class LoadWeaponCsv
 	/// <summary>`EquipmentType` 所在的列序（0 起）：Melee / Ranged / Armor，留空按 AttackMode 推导（与战斗侧同规则）。</summary>
 	private const int EquipmentTypeColumn = 10;
 
-	/// <summary>`Load` 列序（0 起）：留空 = 按手数推导（单手 2.0 / 双手 4.0）。</summary>
-	private const int LoadColumn = 11;
+	// `Load` 与 `Rarity`（2026-10-05）都**按表头定位**（本表允许表尾追加列）：
+	// 此前 `Load` 写死下标 11，而 Weapon.csv 原本**没有** Load 列 → 追加 `Rarity` 后下标 11 被当 Load 解析（整表加载抛错）。
+	// 缺列时分别按 -1 处理：Load = 「按手数推导」、Rarity = 「普通」。
 
 	public static Dictionary<int, WeaponDefinition> LoadFromCSV(string filePath)
 	{
@@ -53,6 +54,11 @@ public static class LoadWeaponCsv
 			}
 		}
 
+		// `Rarity` 与 `Load` 列（2026-10-05 阻断项清理）：都按**表头**定位 —— 本加载器允许表尾追加列，因此不硬编码列序；
+		// 缺列 / 留空分别按「普通」与「按手数推导」处理。
+		int rarityColumn = ResolveColumnIndex(header, "Rarity");
+		int loadColumn = ResolveColumnIndex(header, "Load");
+
 		Dictionary<int, string> seenIds = new Dictionary<int, string>();
 		Dictionary<string, string> seenNames = new Dictionary<string, string>(StringComparer.Ordinal);
 		for (int lineIndex = 1; lineIndex < allLines.Length; lineIndex++)
@@ -81,7 +87,8 @@ public static class LoadWeaponCsv
 				MoveBonus = ParseOptionalNonNegativeInt(fields, 7, 0, context),
 			};
 			definition.Type = ParseEquipmentType(fields, context);
-			definition.Load = ParseOptionalLoad(fields, context);
+			definition.Load = ParseOptionalLoad(fields, loadColumn, context);
+			definition.Rarity = ParseOptionalRarity(fields, rarityColumn, context);
 
 			ItemCsvSchema.EnsureUnique(seenIds, definition.WeaponId, context);
 			if (!seenNames.TryAdd(definition.DefinitionId, context))
@@ -93,6 +100,27 @@ public static class LoadWeaponCsv
 		}
 
 		return result;
+	}
+
+	/// <summary>表头里的某一列下标（大小写不敏感）；没有该列时返回 -1。</summary>
+	private static int ResolveColumnIndex(string[] header, string columnName)
+	{
+		for (int i = 0; i < header.Length; i++)
+		{
+			if ((header[i] ?? string.Empty).Trim().Equals(columnName, StringComparison.OrdinalIgnoreCase))
+			{
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	/// <summary>稀有度（可选）：空 / 无该列 = 普通；填了就必须是「普通 / 罕见 / 稀有」。列序由 <see cref="ResolveColumnIndex"/> 给出。</summary>
+	private static ItemRarity ParseOptionalRarity(string[] fields, int rarityColumn, string context)
+	{
+		string raw = rarityColumn >= 0 && fields.Length > rarityColumn ? (fields[rarityColumn] ?? string.Empty).Trim() : string.Empty;
+		return raw.Length == 0 ? ItemRarity.Common : ItemCsvSchema.ParseRarity(raw, context);
 	}
 
 	/// <summary>手数：只能是 1（单手）或 2（双手）。</summary>
@@ -123,10 +151,10 @@ public static class LoadWeaponCsv
 		throw new FormatException($"{context}：EquipmentType 必须是 Melee / Ranged / Armor，实际 `{raw}`");
 	}
 
-	/// <summary>`Load` 列（可选）：留空 = -1（由 ItemNameResolver 按手数推导）。</summary>
-	private static float ParseOptionalLoad(string[] fields, string context)
+	/// <summary>`Load` 列（可选，按表头定位）：留空 / 无该列 = -1（由 ItemNameResolver 按手数推导）。</summary>
+	private static float ParseOptionalLoad(string[] fields, int loadColumn, string context)
 	{
-		string raw = fields.Length > LoadColumn ? (fields[LoadColumn] ?? string.Empty).Trim() : string.Empty;
+		string raw = loadColumn >= 0 && fields.Length > loadColumn ? (fields[loadColumn] ?? string.Empty).Trim() : string.Empty;
 		return raw.Length == 0 ? -1f : ItemCsvSchema.ParseNonNegativeFloat(raw, context);
 	}
 

@@ -69,6 +69,18 @@ public sealed class RunSaveData
 
 	public RunMapStateSave MapState { get; set; } = new RunMapStateSave();
 
+	// ── 地点场景：村庄 / 商人（2026-10-05，村庄地图交互案 §十 / 商人交互案 §七）──
+	// 两份快照都是**纯新增字段**：旧档 JSON 里没有这两项 → 反序列化后取这里的初始值（`System.Text.Json`
+	// 的 `IncludeFields` 会跑字段初始化器），因此**不升 `CurrentSchemaVersion`**，也不需要迁移语义。
+	// 只有「字段已存在但为 null」这种手改档才需要兜底，由 `RunSession.MigrateToCurrentSchema` 里的
+	// `EnsurePlaceStates()` 负责。
+
+	/// <summary>村庄状态（设施使用标记 / 客栈选择 / 民宿锁 / 当前所在格）。</summary>
+	public RunVillageStateSave VillageState { get; set; } = new RunVillageStateSave();
+
+	/// <summary>商人状态（货架与卡包快照 / 卡牌操作次数 / 当前所在格）。</summary>
+	public RunMerchantStateSave MerchantState { get; set; } = new RunMerchantStateSave();
+
 	// ── 待处理战斗（InBattleStart）──
 	/// <summary>遭遇层目录名（第一层…）。</summary>
 	public string PendingEncounterLayer = string.Empty;
@@ -710,6 +722,129 @@ public sealed class RunFoodEffectSave
 
 	/// <summary>来源食物显示名（面板 / 日志用）。</summary>
 	public string SourceFoodId = string.Empty;
+}
+
+/// <summary>本局选定的过夜住处（村庄案 §八：旅馆 / 民宿本局二选一）。</summary>
+public enum RunLodgingChoice
+{
+	/// <summary>还没在任何一家过夜。</summary>
+	None = 0,
+	/// <summary>已在旅馆过夜（本局 1 次）。</summary>
+	Inn = 1,
+	/// <summary>已在民宿过夜。</summary>
+	Guesthouse = 2,
+}
+
+/// <summary>
+/// 村庄状态（村庄案 §十 第 6 条 / 旅馆案 §四 / 民宿案 §六）：设施使用标记 + 客栈选择 + 民宿锁 +
+/// 读档恢复用的当前所在格。**全部字段都是本局范围**（不按天重置，民宿的「今天已住」用天数比对）。
+/// </summary>
+public sealed class RunVillageStateSave
+{
+	/// <summary>旅馆本局已用（§一：本局 1 次，用过之后入口格不再弹 tips）。</summary>
+	public bool InnUsed;
+
+	/// <summary>民宿「今天已住」的记日（-1 = 没住过）；比对 `RunMapStateSave.CurrentDay` 判「今天已经借住过了」。</summary>
+	public int GuesthouseUsedDay = -1;
+
+	/// <summary>本局选定的过夜住处（旅馆 / 民宿互斥的判据，§八）。</summary>
+	public RunLodgingChoice ChosenLodging = RunLodgingChoice.None;
+
+	/// <summary>民宿被**事件选项**封门（民宿案 §二 ②：本局一旦置位不可清除）。</summary>
+	public bool GuesthouseLockedByEvent;
+
+	/// <summary>
+	/// 民宿被**每日 Debuff** 封门时记下的状态显示名（空串 = 未被封门）。
+	/// 每日 Debuff（代码需求清单 P2-20）落地前恒为空 —— 民宿案 §七 的降级口径：
+	/// 「Debuff 封门」在它落地前不成立，只可能被事件选项封门。
+	/// </summary>
+	public string GuesthouseDebuffBlockName = string.Empty;
+
+	/// <summary>角色在村庄版图上的当前格 NodeId（读档恢复用；-1 = 未进入）。</summary>
+	public int PlayerNodeId = -1;
+
+	/// <summary>本次进入村庄已用过的设施入口格（走开再走回才能重新触发，村庄案 §五 待拍板第 3 条）。</summary>
+	public int LastTriggeredEntranceNodeId = -1;
+}
+
+/// <summary>商人货架的一格（商人案 §4.1 / §七：类目 + 定义 + 价格 + 已售出）。</summary>
+public sealed class RunMerchantStockEntrySave
+{
+	/// <summary>`MerchantCategory`（材料 / 食物 / 装备 / 道具 / 钥匙）。</summary>
+	public int Category;
+
+	/// <summary>类目内的格序号（0 起；已售出不补位、不重排，靠它定位）。</summary>
+	public int SlotIndex;
+
+	/// <summary>定义数字主键（材料 / 食物 / 道具的 Id；装备为 0 —— 它靠定义名寻址）。</summary>
+	public int DefinitionKey;
+
+	/// <summary>定义名（材料 / 食物 / 道具 / 装备的显示名，冗余保存便于脱离配表展示）。</summary>
+	public string DefinitionId = string.Empty;
+
+	/// <summary>单价（生成时锁定，§五 价格表）。</summary>
+	public int Price;
+
+	public bool Sold;
+}
+
+/// <summary>商人卡包里的一张卡（商人案 §4.2 / §4.3 / §七）。</summary>
+public sealed class RunMerchantCardEntrySave
+{
+	public int CardId;
+
+	/// <summary>等级字母（`CardTier`；卡包详细里画在右下角）。</summary>
+	public int Tier;
+
+	public int Price;
+
+	public bool Sold;
+
+	/// <summary>买下后写进了哪个槽位（包 1–3 = 包绑定槽位；包 4 / 5 = 玩家点选；未买 = -1）。</summary>
+	public int GrantedSlot = -1;
+}
+
+/// <summary>商人卡包快照（5 个包；本局首次进入本商人生成后固定，不刷新、不补位）。</summary>
+public sealed class RunMerchantCardPackSave
+{
+	public int PackIndex;
+
+	/// <summary>`MerchantPackKind`：Character / Mixed / Generic。</summary>
+	public int Kind;
+
+	/// <summary>`MerchantOwnerSlotPolicy`：Fixed（包 1–3）/ Chosen（包 4 / 5）。</summary>
+	public int Policy;
+
+	/// <summary>Fixed 策略绑定的槽位（0–2；Chosen 恒 -1）。</summary>
+	public int OwnerSlot = -1;
+
+	public List<RunMerchantCardEntrySave> Cards { get; set; } = new List<RunMerchantCardEntrySave>();
+}
+
+/// <summary>商人状态（商人案 §七 的三份快照合成一个字段 + 卡牌操作计数 + 当前所在格）。</summary>
+public sealed class RunMerchantStateSave
+{
+	/// <summary>货架是否已生成（false = 本次进入要抽一次并落档）。</summary>
+	public bool StockGenerated;
+
+	public List<RunMerchantStockEntrySave> Stock { get; set; } = new List<RunMerchantStockEntrySave>();
+
+	/// <summary>5 个卡包是否已生成。</summary>
+	public bool CardPacksGenerated;
+
+	public List<RunMerchantCardPackSave> CardPacks { get; set; } = new List<RunMerchantCardPackSave>();
+
+	/// <summary>「删除卡牌」已用次数（上限 1，§5.2；只在进入新商人时重置）。</summary>
+	public int RemoveUsed;
+
+	/// <summary>「转移卡牌」已用次数（上限 1）。</summary>
+	public int TransferUsed;
+
+	/// <summary>角色在商人场景上的当前格 NodeId（读档恢复用；-1 = 未进入）。</summary>
+	public int PlayerNodeId = -1;
+
+	/// <summary>是否已经打开过一次商人界面（走近演出的「不重放」判据，§2.1 第 5 条）。</summary>
+	public bool ShopOpened;
 }
 
 

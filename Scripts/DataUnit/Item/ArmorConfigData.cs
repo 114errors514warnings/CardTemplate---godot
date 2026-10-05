@@ -52,6 +52,12 @@ public sealed class ArmorDefinition
 	/// </summary>
 	public float Load = -1f;
 
+	/// <summary>
+	/// 稀有度（`Rarity` 列，2026-10-05 阻断项清理）：商人装备货架分档与锻铁铺费用档共用；
+	/// 列留空 = <see cref="ItemRarity.Common"/>（= 商人 40 金币档）。
+	/// </summary>
+	public ItemRarity Rarity = ItemRarity.Common;
+
 	/// <summary>是否为「同部位多槽」的部位（只有饰品）。</summary>
 	public bool IsMultiSlot => Slot == EquipmentSlotKind.Accessory;
 }

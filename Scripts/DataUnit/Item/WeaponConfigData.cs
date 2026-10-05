@@ -31,4 +31,10 @@ public sealed class WeaponDefinition
 	/// （单手 2.0 / 双手 4.0）；显式填了正数 / 0 就按表里的值。
 	/// </summary>
 	public float Load = -1f;
+
+	/// <summary>
+	/// 稀有度（`Rarity` 列，2026-10-05 阻断项清理）：商人装备货架分档与锻铁铺费用档共用；
+	/// 列缺省 / 留空 = <see cref="ItemRarity.Common"/>（= 商人 40 金币档，见商人交互案 §十 第 4 条默认值）。
+	/// </summary>
+	public ItemRarity Rarity = ItemRarity.Common;
 }

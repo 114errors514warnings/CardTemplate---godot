@@ -15,6 +15,13 @@ public sealed class StateDefinition
 	/// <summary>状态表 `EnumName` 列记录的枚举名；未填写时自动取 <c>Type.ToString()</c>。</summary>
 	public string EnumName { get; }
 
+	/// <summary>
+	/// 该状态是否会**封住村庄民宿的门**（`通用State.csv` 的 `BlocksGuesthouse` 列，2026-10-05 阻断项清理）。
+	/// 只有真的持有**至少一层**该状态时才算封门（判定见 `VillageLodging`）；列缺省 / 留空 = FALSE。
+	/// 口径出处：[民宿交互案](../../../README/施工文档/2026/2026.10/交互/民宿交互案.md) §二。
+	/// </summary>
+	public bool BlocksGuesthouse { get; }
+
 	public StateDefinition(
 		StateType type,
 		string name,
@@ -25,7 +32,8 @@ public sealed class StateDefinition
 		bool isDebuff = false,
 		bool isElite = false,
 		string effectDescription = null,
-		string enumName = null)
+		string enumName = null,
+		bool blocksGuesthouse = false)
 	{
 		Type = type;
 		Name = name ?? string.Empty;
@@ -37,6 +45,7 @@ public sealed class StateDefinition
 		StacksToRemove = stacksToRemove < 0 ? 0 : stacksToRemove;
 		EffectDescription = effectDescription ?? string.Empty;
 		EnumName = string.IsNullOrWhiteSpace(enumName) ? type.ToString() : enumName.Trim();
+		BlocksGuesthouse = blocksGuesthouse;
 	}
 }
 

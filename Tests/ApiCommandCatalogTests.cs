@@ -93,6 +93,8 @@ public class ApiCommandCatalogTests
 		// 用户点名要的越权能力：选关 / 一键跳关（调试通道）。
 		AssertCommand(ApiLane.Debug, "debug.run.select_level");
 		AssertCommand(ApiLane.Debug, "debug.run.next_combat");
+		// 用户点名要的「完成关卡」（仅限战斗关卡；事件不能跳过）：调试通道。
+		AssertCommand(ApiLane.Debug, "debug.run.complete_level");
 		AssertCommand(ApiLane.Debug, "debug.battle.jump_level");
 		AssertCommand(ApiLane.Debug, "debug.game.new_run");
 	}

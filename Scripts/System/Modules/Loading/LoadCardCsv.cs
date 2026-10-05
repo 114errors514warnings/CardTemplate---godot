@@ -28,8 +28,10 @@ public partial class LoadCardCsv : Node
 	public static Card[] LoadCardsFromCSV(string filePath)
 	{
 		string[] dataLines = LoadCsv.LoadCSVDataLines(filePath);
-		// 等级列（`CardTier`，P1-6 最小版 / T9）：按**表头**定位，缺列返回 -1（老表零影响）。
-		int tierColumn = ResolveTierColumnIndex(filePath);
+		// 等级列（`CardTier`，P1-6 最小版 / T9）与条件列（`ConditionParams`）：都**按表头定位**。
+		// 2026-10-05 修：此前条件列写死下标 8 → 通用表在尾部加 `CardTier` 后，第 9 列被当条件列解析（每行报错、整表 0 张）。
+		int tierColumn = ResolveColumnIndex(filePath, "CardTier");
+		int conditionColumn = ResolveColumnIndex(filePath, "ConditionParams");
 
 		if (dataLines.Length == 0)
 		{
@@ -44,7 +46,7 @@ public partial class LoadCardCsv : Node
 			if (string.IsNullOrWhiteSpace(line))
 				continue;
 
-			Card card = ParseCardFromCSVLine(line, tierColumn);
+			Card card = ParseCardFromCSVLine(line, tierColumn, conditionColumn);
 			if (card != null)
 			{
 				cardList.Add(card);
@@ -55,8 +57,8 @@ public partial class LoadCardCsv : Node
 		return cardList.ToArray();
 	}
 
-	/// <summary>定位表头里的 `CardTier` 列下标；没有表头 / 没有该列时返回 -1（= 该表无等级数据）。</summary>
-	private static int ResolveTierColumnIndex(string filePath)
+	/// <summary>定位表头里的某一列（大小写不敏感、去 BOM）；没有表头 / 没有该列时返回 -1。</summary>
+	private static int ResolveColumnIndex(string filePath, string columnName)
 	{
 		foreach (string line in LoadCsv.LoadCSVLines(filePath))
 		{
@@ -68,13 +70,13 @@ public partial class LoadCardCsv : Node
 			string[] header = LoadCsv.ParseCSVFields(line);
 			for (int i = 0; i < header.Length; i++)
 			{
-				if ((header[i] ?? string.Empty).Trim().TrimStart('\uFEFF').Equals("CardTier", StringComparison.OrdinalIgnoreCase))
+				if ((header[i] ?? string.Empty).Trim().TrimStart('\uFEFF').Equals(columnName, StringComparison.OrdinalIgnoreCase))
 				{
 					return i;
 				}
 			}
 
-			return -1;   // 首行不是表头 → 视为无等级列
+			return -1;   // 首行不是表头 → 视为无该列
 		}
 
 		return -1;
@@ -103,7 +105,7 @@ public partial class LoadCardCsv : Node
 	/// </summary>
 	/// <param name="line">CSV行</param>
 	/// <returns>解析后的卡牌对象，失败返回null</returns>
-	private static Card ParseCardFromCSVLine(string line, int tierColumn = -1)
+	private static Card ParseCardFromCSVLine(string line, int tierColumn = -1, int conditionColumn = -1)
 	{
 		try
 		{
@@ -125,7 +127,10 @@ public partial class LoadCardCsv : Node
 			string paramsStr = fields.Length > 6 ? fields[6] : string.Empty;
 
 			CardKeyWord cardKeyWord = fields.Length > 7 ? ParseCardKeyWord(fields[7]) : CardKeyWord.None;
-			CardConditionType[] conditionParams = fields.Length > 8 ? ParseConditionParams(fields[8]) : Array.Empty<CardConditionType>();
+			// 条件列按**表头**定位（缺列 = 该表无条件数据）；不再写死下标 8。
+			CardConditionType[] conditionParams = conditionColumn >= 0 && conditionColumn < fields.Length
+				? ParseConditionParams(fields[conditionColumn])
+				: Array.Empty<CardConditionType>();
 
 			// 解析 EffectTypes（"|"分隔多个效果）
 			EffectType[] effectTypes = ParseEffectTypes(effectTypeStr);

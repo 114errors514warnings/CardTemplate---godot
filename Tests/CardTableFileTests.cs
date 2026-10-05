@@ -35,7 +35,7 @@ public class CardTableFileTests
     // ── 表结构：表头 / 升序 / 表内不重复 ──
 
     [Theory]
-    [InlineData("Card/通用/通用Card.csv", 8)]
+    [InlineData("Card/通用/通用Card.csv", 9)]
     [InlineData("Card/勇士Card.csv", 12)]
     [InlineData("Card/精灵Card.csv", 13)]
     [InlineData("Card/法师Card.csv", 13)]
@@ -226,6 +226,35 @@ public class CardTableFileTests
         string[] header = Cells(ReadTable("Card/勇士Card.csv")[0]);
         Assert.DoesNotContain(CardTierColumn, header.Select(x => x.Trim()));
     }
+
+    // ── 阻断项清理（2026-10-05）：通用表落 CardTier 列，商人第 5 卡包的 3 A + 2 S 通用牌先占位 ──
+
+    [Fact]
+    public void GenericTable_CarriesTierColumn_WithThreeAAndTwoSPlaceholders()
+    {
+        List<string[]> data = DataRows("Card/通用/通用Card.csv");
+        string[] header = Cells(ReadTable("Card/通用/通用Card.csv")[0]).Select(x => x.Trim()).ToArray();
+        int tierColumn = Array.IndexOf(header, CardTierColumn);
+        Assert.True(tierColumn >= 0, "通用表缺 CardTier 列（商人第 5 卡包按等级抽卡依赖它）");
+
+        Assert.All(data, cells => Assert.True(tierColumn < cells.Length, $"{cells[0]} 没有等级列的值"));
+
+        // 用户口径（2026-10-05）：通用牌先占位、不实现具体功能 → 第 5 包所需份数先用占位行凑齐（3 A + 2 S）。
+        Assert.Equal(3, data.Count(cells => cells[tierColumn].Trim() == "A"));
+        Assert.Equal(2, data.Count(cells => cells[tierColumn].Trim() == "S"));
+
+        // 现役通用牌：设计《卡牌表格/通用卡牌.csv》与总体卡牌设计「攻击 / 防御 = D 级」。
+        Assert.Equal("D", TierOf(data, tierColumn, 10000001));
+        Assert.Equal("D", TierOf(data, tierColumn, 20000001));
+        Assert.Equal("C", TierOf(data, tierColumn, 10000002));
+
+        // 占位行的名字必须自带「占位」二字（防止以后误当成正式设计）。
+        Assert.All(data.Where(cells => cells[tierColumn].Trim() is "A" or "S"),
+            cells => Assert.Contains("占位", cells[1]));
+    }
+
+    private static string TierOf(List<string[]> data, int tierColumn, int cardId) =>
+        data.First(cells => cells[0].Trim() == cardId.ToString())[tierColumn].Trim();
 
     [Fact]
     public void TierEligibility_CutsCAndD_KeepsBSAndUnknown()
