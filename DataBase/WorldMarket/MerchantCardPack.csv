@@ -1,0 +1,6 @@
+PackIndex,PackKind,OwnerSlotPolicy,CardCount,TierWeightD,TierWeightC,TierWeightB,TierWeightA,TierWeightS
+1,Character,Fixed,5,40,30,18,9,3
+2,Character,Fixed,5,40,30,18,9,3
+3,Character,Fixed,5,40,30,18,9,3
+4,Mixed,Chosen,5,40,30,18,9,3
+5,Generic,Chosen,5,40,30,18,9,3

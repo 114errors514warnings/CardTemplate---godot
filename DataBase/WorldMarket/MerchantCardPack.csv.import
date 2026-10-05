@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://c81pj46d6a6xw"
+
+[deps]
+
+files=["res://DataBase/WorldMarket/MerchantCardPack.PackKind.translation", "res://DataBase/WorldMarket/MerchantCardPack.OwnerSlotPolicy.translation", "res://DataBase/WorldMarket/MerchantCardPack.CardCount.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightD.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightC.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightB.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightA.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightS.translation"]
+
+source_file="res://DataBase/WorldMarket/MerchantCardPack.csv"
+dest_files=["res://DataBase/WorldMarket/MerchantCardPack.PackKind.translation", "res://DataBase/WorldMarket/MerchantCardPack.OwnerSlotPolicy.translation", "res://DataBase/WorldMarket/MerchantCardPack.CardCount.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightD.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightC.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightB.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightA.translation", "res://DataBase/WorldMarket/MerchantCardPack.TierWeightS.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

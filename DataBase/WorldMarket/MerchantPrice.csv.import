@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b2s4p7tjg2x8k"
+
+[deps]
+
+files=["res://DataBase/WorldMarket/MerchantPrice.Rarity.translation", "res://DataBase/WorldMarket/MerchantPrice.Price.translation"]
+
+source_file="res://DataBase/WorldMarket/MerchantPrice.csv"
+dest_files=["res://DataBase/WorldMarket/MerchantPrice.Rarity.translation", "res://DataBase/WorldMarket/MerchantPrice.Price.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

@@ -1,0 +1,15 @@
+RecipeId,ResultDefinitionId,Material1Id,Material1Count,Material2Id,Material2Count,Gold,Enabled
+1,行军短剑,202,2,,,20,TRUE
+2,长刀,202,3,,,20,TRUE
+3,长枪,201,2,202,2,40,TRUE
+4,魔典,103,2,101,2,40,TRUE
+5,弓,107,3,202,1,40,TRUE
+6,双手剑,202,4,201,2,60,TRUE
+7,弓箭,107,4,202,2,60,TRUE
+8,法典,103,3,205,1,80,TRUE
+9,布头巾,102,2,,,20,TRUE
+10,皮甲,105,1,102,2,30,TRUE
+11,旅人靴,107,2,102,1,30,TRUE
+12,护身符,101,1,103,1,40,TRUE
+13,青铜戒指,201,2,,,20,TRUE
+14,猎人护腕,107,1,108,1,40,TRUE

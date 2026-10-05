@@ -1,10 +1,15 @@
-CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord
-10000001,攻击,Attack,1,Damage,攻击,2
-10000002,压制打击,Attack,1,AddState|Damage,对所有敌人造成2层易伤，并攻击选定敌人,3;1;2|2
-20000001,护盾,Skill,1,Shield,防御,1
-20000002,治疗,Skill,1,Heal,治疗,
-20000003,深呼吸,Skill,0,ClearAllStates|AddCost|DrawCard,移除所有状态，获得2点能量，抽2张牌,1|1;2|1;2
-30000001,燃烧,State,1,AddState,获得2点攻击力，回合结束时移除,1;3;1
-30000002,易伤,Skill,1,AddState,赋予2层易伤,2;1;2
-30000003,虚弱,Skill,1,AddState,赋予2层虚弱,2;2;2
-30000004,反击,Skill,1,AddState,添加状态反击：回合外受到攻击时，反击目标来源,1;4;1
+CardId,CardName,CardType,EnergyCost,EffectType,EffectDesc,Params,CardKeyWord,CardTier
+10000001,攻击,Attack,1,Damage,攻击,2,,D
+10000002,压制打击,Attack,1,AddState|Damage,对所有敌人造成2层易伤，并攻击选定敌人,3;1;2|2,,C
+20000001,护盾,Skill,1,Shield,防御,1,,D
+20000002,治疗,Skill,1,Heal,治疗,,,C
+20000003,深呼吸,Skill,0,ClearAllStates|AddCost|DrawCard,移除所有状态，获得2点能量，抽2张牌,1|1;2|1;2,,C
+20000004,通用A级占位1,Skill,1,Shield,占位：通用 A 级卡（效果待设计，参数暂同「护盾」）,1,,A
+20000005,通用A级占位2,Skill,1,Shield,占位：通用 A 级卡（效果待设计，参数暂同「护盾」）,1,,A
+20000006,通用A级占位3,Skill,1,Shield,占位：通用 A 级卡（效果待设计，参数暂同「护盾」）,1,,A
+20000007,通用S级占位1,Skill,1,Shield,占位：通用 S 级卡（效果待设计，参数暂同「护盾」）,1,,S
+20000008,通用S级占位2,Skill,1,Shield,占位：通用 S 级卡（效果待设计，参数暂同「护盾」）,1,,S
+30000001,燃烧,State,1,AddState,获得2点攻击力，回合结束时移除,1;3;1,,C
+30000002,易伤,Skill,1,AddState,赋予2层易伤,2;1;2,,C
+30000003,虚弱,Skill,1,AddState,赋予2层虚弱,2;2;2,,C
+30000004,反击,Skill,1,AddState,添加状态反击：回合外受到攻击时，反击目标来源,1;4;1,,C

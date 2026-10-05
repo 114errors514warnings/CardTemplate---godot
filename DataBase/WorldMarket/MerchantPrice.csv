@@ -1,0 +1,14 @@
+Category,Rarity,Price
+Material,普通,10
+Material,罕见,30
+Material,稀有,60
+Food,普通,20
+Food,罕见,40
+Food,稀有,80
+Equipment,普通,40
+Equipment,罕见,80
+Equipment,稀有,160
+Item,普通,50
+Item,罕见,90
+Item,稀有,160
+Key,普通,80
