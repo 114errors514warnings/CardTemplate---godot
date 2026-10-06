@@ -49,7 +49,7 @@ http://127.0.0.1:17880/api/game/
 | `battle.pick_item` / `battle.use_item` / `battle.throw_item` | 玩家 | 拾取 / 使用 / 投掷道具 |
 | `battle.equip` / `battle.drop_equipment` | 玩家 | 从当前格装备 / 把手位装备放到当前格 |
 
-### 运行局：时间点 / 夜间（营地）/ 背包 / 地图 / 结算（`run.*`）
+### 运行局：时间点 / 夜间（营地）/ 背包 / 地图 / 结算 / 村庄（`run.*`）
 
 | type | 用途 |
 |---|---|
@@ -66,12 +66,18 @@ http://127.0.0.1:17880/api/game/
 | `run.bag.drag` | **移动物品**：`fromCell` → `toCell`（与鼠标拖放共用同一条落点判定） |
 | `run.map.state` · `run.map.toggle` | 地图状态 / 开合世界地图 |
 | `run.map.enter_node` · `enter_next` | 点**可达**格进入（不可达一律拒绝） |
-| `run.settlement.state` | 结算界面（面板 / 选牌 / 放弃确认 / 未领取清单）—— 本轮只读 |
+| `run.settlement.state` | 结算界面（面板 / 选牌 / 放弃确认 / 未领取物品清单 + **卡牌份候选**） |
+| `run.settlement.claim` · `claim_card` · `close_panel` | 领物品（按 `claimKey`）/ 卡牌份里选一张（`slotIndex` + `cardId`）/ 点「关闭」（领完 → 回地图） |
+| `run.village.state` | **村庄**：所在格 / 入口 / 离开格 / 可走格 / 设施 / tips / 打开的界面 / 提示行（只读） |
+| `run.village.move` · `walk_to` · `exit` | 走相邻格 / 沿相邻格逐格走到目标格 / 走到离开格并回世界地图 |
+| `run.village.tips_accept` · `tips_decline` · `close` | 确认 tips 的「进入 / 稍后」、关闭设施界面（锻铁铺 / 餐厅） |
+| `run.village.smithy_state` · `smithy_select` · `smithy_craft` | 锻铁铺：状态（只读）/ 选配方 / 点「打造」（0.1 时间点 + 配方金币） |
+| `run.village.restaurant_state` · `restaurant_tab` · `restaurant_order` · `restaurant_cook` · `restaurant_sell` | 餐厅：状态（只读）/ 切页签 / 点菜（0.1 + 菜价）/ 现做（0.1 + 材料）/ 卖出（纯交易） |
 
 ## 调试通道指令
 
 见 [调试API.md](调试API.md)：`debug.game.*`（开局 / 切场景 / 截图 / 退出）、`debug.run.*`（选关 / 一键跳关 /
-改时间点 / 塞物品 / 清档 / 强制放行背包闸门）、`debug.battle.*`（原调试面板的全部指令）、`debug.capture`。
+改时间点 / 塞物品 / 清档 / 强制放行背包闸门 / **完成关卡**（仅战斗关卡））、`debug.battle.*`（原调试面板的全部指令）、`debug.capture`。
 
 ## 相关文档
 

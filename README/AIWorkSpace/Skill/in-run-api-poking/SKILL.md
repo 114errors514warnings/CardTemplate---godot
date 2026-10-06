@@ -39,12 +39,29 @@ if (Test-Path ($save + '.apibak')) { Copy-Item -LiteralPath ($save + '.apibak') 
 if (Test-Path $save) { "saveHash 前后：$h0 -> $((Get-FileHash $save).Hash)" }
 ```
 
-## 二、四条要点（栽过的都在这）
+## 二、五条要点（栽过的都在这）
 
 1. `-Body` 传 **UTF8 字节数组**（`[Text.Encoding]::UTF8.GetBytes($json)`）—— PowerShell 5.1 的原生参数有引号坑；**中文 JSON 别用 `curl.exe`**（会吃引号）。
-2. **被拒绝也是 JSON**：HTTP 400 的响应体里有 `ok=false` + `errorCode` + 原因 + 当刻状态，所以 `catch` 里也要解析（这是断言「越权被拦」最省事的路径）。
+2. **被拒绝也是 JSON**：HTTP 400 的响应体里有 `ok=false` + `errorCode` + 原因 + 当刻状态，所以「被规则拒绝」也要当正常结果解析（这是断言「越权被拦」最省事的路径）。**但别用 `Invoke-RestMethod` 去读它** —— 见第 5 条。
 3. 每条响应都有 `permission`（`玩家` / `调试`）——顺手确认自己没跑到越权通道上。
 4. **一次启动只付一次代价**：起游戏 ≈ 分钟级。先把这一轮要验的步骤**全部列好**一次跑完；**不要**拿到空 body / 报错就换一种写法重启重来（2026-10-03 实测：这样连搓 4 个临时 `.ps1`、重启 4 次，全废）。
+5. **请求一律走 `curl + 文件 body`（2026-10-05 实测，取代上面模板里的 `Invoke-RestMethod`）**：PS 5.1 的 `Invoke-RestMethod` 在 **400 分支**里读响应流会**静默失败**（函数返回 `$null` → 断言里 `$r.ok` 是空的，看起来像「API 没回话」；2026-10-05 的 `run.village.smithy_craft` / `restaurant_cook` 就是这样被误判成「没回响应」，实际两条都规矩地回了 `CRAFT_REJECTED` / `COOK_REJECTED`）。
+
+   ```powershell
+   $u = 'http://127.0.0.1:17880/api/game/'
+   $body = Join-Path $env:TEMP 'poke-body.json'
+   function Api($json) {
+     [IO.File]::WriteAllText($body, $json, (New-Object Text.UTF8Encoding($false)))   # UTF-8 无 BOM
+     $raw = & curl.exe -s --max-time 60 -X POST -H 'Content-Type: application/json; charset=utf-8' `
+       --data-binary ('@' + $body) $u
+     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+     return ($raw | ConvertFrom-Json)
+   }
+   ```
+
+   - **不要**写 `--data-binary $json` 直接传串：PS 会把内层双引号吃掉 → 服务端回 `REQUEST_ERROR: 't' is an invalid start of a property name`（2026-10-05 实测）。
+   - 400 / 200 都返回可解析 JSON；`ConvertFrom-Json` 会把 `\uXXXX` 还原成中文。
+   - 脚本文件本身保持 **ASCII（或存成 UTF-8 带 BOM）**：PS 5.1 按 GBK 读无 BOM 的 UTF-8，中文路径 / 文案会乱码甚至 `ParserError`；路径别写死中文 → 用 `$PSScriptRoot` / 枚举 `$env:APPDATA\Godot\app_userdata` 推。
 
 ## 三、通道红线
 
