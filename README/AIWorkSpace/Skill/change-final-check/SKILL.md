@@ -12,10 +12,19 @@ description: "当改动要交付或提交前使用（Use when finishing a change
 
 | 改动类型 | 必做体检 |
 |---|---|
-| C# 代码（`Scripts/**`、`Tests/**`） | `dotnet build` 0 警告 0 错误 → `dotnet test` 失败 0 → 相关烟测 / API 点打（见 [烟测选择](../smoke-test-choice/SKILL.md)） |
+| C# 代码（`Scripts/**`、`Tests/**`） | `dotnet build` 0 警告 0 错误 → **`dotnet test Tests\卡牌模拟器.Tests.csproj`** 失败 0 → 相关烟测 / API 点打（见 [烟测选择](../smoke-test-choice/SKILL.md)） |
 | 配置（`DataBase/**`） | 定向 `--filter` 测试；「能否进场」类改动加跑 `--battlefield-smoke` |
 | 文档（`README/**`、`*.md`） | 链接体检（§三）+ 行尾 / 编码抽查 |
 | 场景 / 资源（`Scenes/**`、`Resources/**`、`*.tscn`） | 相关场景烟测；Godot 生成的 `.import` / `.translation` 边车是否齐 |
+
+> **测试命令必须写全（2026-10-05 实测踩坑，假绿）**：本仓库 `Tests/卡牌模拟器.Tests.csproj` **不在 `卡牌模拟器.sln` 里** —— 在根目录直接跑 `dotnet test` 只做 restore + build 就退出，`$LASTEXITCODE = 0`，**一条测试都不执行**（本轮因此白跑两次）。C# 改动一律 `dotnet test Tests\卡牌模拟器.Tests.csproj`；要**可信计数**再加 trx 日志（本机控制台里 `dotnet test` 的「已通过! …」汇总行会被进度重绘吞掉，`| Select-String` / `| Select-Object -Last` 可能抓到空）：
+>
+> ```powershell
+> [Console]::OutputEncoding = [Text.Encoding]::UTF8
+> dotnet test Tests\卡牌模拟器.Tests.csproj --nologo --logger 'trx;LogFileName=x.trx' --results-directory '_tmp/testresults'
+> $x = [xml] (Get-Content '_tmp/testresults/x.trx' -Encoding UTF8); $c = $x.TestRun.ResultSummary.Counters
+> 'outcome=' + $x.TestRun.ResultSummary.outcome + ' total=' + $c.total + ' passed=' + $c.passed + ' failed=' + $c.failed
+> ```
 
 ## 二、通用四步
 
@@ -62,6 +71,8 @@ $save = Join-Path $env:APPDATA 'Godot\app_userdata\卡牌模拟器\run_save_v1.j
 | `Tests/*.txt` 烟测日志、`Tests/*.png` 截图、`Tests/ApiCaptures/*` | 已被 `.gitignore` 忽略，但**无引用的用完就清**（`Move-Item` 到 `_tmp/`） |
 | `*.apibak` 存档备份 | 确认已还原后清掉 |
 | 临时 `.ps1` / 中间 json | 同上；不要留在仓库根或 `Tests/` |
+
+> **隔离区里的 `.cs` 必须加 `.discard` 后缀（2026-10-06 实测，方案甲撤除轮）**：把要删的 `*.cs` `Move-Item` 到 `_tmp/` 之后，`dotnet build` 仍会**把它们当源码编进去** —— 主 `卡牌模拟器.csproj` 的默认 glob 是整仓 `**/*.cs`，`_tmp/` 不在排除表里（本轮因此报 38 个 `CS0246`，全部来自隔离区的两份旧测试）。判据：**移完立刻 `dotnet build`**；报错文件名出现在 `_tmp/` 下 → 用 `Get-ChildItem -Recurse -File '_tmp/xxx' | Rename-Item { $_.Name + '.discard' }` 补后缀（`.uid` / `.csv` / `.tscn` 同样建议加，免得 Godot 侧再扫到）。
 
 **删文件不走 `Remove-Item`**（硬安全策略，2026-10-05 又犯一次）：一律 `Move-Item` 到 `_tmp/` 或 `Rename-Item` 加 `.discard`，见 [工作守则 §二](../../AgentOps/工作守则.md)。
 

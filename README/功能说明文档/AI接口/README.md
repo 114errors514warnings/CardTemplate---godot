@@ -68,11 +68,7 @@ http://127.0.0.1:17880/api/game/
 | `run.map.enter_node` · `enter_next` | 点**可达**格进入（不可达一律拒绝） |
 | `run.settlement.state` | 结算界面（面板 / 选牌 / 放弃确认 / 未领取物品清单 + **卡牌份候选**） |
 | `run.settlement.claim` · `claim_card` · `close_panel` | 领物品（按 `claimKey`）/ 卡牌份里选一张（`slotIndex` + `cardId`）/ 点「关闭」（领完 → 回地图） |
-| `run.village.state` | **村庄**：所在格 / 入口 / 离开格 / 可走格 / 设施 / tips / 打开的界面 / 提示行（只读） |
-| `run.village.move` · `walk_to` · `exit` | 走相邻格 / 沿相邻格逐格走到目标格 / 走到离开格并回世界地图 |
-| `run.village.tips_accept` · `tips_decline` · `close` | 确认 tips 的「进入 / 稍后」、关闭设施界面（锻铁铺 / 餐厅） |
-| `run.village.smithy_state` · `smithy_select` · `smithy_craft` | 锻铁铺：状态（只读）/ 选配方 / 点「打造」（0.1 时间点 + 配方金币） |
-| `run.village.restaurant_state` · `restaurant_tab` · `restaurant_order` · `restaurant_cook` · `restaurant_sell` | 餐厅：状态（只读）/ 切页签 / 点菜（0.1 + 菜价）/ 现做（0.1 + 材料）/ 卖出（纯交易） |
+| ~~`run.village.*`~~（15 条） | **已撤除（2026-10-06）**：随村庄专用场景一起删除（用户强制规定「地点一律走关卡统一流程」）→ [10 月施工文档 §33 / §34](../../施工文档/2026/2026.10/10月施工文档.md)；设施界面（锻铁铺 / 餐厅）与设施规则层保留，重新接指令的形态见 §34.4 / §34.6 |
 
 ## 调试通道指令
 
