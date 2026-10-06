@@ -1,8 +1,0 @@
-FacilityId,DisplayName,NodeIds,EntranceNodeId
-Inn,旅馆,15;22;28;33,23
-Guesthouse,民宿,1;2;3,7
-Smithy,锻铁铺,0;4;9,10
-Restaurant,餐厅,8;14;21,13
-Forest,树林,27;32;34;35;36,31
-Entrance,入口格,5,
-Exit,离开格,30,
