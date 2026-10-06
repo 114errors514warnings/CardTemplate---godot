@@ -1,6 +1,7 @@
 // VillageFacilityLogicTests.cs
 // 村庄 5 个设施与商人货架的**纯逻辑**断言（村庄地图交互案 / 旅馆案 / 民宿案 / 树林案 / 锻铁铺案 / 餐厅案 / 商人案）。
 // 只锁「规则 + 数值 + 文案」：界面接线由烟测覆盖，这里把静默退化（比例改了、文案改了、价格算错）变成红灯。
+// 与 `RunFacilityCostsTests` 同集合：后者会临时改写设施代价的全局运行期取值，同集合 = 串行，不互相踩。
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,6 +9,7 @@ using System.Linq;
 using CardSimulator;
 using Xunit;
 
+[Collection("RunFacilityCosts")]
 public class VillageFacilityLogicTests
 {
 	private static string[] ReadTable(string relativePath)
@@ -211,12 +213,19 @@ public class VillageFacilityLogicTests
 	}
 
 	[Fact]
-	public void Forage_TimePointGate_AndReasonText()
+	public void Forage_UsesItsOwnForestCost_AndEntryIsNotAnOperation()
 	{
-		Assert.Equal(1f, VillageForage.TimePointCost);
-		Assert.True(VillageForage.CanSearch(1f));
-		Assert.False(VillageForage.CanSearch(0.9f));
-		Assert.Equal("时间点不足：需要 1.0，当前剩余 0.4。", VillageForage.TimePointShortText(1f, 0.4f));
+		// 2026-10-05 第四轮口径（用户裁定）：进入树林本身不是操作；每次搜寻按**树林专属**表值收时间点
+		// （`ForestForageTimePointCost`），与村庄其他操作的表值（`VillageOperationTimePointCost`）分开配。
+		// 表值与代码兜底是否一致由 `GameVariablesTableTests` 对 CSV 直接校验。
+		Assert.NotEqual(VillageVisit.OperationTimePointCost, VillageForage.TimePointCost);
+
+		// 门槛边界全部从代价现算（表值调整后断言不用跟着改）：
+		float cost = VillageForage.TimePointCost;
+		Assert.True(VillageForage.CanSearch(cost));            // 剩余正好 = 一次搜寻 → 可搜寻
+		Assert.False(VillageForage.CanSearch(cost / 2f));      // 剩余只有一半 → 不能搜寻（先去旅馆 / 民宿过夜）
+		Assert.Equal($"时间点不足：需要 {RunTimePoints.Format(cost)}，当前剩余 0.4。请前往旅馆或民宿过夜，或回营地结束当天。",
+			VillageForage.SearchTimePointShortText(0.4f));
 	}
 
 	// ── 锻铁铺 / 商人锻造炉（SmithyCrafting）──
@@ -233,7 +242,12 @@ public class VillageFacilityLogicTests
 		Assert.Equal(0, SmithyCrafting.GoldFor(0, SmithyCrafting.MerchantGoldMultiplier));
 		Assert.Equal(2, SmithyCrafting.VillageMaxCrafts);
 		Assert.Equal(1, SmithyCrafting.MerchantMaxCrafts);
-		Assert.Equal(1f, SmithyCrafting.VisitTimePointCost);
+
+		// 2026-10-05 第四轮口径：每次打造 = 一次「操作」= 村庄操作表值的时间点（默认 0.1）+ 配方金币。
+		float cost = SmithyCrafting.CraftTimePointCost;
+		Assert.Equal(VillageVisit.OperationTimePointCost, cost);
+		Assert.True(SmithyCrafting.CanCraft(cost));            // 剩余正好 = 一次操作 → 可打造
+		Assert.False(SmithyCrafting.CanCraft(cost / 2f));      // 剩余不足一次操作 → 不能打造（先去旅馆 / 民宿过夜）
 	}
 
 	[Fact]
@@ -293,6 +307,18 @@ public class VillageFacilityLogicTests
 		}
 
 		Assert.Equal(2, RestaurantTrade.CooksPerVisit);
+
+		// 2026-10-05 第四轮口径：烹饪与**点菜（买入）**各算一次「操作」，各收一次村庄操作表值的时间点
+		// （默认 0.1）+（点菜另按菜价）金币；出售是纯交易，不收时间点。
+		float cost = RestaurantTrade.CookTimePointCost;
+		Assert.Equal(VillageVisit.OperationTimePointCost, cost);
+		Assert.Equal(cost, RestaurantTrade.OrderTimePointCost);
+		Assert.True(RestaurantTrade.CanCook(cost));            // 剩余正好 = 一次操作 → 可烹饪
+		Assert.False(RestaurantTrade.CanCook(cost / 2f));      // 剩余不足 → 不能烹饪
+		Assert.True(RestaurantTrade.CanOrder(cost));
+		Assert.False(RestaurantTrade.CanOrder(cost / 2f));
+		Assert.Equal($"时间点不足：需要 {RunTimePoints.Format(cost)}，当前剩余 0.4。请前往旅馆或民宿过夜，或回营地结束当天。",
+			RestaurantTrade.OrderTimePointShortText(0.4f));
 	}
 
 	[Fact]
@@ -418,5 +444,24 @@ public class VillageFacilityLogicTests
 		List<RunMerchantStockEntrySave> stock = MerchantStock.Generate(new Random(7), catalog, prices);
 		Assert.DoesNotContain(stock, entry => entry.DefinitionId == "稀有钥匙");
 		Assert.Equal(1, MerchantStock.CountInCategory(stock, MerchantCategory.Key));
+	}
+
+	// ── 餐厅价目（餐厅案 §五：普通 / 罕见 / 稀有 = 20 / 40 / 80，且买进来再卖一定亏）──
+
+	[Fact]
+	public void RestaurantFoodPrice_MatchesPriceTable_AndIsArbitrageFree()
+	{
+		Assert.Equal(20, RestaurantTrade.FoodBuyPrice((int)ItemRarity.Common));
+		Assert.Equal(40, RestaurantTrade.FoodBuyPrice((int)ItemRarity.Uncommon));
+		Assert.Equal(80, RestaurantTrade.FoodBuyPrice((int)ItemRarity.Rare));
+		Assert.Equal(4, RestaurantTrade.BuyShelfSlots);
+
+		foreach (ItemRarity rarity in new[] { ItemRarity.Common, ItemRarity.Uncommon, ItemRarity.Rare })
+		{
+			int buy = RestaurantTrade.FoodBuyPrice((int)rarity);
+			Assert.True(RestaurantTrade.IsArbitrageFree(buy), $"{rarity} 档买进来再卖掉不应赚钱");
+			Assert.Equal((int)Math.Floor(buy * 0.4 + 1e-6), RestaurantTrade.SellPrice(buy, false));
+			Assert.Equal((int)Math.Floor(buy * 0.4 * 1.5 + 1e-6), RestaurantTrade.SellPrice(buy, true));
+		}
 	}
 }

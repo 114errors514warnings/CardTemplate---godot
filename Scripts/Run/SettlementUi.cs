@@ -61,6 +61,144 @@ public partial class SettlementUi : Node
 	/// <summary>是否仍有未领取项（放弃闸门 / 浮窗显示判据）。</summary>
 	public bool HasUnclaimed => Session?.IsInSettlement == true && UnclaimedCount > 0;
 
+	// ── AI 接口窄口（2026-10-05，P3-18）────────────────────────
+	// 背景：`run.settlement.state` 一直是只读，领取 / 关闭是私有嵌套实现 → 自动化走不通「领取 → 关闭 → 回地图」。
+	// 口径同 [in-run-api-poking]：这里只是「等同点一下」（点 Tab / 点卡面 / 点关闭），规则仍全在
+	// `RunSession`（入账 + 去重键落档）与 `SettlementRewardPresenter`（清单与候选）。
+
+	/// <summary>未领取的物品条目（与 `run.settlement.state` 的 items 同一份判据）。</summary>
+	public List<SettlementItemTab> UnclaimedItemTabs =>
+		Run == null ? new List<SettlementItemTab>() : SettlementRewardPresenter.BuildVisibleItemTabs(Run, LoadingSystem.DropTableEntries);
+
+	/// <summary>未领取的卡牌份（每份候选见 <see cref="SettlementCardPoolSave.CandidateCardIds"/>）。</summary>
+	public List<SettlementCardPoolSave> UnclaimedCardPools =>
+		Run == null ? new List<SettlementCardPoolSave>() : SettlementRewardPresenter.BuildVisibleCardPools(Run);
+
+	/// <summary>按 `claimKey` 领一件物品（= 点列表里那一行）；拒绝时给一行原因。</summary>
+	public bool TryClaimItem(string claimKey, out string error)
+	{
+		error = string.Empty;
+		if (!CanUsePanel(out error))
+		{
+			return false;
+		}
+
+		SettlementItemTab target = null;
+		foreach (SettlementItemTab tab in UnclaimedItemTabs)
+		{
+			if (tab != null && string.Equals(tab.ClaimKey, claimKey, StringComparison.Ordinal))
+			{
+				target = tab;
+				break;
+			}
+		}
+
+		if (target == null)
+		{
+			error = $"没有可领取的条目「{claimKey}」（未领取清单见 run.settlement.state 的 items）。";
+			return false;
+		}
+
+		ClaimItem(target);
+		return true;
+	}
+
+	/// <summary>在某个卡牌份里选一张（= 点卡面）：入该槽卡组并落档；`ownerSlot` 回实际入组槽位。</summary>
+	public bool TryClaimCard(int slotIndex, int cardId, out int ownerSlot, out string error)
+	{
+		ownerSlot = -1;
+		error = string.Empty;
+		if (!CanUsePanel(out error))
+		{
+			return false;
+		}
+
+		SettlementCardPoolSave pool = null;
+		foreach (SettlementCardPoolSave candidate in UnclaimedCardPools)
+		{
+			if (candidate != null && candidate.SlotIndex == slotIndex)
+			{
+				pool = candidate;
+				break;
+			}
+		}
+
+		if (pool == null)
+		{
+			error = $"没有可领取的卡牌份 {slotIndex}（未领取份见 run.settlement.state 的 cardPools）。";
+			return false;
+		}
+
+		bool inPool = false;
+		if (pool.CandidateCardIds != null)
+		{
+			foreach (int candidateId in pool.CandidateCardIds)
+			{
+				if (candidateId == cardId)
+				{
+					inPool = true;
+					break;
+				}
+			}
+		}
+
+		if (!inPool)
+		{
+			error = $"卡牌份 {slotIndex} 的候选里没有卡牌 {cardId}（候选见 run.settlement.state 的 cardPools）。";
+			return false;
+		}
+
+		if (!Session.TryClaimSettlementCard(pool.SlotIndex, cardId, out ownerSlot))
+		{
+			error = "领取被拒绝（该份可能已经领取过）。";
+			return false;
+		}
+
+		GD.Print($"[结算] 领取卡牌 {cardId}（{ResolveCardName(cardId)}）→ 槽位 {ownerSlot} {Session.GetSlotDisplayName(ownerSlot)}。");
+		HideCardPick();
+		RefreshFromSave();
+		return true;
+	}
+
+	/// <summary>点「关闭」（`Esc` / X / 底部「关闭」等价）：未领完 → 待领取态 + 浮窗；领完 → 宿主推进回地图。</summary>
+	public bool TryClosePanel(out string error)
+	{
+		error = string.Empty;
+		if (Run == null || Session == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!IsPanelOpen)
+		{
+			error = "结算面板未打开（先读 run.settlement.state）。";
+			return false;
+		}
+
+		ClosePanel();
+		return true;
+	}
+
+	/// <summary>领取 / 关闭共用的可用性门槛：要有本局且结算面板已打开。</summary>
+	private bool CanUsePanel(out string error)
+	{
+		error = string.Empty;
+		if (Run == null || Session == null)
+		{
+			error = "没有进行中的本局。";
+			return false;
+		}
+
+		if (!IsPanelOpen)
+		{
+			error = "结算面板未打开（先读 run.settlement.state）。";
+			return false;
+		}
+
+		return true;
+	}
+
 	public void Bind(CanvasLayer panel, CanvasLayer badge, CanvasLayer confirm)
 	{
 		panelLayer = panel;
@@ -396,23 +534,10 @@ public partial class SettlementUi : Node
 		return Mathf.Clamp(available / 420f, 0.5f, 1f);
 	}
 
-	/// <summary>选中并立即领取（§5.4）：只有该份落档，重建面板后该份 Tab 从列表消失（2026-10-02 口径）。</summary>
-	private void ChooseCard(SettlementCardPoolSave pool, int cardId)
-	{
-		if (Session == null || pool == null)
-		{
-			return;
-		}
-
-		if (!Session.TryClaimSettlementCard(pool.SlotIndex, cardId, out int ownerSlot))
-		{
-			return;
-		}
-
-		GD.Print($"[结算] 领取卡牌 {cardId}（{ResolveCardName(cardId)}）→ 槽位 {ownerSlot} {Session.GetSlotDisplayName(ownerSlot)}。");
-		HideCardPick();
-		RefreshFromSave();
-	}
+	/// <summary>选中并立即领取（§5.4）：只有该份落档，重建面板后该份 Tab 从列表消失（2026-10-02 口径）。
+	/// 实现收口到公开窄口 <see cref="TryClaimCard"/>（AI 接口与鼠标点击同一条路）。</summary>
+	private void ChooseCard(SettlementCardPoolSave pool, int cardId) =>
+		TryClaimCard(pool?.SlotIndex ?? -1, cardId, out _, out _);
 
 	// ── 关闭面板与待领取态（§6.1 – §6.4） ─────────────────────
 

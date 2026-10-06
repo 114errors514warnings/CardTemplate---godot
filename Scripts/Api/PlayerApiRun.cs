@@ -46,7 +46,25 @@ public sealed class PlayerApiRun : IApiDomain
         new("run.map.toggle", ApiLane.Player, "开合世界地图（= 顶栏「地图」按钮）。"),
         new("run.map.enter_node", ApiLane.Player, "点一个**可达**格进入（不可达 / 未就绪一律拒绝）。", false, "nodeId"),
         new("run.map.enter_next", ApiLane.Player, "点第一个可达格（= 玩家点击的同一入口）。"),
-        new("run.settlement.state", ApiLane.Player, "结算界面：面板 / 选牌 / 放弃确认 / 未领取清单（本轮只读）。", true),
+        new("run.settlement.state", ApiLane.Player, "结算界面：面板 / 选牌 / 放弃确认 / 未领取物品清单与卡牌候选。", true),
+        new("run.settlement.claim", ApiLane.Player, "领一件物品（按 claimKey；= 点列表里那一行）。", false, "claimKey"),
+        new("run.settlement.claim_card", ApiLane.Player, "在某个卡牌份里选一张（= 点卡面）：入该槽卡组。", false, "slotIndex,cardId"),
+        new("run.settlement.close_panel", ApiLane.Player, "点「关闭」（未领完 → 待领取态 + 浮窗；领完 → 回地图）。"),
+        new("run.village.state", ApiLane.Player, "村庄：所在格 / 入口 / 离开格 / 可走格 / 设施 / tips / 打开的界面 / 提示行。", true),
+        new("run.village.move", ApiLane.Player, "走到相邻格（= 点那一格；局内移动不消耗时间点），踏入入口格 / 离开格按玩家口径触发。", false, "nodeId"),
+        new("run.village.walk_to", ApiLane.Player, "沿相邻格逐格走到目标格（= 玩家连续点相邻格；每步仍走走法判定与触发）。", false, "nodeId"),
+        new("run.village.tips_accept", ApiLane.Player, "点确认 tips 的「进入」（旅馆 / 民宿 / 树林；= 点按钮）。"),
+        new("run.village.tips_decline", ApiLane.Player, "点确认 tips 的「稍后」。"),
+        new("run.village.close", ApiLane.Player, "关闭当前打开的设施界面（锻铁铺 / 餐厅；= `Esc` / `关闭`）。"),
+        new("run.village.exit", ApiLane.Player, "走到离开格（= 玩家逐格走到离开格）并回世界地图。"),
+        new("run.village.smithy_state", ApiLane.Player, "锻铁铺界面：次数 / 配方列表 / 选中项 / 费用行 / 按钮可用性 / 提示行。", true),
+        new("run.village.smithy_select", ApiLane.Player, "选一件配方（= 点列表里那一行）。", false, "definitionId"),
+        new("run.village.smithy_craft", ApiLane.Player, "点「打造」：时间点 → 次数 → 材料 → 金币 → 背包。"),
+        new("run.village.restaurant_state", ApiLane.Player, "餐厅界面：页签 / 次数 / 选中配方 / 食物货架 / 现做标 / 提示行。", true),
+        new("run.village.restaurant_tab", ApiLane.Player, "切餐厅页签（buy / cook / sell）。", false, "tab"),
+        new("run.village.restaurant_order", ApiLane.Player, "点菜：买货架上第 index 件食物（每次 0.1 时间点 + 菜价）。", false, "index"),
+        new("run.village.restaurant_cook", ApiLane.Player, "现做：按配方 Id 选中并点「烹饪」（每次 0.1 时间点 + 材料）。", false, "recipeId"),
+        new("run.village.restaurant_sell", ApiLane.Player, "卖出背包里的一件食物实例（纯交易，不消耗时间点）。", false, "instanceId"),
     };
 
     private readonly ApiRunContext context;
@@ -89,6 +107,24 @@ public sealed class PlayerApiRun : IApiDomain
             ["run.map.enter_node"] = EnterNode,
             ["run.map.enter_next"] = EnterNext,
             ["run.settlement.state"] = request => Ok(request, "结算状态读取成功。", ApiRunSnapshot.Settlement(Scene)),
+            ["run.settlement.claim"] = ClaimSettlementItem,
+            ["run.settlement.claim_card"] = ClaimSettlementCard,
+            ["run.settlement.close_panel"] = CloseSettlementPanel,
+            ["run.village.state"] = VillageState,
+            ["run.village.move"] = VillageMove,
+            ["run.village.walk_to"] = VillageWalkTo,
+            ["run.village.tips_accept"] = VillageTipsAccept,
+            ["run.village.tips_decline"] = VillageTipsDecline,
+            ["run.village.close"] = VillageCloseFacilityUi,
+            ["run.village.exit"] = VillageExit,
+            ["run.village.smithy_state"] = request => VillageOk(request, "锻铁铺状态读取成功。", ApiRunSnapshot.VillageSmithy(Scene)),
+            ["run.village.smithy_select"] = VillageSmithySelect,
+            ["run.village.smithy_craft"] = VillageSmithyCraft,
+            ["run.village.restaurant_state"] = request => VillageOk(request, "餐厅状态读取成功。", ApiRunSnapshot.VillageRestaurant(Scene)),
+            ["run.village.restaurant_tab"] = VillageRestaurantTab,
+            ["run.village.restaurant_order"] = VillageRestaurantOrder,
+            ["run.village.restaurant_cook"] = VillageRestaurantCook,
+            ["run.village.restaurant_sell"] = VillageRestaurantSell,
         };
     }
 
@@ -349,5 +385,199 @@ public sealed class PlayerApiRun : IApiDomain
     {
         if (!Scene.TryEnterNextNode()) return Fail(request, "NO_REACHABLE_NODE", "当前没有可达格（地图不可选或没有相邻格）。");
         return Ok(request, "已进入第一个可达格。", ApiRunSnapshot.Map(Scene));
+    }
+
+    // ── 结算（玩家口径：领取 / 关闭；2026-10-05 补 P3-18） ─────────
+
+    private ApiResult ClaimSettlementItem(ApiRequest request)
+    {
+        SettlementUi ui = Scene?.Settlement;
+        if (ui == null) return Fail(request, "NO_SETTLEMENT_UI", "本场景没有结算界面。");
+        if (string.IsNullOrWhiteSpace(request.ClaimKey))
+            return Fail(request, "MISSING_CLAIM_KEY", "请给出 claimKey（未领取清单见 run.settlement.state 的 items）。");
+        if (!ui.TryClaimItem(request.ClaimKey, out string error)) return Fail(request, "CLAIM_REJECTED", error);
+        return Ok(request, $"已领取物品「{request.ClaimKey}」。", ApiRunSnapshot.Settlement(Scene));
+    }
+
+    private ApiResult ClaimSettlementCard(ApiRequest request)
+    {
+        SettlementUi ui = Scene?.Settlement;
+        if (ui == null) return Fail(request, "NO_SETTLEMENT_UI", "本场景没有结算界面。");
+        if (!ui.TryClaimCard(request.SlotIndex, request.CardId, out int ownerSlot, out string error))
+            return Fail(request, "CLAIM_CARD_REJECTED", error);
+        return Ok(request, $"已领取卡牌 {request.CardId}（入槽位 {ownerSlot}）。", ApiRunSnapshot.Settlement(Scene));
+    }
+
+    private ApiResult CloseSettlementPanel(ApiRequest request)
+    {
+        SettlementUi ui = Scene?.Settlement;
+        if (ui == null) return Fail(request, "NO_SETTLEMENT_UI", "本场景没有结算界面。");
+        if (!ui.TryClosePanel(out string error)) return Fail(request, "CLOSE_REJECTED", error);
+        return Ok(request, "已关闭结算面板。", ApiRunSnapshot.Settlement(Scene));
+    }
+
+    // ── 村庄（地点场景；2026-10-05 补 `run.village.*`） ────────────
+    // 口径：这些处理器只做「等同玩家点一下」——走格 / 点 tips / 点按钮；规则与扣费全在
+    // `VillageVisit`（走法 / 触发）与 `RunSession.Place.cs`（操作结算）。
+
+    private ApiResult VillageOk(ApiRequest request, string message, object data = null) =>
+        Ok(request, message, data ?? ApiRunSnapshot.Village(Scene));
+
+    private ApiResult RequireVillage(ApiRequest request, out VillageScene village)
+    {
+        village = Scene?.Village;
+        if (village == null || !Godot.GodotObject.IsInstanceValid(village))
+            return Fail(request, "NO_VILLAGE", "当前不在村庄地点场景（先在世界地图点村庄格进入）。");
+        return null;
+    }
+
+    private ApiResult VillageState(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out _);
+        return gate ?? VillageOk(request, "村庄状态读取成功。");
+    }
+
+    private ApiResult VillageMove(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        if (!village.TryMoveTo(request.NodeId))
+            return Fail(request, "VILLAGE_MOVE_REJECTED",
+                string.IsNullOrWhiteSpace(village.HintText) ? "这一格走不过去。" : village.HintText);
+        return VillageOk(request, $"已走到格 {request.NodeId}。");
+    }
+
+    private ApiResult VillageWalkTo(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        if (!village.TryWalkTo(request.NodeId))
+            return Fail(request, "VILLAGE_WALK_REJECTED",
+                string.IsNullOrWhiteSpace(village.HintText) ? "走不到这一格。" : village.HintText);
+        return VillageOk(request, $"已走到格 {request.NodeId}。");
+    }
+
+    private ApiResult VillageTipsAccept(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        if (!village.TipsOpen) return Fail(request, "NO_TIPS", "当前没有确认 tips（走到旅馆 / 民宿 / 树林入口格才会弹）。");
+        if (!village.AcceptTips()) return Fail(request, "TIPS_REJECTED", "确认 tips 已被关闭。");
+        return VillageOk(request, "已点确认 tips 的「进入」。");
+    }
+
+    private ApiResult VillageTipsDecline(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        if (!village.TipsOpen) return Fail(request, "NO_TIPS", "当前没有确认 tips。");
+        if (!village.DeclineTips()) return Fail(request, "TIPS_REJECTED", "确认 tips 已被关闭。");
+        return VillageOk(request, "已点确认 tips 的「稍后」。");
+    }
+
+    private ApiResult VillageCloseFacilityUi(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        if (!village.TryCloseFacilityUi()) return Fail(request, "NO_FACILITY_UI", "当前没有打开的设施界面（锻铁铺 / 餐厅）。");
+        return VillageOk(request, "已关闭设施界面。");
+    }
+
+    private ApiResult VillageExit(ApiRequest request)
+    {
+        ApiResult gate = RequireVillage(request, out VillageScene village);
+        if (gate != null) return gate;
+        int exitNodeId = village.ExitNodeId;
+        if (!village.TryWalkTo(exitNodeId))
+            return Fail(request, "VILLAGE_EXIT_REJECTED",
+                string.IsNullOrWhiteSpace(village.HintText) ? "走不到离开格。" : village.HintText);
+        return Ok(request, $"已走到离开格 {exitNodeId}，回到世界地图（村庄节点标记为已访问）。", ApiRunSnapshot.Map(Scene));
+    }
+
+    private ApiResult RequireSmithyUi(ApiRequest request, out SmithyUi ui)
+    {
+        ui = Scene?.Village?.Smithy;
+        if (ui == null || !Godot.GodotObject.IsInstanceValid(ui) || !ui.IsOpen)
+        {
+            ui = null;
+            return Fail(request, "NO_SMITHY_UI", "锻铁铺界面未打开（先走到锻铁铺入口格）。");
+        }
+
+        return null;
+    }
+
+    private ApiResult VillageSmithySelect(ApiRequest request)
+    {
+        ApiResult gate = RequireSmithyUi(request, out SmithyUi ui);
+        if (gate != null) return gate;
+        if (string.IsNullOrWhiteSpace(request.DefinitionId))
+            return Fail(request, "MISSING_DEFINITION_ID", "请给出 definitionId（可选配方见 run.village.smithy_state 的 recipeDefinitionIds）。");
+        if (!ui.SelectByDefinitionId(request.DefinitionId))
+            return Fail(request, "SMITHY_SELECT_REJECTED", $"配方表里没有「{request.DefinitionId}」。");
+        return Ok(request, $"已选中配方 {request.DefinitionId}。", ApiRunSnapshot.VillageSmithy(Scene));
+    }
+
+    private ApiResult VillageSmithyCraft(ApiRequest request)
+    {
+        ApiResult gate = RequireSmithyUi(request, out SmithyUi ui);
+        if (gate != null) return gate;
+        int before = ui.CraftedThisVisit;
+        ui.TriggerCraft();
+        if (ui.CraftedThisVisit <= before)
+            return Fail(request, "CRAFT_REJECTED", string.IsNullOrWhiteSpace(ui.HintText) ? "打造被拒绝。" : ui.HintText);
+        return Ok(request, $"已打造（本次第 {ui.CraftedThisVisit} 件，剩余次数 {ui.CraftsLeft}）。", ApiRunSnapshot.VillageSmithy(Scene));
+    }
+
+    private ApiResult RequireRestaurantUi(ApiRequest request, out RestaurantUi ui)
+    {
+        ui = Scene?.Village?.Restaurant;
+        if (ui == null || !Godot.GodotObject.IsInstanceValid(ui) || !ui.IsOpen)
+        {
+            ui = null;
+            return Fail(request, "NO_RESTAURANT_UI", "餐厅界面未打开（先走到餐厅入口格）。");
+        }
+
+        return null;
+    }
+
+    private ApiResult VillageRestaurantTab(ApiRequest request)
+    {
+        ApiResult gate = RequireRestaurantUi(request, out RestaurantUi ui);
+        if (gate != null) return gate;
+        if (string.IsNullOrWhiteSpace(request.Tab))
+            return Fail(request, "MISSING_TAB", "请给出 tab（buy / cook / sell）。");
+        if (!ui.ShowTabForSmoke(request.Tab))
+            return Fail(request, "INVALID_TAB", $"页签「{request.Tab}」无效：请用 buy / cook / sell。");
+        return Ok(request, $"已切到餐厅「{ui.ActiveTab}」页。", ApiRunSnapshot.VillageRestaurant(Scene));
+    }
+
+    private ApiResult VillageRestaurantOrder(ApiRequest request)
+    {
+        ApiResult gate = RequireRestaurantUi(request, out RestaurantUi ui);
+        if (gate != null) return gate;
+        if (!ui.TriggerBuyAt(request.Index))
+            return Fail(request, "ORDER_REJECTED", string.IsNullOrWhiteSpace(ui.HintText) ? "点菜被拒绝。" : ui.HintText);
+        return Ok(request, $"已点菜（货架第 {request.Index} 件，本次已售 {ui.ShelfSoldCount} 件）。", ApiRunSnapshot.VillageRestaurant(Scene));
+    }
+
+    private ApiResult VillageRestaurantCook(ApiRequest request)
+    {
+        ApiResult gate = RequireRestaurantUi(request, out RestaurantUi ui);
+        if (gate != null) return gate;
+        int before = ui.CooksLeft;
+        if (!ui.TriggerCookByRecipeId(request.RecipeId) || ui.CooksLeft >= before)
+            return Fail(request, "COOK_REJECTED", string.IsNullOrWhiteSpace(ui.HintText) ? "烹饪被拒绝。" : ui.HintText);
+        return Ok(request, $"{ui.HintText}（剩余次数 {ui.CooksLeft}）", ApiRunSnapshot.VillageRestaurant(Scene));
+    }
+
+    private ApiResult VillageRestaurantSell(ApiRequest request)
+    {
+        ApiResult gate = RequireRestaurantUi(request, out RestaurantUi ui);
+        if (gate != null) return gate;
+        if (string.IsNullOrWhiteSpace(request.InstanceId))
+            return Fail(request, "MISSING_INSTANCE_ID", "请给出 instanceId（背包食物实例键见 run.bag.state）。");
+        if (!ui.TriggerSellByInstanceId(request.InstanceId))
+            return Fail(request, "SELL_REJECTED", string.IsNullOrWhiteSpace(ui.HintText) ? "卖出被拒绝。" : ui.HintText);
+        return Ok(request, ui.HintText, ApiRunSnapshot.VillageRestaurant(Scene));
     }
 }

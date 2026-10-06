@@ -93,6 +93,15 @@ public class ApiCommandCatalogTests
 		// 用户点名要的越权能力：选关 / 一键跳关（调试通道）。
 		AssertCommand(ApiLane.Debug, "debug.run.select_level");
 		AssertCommand(ApiLane.Debug, "debug.run.next_combat");
+		// 地点场景（村庄）与结算领取 / 关闭（2026-10-05，P3-18）：都是玩家在界面上真能点的那一下。
+		AssertCommand(ApiLane.Player, "run.village.state");
+		AssertCommand(ApiLane.Player, "run.village.move");
+		AssertCommand(ApiLane.Player, "run.village.tips_accept");
+		AssertCommand(ApiLane.Player, "run.village.smithy_craft");
+		AssertCommand(ApiLane.Player, "run.village.restaurant_order");
+		AssertCommand(ApiLane.Player, "run.settlement.claim");
+		AssertCommand(ApiLane.Player, "run.settlement.claim_card");
+		AssertCommand(ApiLane.Player, "run.settlement.close_panel");
 		// 用户点名要的「完成关卡」（仅限战斗关卡；事件不能跳过）：调试通道。
 		AssertCommand(ApiLane.Debug, "debug.run.complete_level");
 		AssertCommand(ApiLane.Debug, "debug.battle.jump_level");
@@ -109,6 +118,9 @@ public class ApiCommandCatalogTests
 		Assert.True(Find("run.bag.state").ReadOnly);
 		Assert.False(Find("run.bag.drag").ReadOnly);
 		Assert.True(Find("run.settlement.state").ReadOnly);
+		Assert.True(Find("run.village.state").ReadOnly);
+		Assert.False(Find("run.village.move").ReadOnly);
+		Assert.False(Find("run.settlement.claim").ReadOnly);
 	}
 
 	private static ApiCommandInfo Find(string type)

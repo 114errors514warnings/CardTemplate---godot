@@ -28,6 +28,7 @@ public static class ApiRunSnapshot
             act = run.MapState.Act,
             seed = run.MapState.Seed,
             currentNodeId = run.MapState.CurrentNodeId,
+            gold = run.Gold,
             keys = run.Keys,
             visitedNodeCount = run.MapState.VisitedNodeIds.Count,
             pendingRestDay = run.MapState.PendingRestDay,
@@ -302,6 +303,7 @@ public static class ApiRunSnapshot
         RunSession session = RunSession.Instance;
         if (ui == null || session?.Current == null) return new { ready = false };
         List<SettlementItemTab> tabs = SettlementRewardPresenter.BuildVisibleItemTabs(session.Current, LoadingSystem.DropTableEntries);
+        List<SettlementCardPoolSave> pools = SettlementRewardPresenter.BuildVisibleCardPools(session.Current);
         return new
         {
             ready = true,
@@ -312,7 +314,125 @@ public static class ApiRunSnapshot
             hasUnclaimed = ui.HasUnclaimed,
             unclaimedCount = ui.UnclaimedCount,
             items = tabs.Select(tab => new { claimKey = tab.ClaimKey, text = tab.Text, claimed = tab.Claimed }).ToArray(),
-            cardPoolCount = SettlementRewardPresenter.BuildVisibleCardPools(session.Current).Count,
+            cardPoolCount = pools.Count,
+            // 每份的候选卡（`run.settlement.claim_card` 的 cardId 就取自这里；已领的份不再列出）。
+            cardPools = pools.Select(pool => new
+            {
+                slotIndex = pool.SlotIndex,
+                candidateCardIds = pool.CandidateCardIds == null ? Array.Empty<int>() : pool.CandidateCardIds.ToArray(),
+            }).ToArray(),
+        };
+    }
+
+    /// <summary>村庄（地点场景）状态：位置 / 版图 / tips / 打开的界面 / 时间点与设施使用情况。</summary>
+    public static object Village(RunFlowScene scene)
+    {
+        VillageScene village = scene?.Village;
+        RunSession session = RunSession.Instance;
+        if (village == null || !Godot.GodotObject.IsInstanceValid(village) || session?.Current == null)
+        {
+            return new { open = false };
+        }
+
+        VillageVisit visit = village.Visit;
+        VillageLayoutData layout = visit?.Layout;
+        RunVillageStateSave state = session.Current.VillageState;
+        List<object> plots = new List<object>();
+        if (layout != null)
+        {
+            foreach (VillagePlot plot in layout.Plots)
+            {
+                plots.Add(new
+                {
+                    kind = plot.Kind.ToString(),
+                    displayName = plot.DisplayName,
+                    nodeIds = plot.NodeIds.ToArray(),
+                    entranceNodeId = plot.EntranceNodeId,
+                    isFacility = plot.IsFacility,
+                });
+            }
+        }
+
+        return new
+        {
+            open = true,
+            playerNodeId = village.PlayerNodeId,
+            entranceNodeId = village.EntranceNodeId,
+            exitNodeId = village.ExitNodeId,
+            walkableNodeIds = visit == null ? Array.Empty<int>() : visit.WalkableNodeIds.ToArray(),
+            passableCount = visit?.PassableCount ?? 0,
+            lastTriggeredEntranceNodeId = state?.LastTriggeredEntranceNodeId ?? -1,
+            plots = plots.ToArray(),
+            tipsOpen = village.TipsOpen,
+            tipsTitle = village.TipsTitleText,
+            tipsEffect = village.TipsEffectText,
+            tipsCost = village.TipsCostText,
+            tipsEnterEnabled = village.TipsEnterEnabled,
+            smithyOpen = village.SmithyOpen,
+            restaurantOpen = village.RestaurantOpen,
+            hintText = village.HintText,
+            gold = session.Current.Gold,
+            day = session.CurrentDay,
+            remainingToday = session.RemainingToday,
+            operationTimePointCost = VillageVisit.OperationTimePointCost,
+            forageTimePointCost = VillageForage.TimePointCost,
+            innUsed = state?.InnUsed ?? false,
+            guesthouseUsedDay = state?.GuesthouseUsedDay ?? -1,
+            chosenLodging = state?.ChosenLodging.ToString(),
+            guesthouseLockedByEvent = state?.GuesthouseLockedByEvent ?? false,
+            guesthouseDebuffBlockName = state?.GuesthouseDebuffBlockName ?? string.Empty,
+        };
+    }
+
+    /// <summary>村庄 · 锻铁铺界面状态（未打开时 `open=false`）。</summary>
+    public static object VillageSmithy(RunFlowScene scene)
+    {
+        SmithyUi ui = scene?.Village?.Smithy;
+        if (ui == null || !Godot.GodotObject.IsInstanceValid(ui) || !ui.IsOpen)
+        {
+            return new { open = false };
+        }
+
+        return new
+        {
+            open = true,
+            craftsLeft = ui.CraftsLeft,
+            craftedThisVisit = ui.CraftedThisVisit,
+            recipeDefinitionIds = ui.RecipeDefinitionIds.ToArray(),
+            selectedDefinitionId = ui.SelectedDefinitionId,
+            costText = ui.CostText,
+            craftDisabled = ui.CraftDisabled,
+            hintText = ui.HintText,
+        };
+    }
+
+    /// <summary>村庄 · 餐厅界面状态（未打开时 `open=false`）。</summary>
+    public static object VillageRestaurant(RunFlowScene scene)
+    {
+        RestaurantUi ui = scene?.Village?.Restaurant;
+        if (ui == null || !Godot.GodotObject.IsInstanceValid(ui) || !ui.IsOpen)
+        {
+            return new { open = false };
+        }
+
+        return new
+        {
+            open = true,
+            activeTab = ui.ActiveTab.ToString(),
+            cooksLeft = ui.CooksLeft,
+            selectedRecipeId = ui.SelectedRecipeId,
+            cookableRecipeIds = ui.CookableRecipeIds.ToArray(),
+            shelf = ui.ShelfEntries.Select(slot => new
+            {
+                foodKey = slot.FoodKey,
+                price = slot.Price,
+                sold = slot.Sold,
+            }).ToArray(),
+            shelfCount = ui.ShelfCount,
+            shelfSoldCount = ui.ShelfSoldCount,
+            freshMarkCount = ui.FreshMarkCount,
+            orderTimePointCost = RestaurantTrade.OrderTimePointCost,
+            hintText = ui.HintText,
         };
     }
 }

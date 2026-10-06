@@ -14,7 +14,11 @@ public static class RunTimePoints
 	/// <summary>一天固定包含的时间点数（不随游戏进程变化）。</summary>
 	public const float PointsPerDay = 4f;
 
-	/// <summary>移动到相邻节点的时间点进程（3 回合 = 0.3）。</summary>
+	/// <summary>
+	/// 移动到相邻节点的时间点进程（3 回合 = 0.3）的**默认值 / 兜底值**：正式数值读全局数据表
+	/// `DataBase/GameVariables.csv` 的 `MoveTimePointCost`（消费点 `MapScene.EnterNode`，2026-10-05 用户口径：
+	/// 数值放表里便于修改）；表里未配置该列时回落到这里。
+	/// </summary>
 	public const float MoveCost = 0.3f;
 
 	/// <summary>战斗内每经过 1 个回合的进程（10 回合 = 1 时间点）。</summary>
@@ -87,6 +91,13 @@ public static class RunTimePoints
 	/// <summary>常驻栏 / 地图信息条的时间点文案：`第 N 天 · 剩余 X.X / 4`。</summary>
 	public static string FormatDayAndRemaining(float total) =>
 		$"第 {DayIndex(total)} 天 · 剩余 {Format(RemainingToday(total))} / {Format(PointsPerDay)}";
+
+	/// <summary>
+	/// 「时间点不足 + 去处指引」的一行原因（设施操作 / 移动等共用这一处句式，避免每个设施各写一份）：
+	/// `时间点不足：需要 1.0，当前剩余 0.4。请前往旅馆或民宿过夜，或回营地结束当天。`
+	/// </summary>
+	public static string ShortRestText(float need, float remaining, string restHint) =>
+		$"时间点不足：需要 {Format(need)}，当前剩余 {Format(remaining)}。{restHint}";
 
 	/// <summary>事件选项里「0.5 时间点（5 回合）」这类可换算写法（事件系统 §2.2 律 3）。</summary>
 	public static string FormatWithRounds(float value)

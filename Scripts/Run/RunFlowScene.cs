@@ -36,6 +36,8 @@ public partial class RunFlowScene : Control
     private CanvasLayer campLayer;
     // 营地实例（null = 未在营地）；「结束当天」与时间点不足的强制转场共用 OpenCamp。
     private CampScene camp;
+    // 地点场景实例（村庄；商人同路，商人批接上）。null = 未在地点场景。
+    private VillageScene village;
     // 常驻栏左侧的时间点显示（第 9 条：天数 + 当天剩余，精度 0.1）与主动结束当天入口。
     private HBoxContainer timeRow;
     // 常驻栏右侧通用按钮行（地图 / 定位当前角色 / 调试 / 暂停，几何取自 RunUiLayout）：
@@ -68,7 +70,10 @@ public partial class RunFlowScene : Control
     public override void _Ready()
     {
         bool uiSmoke = OS.GetCmdlineUserArgs().Contains("--run-flow-ui-smoke");
-        if (uiSmoke && RunSession.Instance?.Current == null)
+        // 省时口径（10 月施工文档 §17.5）：`--run-flow-ui-smoke=<段名>` 只跑改动到的那一段；
+        // 裸 `--run-flow-ui-smoke` 仍是整套回归（提交门）。两者的建档 / 备份 / 收尾完全共用。
+        string smokeSegment = ParseUiSmokeSegment(OS.GetCmdlineUserArgs());
+        if ((uiSmoke || smokeSegment != null) && RunSession.Instance?.Current == null)
         {
             // 烟测会新建本局并写档：先备份玩家存档，结束时还原，避免覆盖正式进度。
             BackupRunSaveFile();
@@ -92,6 +97,7 @@ public partial class RunFlowScene : Control
         var packed = GD.Load<PackedScene>("res://Scenes/Map/MapScene.tscn");
         map = packed.Instantiate<MapScene>(); map.EmbeddedMode = true;
         map.LevelRequested += StartLevel; map.EventRequested += StartEvent;
+        map.PlaceRequested += OpenPlace;
         map.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         worldMapLayer.AddChild(map);
         BuildGlobalTopBar();
@@ -121,7 +127,9 @@ public partial class RunFlowScene : Control
         // 不能重播事件（§5.7 / §6.5）。
         if (run?.IsInSettlement == true) StartLevel(run.Current.PendingContentId);
         else if (run?.Current?.PendingContentType == "Event") StartEvent(run.Current.PendingContentId);
+        else if (run?.IsInVillage == true) StartVillage();
         else if (run?.Current?.PendingContentType == "Level" || run?.IsInBattleStart == true) StartLevel(run?.Current?.PendingContentId);
+        else if (smokeSegment != null) { map.SetReadOnly(false); CallDeferred(nameof(RunUiSmokeSegment), smokeSegment); }
         else if (uiSmoke) { map.SetReadOnly(false); CallDeferred(nameof(RunUiSmoke)); }
         else { map.SetReadOnly(false); CallDeferred(nameof(TriggerStartEvent)); }
     }
@@ -140,12 +148,16 @@ public partial class RunFlowScene : Control
     public BagUi Bag => bagUi;
     public EquipmentUi Equipment => equipmentUi;
     public CampScene Camp => camp;
+    public VillageScene Village => village;
     public MapScene Map => map;
     public SettlementUi Settlement => settlementUi;
     public HexBattleScene ActiveBattle => activeBattle;
 
     /// <summary>营地（夜间 UI）是否开着。</summary>
     public bool IsCampOpen => camp != null && GodotObject.IsInstanceValid(camp);
+
+    /// <summary>地点场景（村庄）是否开着。</summary>
+    public bool IsVillageOpen => village != null && GodotObject.IsInstanceValid(village);
 
     /// <summary>世界地图是否可见（顶栏「地图」的开合状态）。</summary>
     public bool IsMapVisible => map != null && GodotObject.IsInstanceValid(map) && map.Visible;
@@ -159,7 +171,9 @@ public partial class RunFlowScene : Control
         get
         {
             if (host == null || host.GetChildCount() == 0) return "none";
-            return host.GetChild(0) is RunBattleScene ? "battle" : "event";
+            Node firstChild = host.GetChild(0);
+            if (firstChild is RunBattleScene) return "battle";
+            return firstChild is VillageScene ? "village" : "event";
         }
     }
 
@@ -227,6 +241,24 @@ public partial class RunFlowScene : Control
         nodeId = -1;
         error = "地图未就绪。";
         return map != null && GodotObject.IsInstanceValid(map) && map.TryJumpToNextCombat(out nodeId, out error);
+    }
+
+    /// <summary>
+    /// **调试通道**（`debug.run.complete_level`）：把**当前战斗关卡**直接判胜，随后照常走战斗结算
+    /// （结算面板 → 选卡 → 回地图），落点与玩家真打完一场完全一致。
+    /// 只认战斗内容：事件（或没有内容）一律拒绝 —— 事件必须由玩家选项推进，调试指令不得跳过。
+    /// </summary>
+    public bool DebugCompleteLevel(out string error)
+    {
+        error = string.Empty;
+        if (ContentKind != "battle" || activeBattle == null || !GodotObject.IsInstanceValid(activeBattle))
+        {
+            error = "当前不是战斗关卡：本指令只用于完成战斗关卡，事件（或没有内容）不能跳过。";
+            return false;
+        }
+        if (!activeBattle.DebugResolveVictory(out error)) return false;
+        GD.Print("[API] 调试：当前战斗关卡已判胜，将按正常战斗流程结算。");
+        return true;
     }
 
     /// <summary>
@@ -584,6 +616,75 @@ public partial class RunFlowScene : Control
             bool inCamp = camp != null && GodotObject.IsInstanceValid(camp);
             endDayButton.Disabled = run?.Current == null || !mapSelectable || inCamp;
         }
+    }
+
+
+    // ── 地点场景（村庄 / 商人；2026-10-05 批 2）────────────────────────────
+
+    /// <summary>
+    /// 统一地点场景入口（村庄案 §十）：世界地图点村庄 / 商人节点 → 这里。
+    /// `placeType` 取 `RunSession.PlaceVillage` / `RunSession.PlaceMerchant`；未知类型只打日志、不改状态。
+    /// </summary>
+    private void OpenPlace(string placeType)
+    {
+        if (RunSession.Instance?.Current == null || IsSettlementBlocking) return;
+        if (string.Equals(placeType, RunSession.PlaceVillage, StringComparison.Ordinal))
+        {
+            StartVillage();
+            return;
+        }
+
+        // 商人地点场景（商人交互案 §二 / §三）随商人批落地：通路已留，这里不静默降级成事件。
+        GD.PrintErr($"[运行局] 地点场景 `{placeType}` 尚未接入，忽略这次进入请求。");
+    }
+
+    /// <summary>进入村庄地点场景：内容进行中（地图转只读 + 常驻栏「结束当天」不可点；村庄案 §七）。</summary>
+    private void StartVillage()
+    {
+        RunSession run = RunSession.Instance;
+        if (run?.Current == null || IsVillageOpen) return;
+        mapSelectable = false;
+        activeBattle = null;
+        activeContent = null;
+        attachMapRetries = 0;
+        ClearHost();
+        SetWorldMapVisible(false);
+        map.SetReadOnly(true);
+
+        PackedScene packed = GD.Load<PackedScene>("res://Scenes/Run/VillageScene.tscn");
+        if (packed == null)
+        {
+            GD.PrintErr("[运行局] 无法加载 VillageScene.tscn，放弃村庄转场。");
+            ReturnToSelectableMap();
+            return;
+        }
+
+        village = packed.Instantiate<VillageScene>();
+        village.EmbeddedMode = true;
+        village.PlaceExited += OnVillageExited;
+        village.Notice += text => GD.Print($"[村庄] {text}");
+        host.AddChild(village);
+        ConfigureGlobalTopBar(null);
+        GD.Print($"[村庄] 进入村庄场景（金币 {run.Current.Gold}，时间点 {RunTimePoints.Format(run.RemainingToday)}）。");
+    }
+
+    /// <summary>走离开格：销毁村庄场景 → 标记村庄节点已访问 → 回可选世界地图（村庄案 §十一 第 7 条）。</summary>
+    private void OnVillageExited()
+    {
+        if (village != null && GodotObject.IsInstanceValid(village))
+        {
+            village.QueueFree();
+        }
+
+        village = null;
+        ClearHost();
+        RunSession.Instance?.CompletePendingPlaceToMap();
+        // 村庄节点是「离开时才标记已访问」，而地图只在建版图时读一次存档：
+        // 不刷新的话，同一会话里再点该格会重复进入（一次性节点失效）。
+        map.RefreshVisitedFlags();
+        RefreshTimePointText();
+        ReturnToSelectableMap();
+        GD.Print("[村庄] 已离开村庄，村庄节点标记为已访问。");
     }
 
 
@@ -948,6 +1049,54 @@ public partial class RunFlowScene : Control
         {
             equipmentUi.Refresh();
         }
+    }
+
+    /// <summary>
+    /// **单段烟测**入口（`--run-flow-ui-smoke=<段名>`，省时口径见 10 月施工文档 §17.5）：
+    /// 整套 UI 烟测串了背包 / 地图 / 结算 / 战斗 / 事件 / 营地 / 读档七段（含 15 张截图与大量等帧；
+    /// 2026-10-03 图形版实测整套 ≈ 15 s、单段 ≈ 6 s）。改动只落在其中一段时用这个档位只跑那一段 ——
+    /// 省的不只是那几秒，更是**隔离失败**：无关段挂 / 前段残留污染都会被排除在结论之外。
+    /// 建档 / 存档备份 / 收尾与整套共用同一条路径，断言口径不缩水。
+    /// **新增独立段**（自带「摆场景 → 断言 → 收尾」的 `async Task` 方法）时，在下面 switch 里登记一行。
+    /// </summary>
+    private async void RunUiSmokeSegment(string segment)
+    {
+        try
+        {
+            await WaitFrames(2);
+            switch (segment)
+            {
+                case "event-battle":
+                    Require(RunSession.Instance?.Current != null, "单段烟测需要一局进行中的本局。");
+                    await RunEventBattleChoiceSmoke(RunSession.Instance);
+                    break;
+                case "time-point-camp":
+                    Require(RunSession.Instance?.Current != null, "单段烟测需要一局进行中的本局。");
+                    await RunTimePointAndCampSmoke();
+                    break;
+                default:
+                    throw new InvalidOperationException($"未知的单段烟测段名「{segment}」；可用段：event-battle、time-point-camp。");
+            }
+            GD.Print($"RUN_FLOW_UI_SMOKE_SEGMENT_PASS: {segment}");
+            RestoreRunSaveFile();
+            GetTree().Quit();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"RUN_FLOW_UI_SMOKE_SEGMENT_FAIL: {segment}: {ex}");
+            RestoreRunSaveFile();
+            GetTree().Quit(1);
+        }
+    }
+
+    /// <summary>解析 `--run-flow-ui-smoke=&lt;段名&gt;`（取第一份，段名大小写不敏感）；没有则返回 null。</summary>
+    private static string ParseUiSmokeSegment(string[] args)
+    {
+        const string prefix = "--run-flow-ui-smoke=";
+        foreach (string arg in args)
+            if (arg.StartsWith(prefix, StringComparison.Ordinal) && arg.Length > prefix.Length)
+                return arg.Substring(prefix.Length).Trim().ToLowerInvariant();
+        return null;
     }
 
     /// <summary>运行局 UI 回归烟测：验证世界地图上方的 ModalLayer 能接收调试窗关闭按钮的真实鼠标输入。</summary>
@@ -1855,6 +2004,9 @@ public partial class RunFlowScene : Control
             Require(!eventRun.IsInSettlement, "放弃事件未领取项后应转 OnMap。");
             Require(FindButtonContaining(this, "未领取") == null, "放弃后事件浮窗应消失。");
 
+            // 危险事件的战斗选项（`next.type = Battle`）：点下**立刻**进入战斗，不再出现「前往地图」（用户口径 2026-10-03）。
+            await RunEventBattleChoiceSmoke(run);
+
             await RunTimePointAndCampSmoke();
             RunSessionReconstructionSmoke();
             GD.Print("RUN_FLOW_UI_SMOKE_PASS: canvas layers, map modal input, debug close, map return after content, camp food/cook, run session reconstruction");
@@ -1868,6 +2020,53 @@ public partial class RunFlowScene : Control
             GetTree().Quit(1);
         }
     }
+    /// <summary>
+    /// 危险事件 `EVT-F1-016` 的战斗选项（`next.type = Battle → F1-D-001`）端到端断言（用户口径 2026-10-03）：
+    /// 点下选项必须**立刻**切到战斗内容、并把待处理内容落成关卡 —— 不再经过「前往地图」那一下。
+    /// 走正式的「事件内容」路径（`BeginRunEvent` + `StartEvent`），断言的就是玩家真能点出来的那一条。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunEventBattleChoiceSmoke(RunSession run)
+    {
+        Require(run?.Current != null, "事件战斗烟测需要一局进行中的本局。");
+        ReturnToSelectableMap();
+        await WaitFrames(2);
+
+        int sourceNodeId = run.Current.MapState.CurrentNodeId;
+        run.BeginRunEvent("EVT-F1-016", sourceNodeId, MapNodeType.DangerousEvent);
+        StartEvent("EVT-F1-016");
+        await WaitFrames(6);
+        HexBattleScene dangerEvent = FindBattle(host);
+        Require(dangerEvent?.ActiveStoryOverlay?.Visible == true, "危险事件应显示剧情 UI。");
+        Require(ContentKind == "event", $"危险事件内容应为 event，实际 {ContentKind}。");
+
+        // 跳到选项面板（跳过只压缩演出，不替玩家选结果）。
+        dangerEvent.ActiveStoryOverlay.ToggleSkipFromGlobalTopBar();
+        await WaitFrames(2);
+        Button skipConfirm = FindButton(dangerEvent, "确认跳过");
+        Require(skipConfirm?.IsVisibleInTree() == true, "危险事件跳过确认面板缺少“确认跳过”。");
+        skipConfirm.EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(3);
+
+        Button battleChoice = FindButtonContaining(dangerEvent, "动手夺回被劫的货物");
+        Require(battleChoice?.IsVisibleInTree() == true, "危险事件缺少带战斗跳转（next = Battle）的选项。");
+        battleChoice.EmitSignal(BaseButton.SignalName.Pressed);
+        await WaitFrames(6);
+
+        Require(run.Current.PendingContentType == "Level" && run.Current.PendingLevelId == "F1-D-001",
+            $"战斗选项点下应立即把内容落成关卡 F1-D-001，实际 {run.Current.PendingContentType} / {run.Current.PendingLevelId}。");
+        Require(ContentKind == "battle", $"战斗选项点下应立即切到战斗内容，实际 {ContentKind}。");
+        Require(FindButtonContaining(host, "前往地图") == null, "战斗选项点下后不得再出现「前往地图」按钮（用户口径：点下即进战）。");
+        GD.Print($"RUN_FLOW_UI_SMOKE_EVENT_BATTLE: 危险事件战斗选项立刻进战 content={ContentKind} "
+            + $"level={run.Current.PendingLevelId} pending={run.Current.PendingContentType}");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-event-battle.png");
+
+        // 收尾：清掉本段留下的“待处理战斗内容”并回到空内容的地图态（GameMode = OnMap），
+        // 让后面的营地烟测与「内容未开始时」一致 —— 否则 `IsOnMap` 断言会挂在本段留下的 InBattleStart 上。
+        run.CompletePendingEventToMap();
+        ApiBackToMap();
+        await WaitFrames(2);
+    }
+
     /// <summary>
     /// 时间点系统与营地（第 8/9/10/11 条 + 第 27/29/30 条）的端到端断言（§九 11–16）：
     /// ① 时间点不足 → 点可达格**不移动、不扣点**并转入营地；② 营地期间常驻栏隐藏、休息结算按公式回复并推进到新一天；
@@ -2019,7 +2218,9 @@ public partial class RunFlowScene : Control
                 $"耗尽来源的休息回复量应按基础 10%（槽 {i} 期望 {expected}，实际 {run.Current.CharacterSlots[i].CurrentHp}）。");
         }
 
-        Require(!state.PendingRestDay && run.IsOnMap, "两次休息后应回到地图且不残留待休息标记。");
+        Require(!state.PendingRestDay && run.IsOnMap,
+            $"两次休息后应回到地图且不残留待休息标记（待休息={state.PendingRestDay} / 模式={run.Current.GameMode} / 内容={ContentKind} / "
+            + $"进程={state.TimePoints}）。");
         GD.Print($"RUN_FLOW_UI_SMOKE_CAMP: 时间点闸门 + 营地休息两轮通过（当前 {RunTimePoints.FormatDayAndRemaining(state.TimePoints)}）。");
     }
 

@@ -1,5 +1,6 @@
 // RestaurantTrade.cs
-// 村庄餐厅的**纯逻辑**：买 / 卖价格、现做标记、防套利校验、每次进入的烹饪次数（无 Godot 依赖，可 xUnit 直测）。
+// 村庄餐厅的**纯逻辑**：买 / 卖价格、现做标记、防套利校验、每次进入的烹饪次数、
+// 「每次操作」的时间点代价（烹饪 / 点菜；无 Godot 依赖，可 xUnit 直测）。
 // 口径出处：README/施工文档/2026/2026.10/交互/餐厅交互案.md §一 §三 §五 §九。
 //   · 购买价与商人**共用一张表**（`MerchantPrice.csv` 的 `Category=Food` 行，餐厅案 §三 / 待拍板第 1 条）；
 //   · 出售价 = 购买价 × 40%（取整）；**现做**再 ×1.5（普通 20 → 8 / 12，罕见 40 → 16 / 24，稀有 80 → 32 / 48）；
@@ -13,8 +14,51 @@ public static class RestaurantTrade
 	/// <summary>每次进入可烹饪次数（餐厅案 §一 / 待拍板第 6 条）。</summary>
 	public const int CooksPerVisit = 2;
 
-	/// <summary>每次进入的时间点代价（餐厅案 §一）。</summary>
-	public const float VisitTimePointCost = 1f;
+	/// <summary>
+	/// 每次**烹饪**的时间点代价（餐厅案 §一，2026-10-05 第四轮口径）= 村庄设施「每次操作」的表值
+	/// `VillageOperationTimePointCost`（默认 0.1，读 `RunFacilityCosts.OperationCost`）；
+	/// **进入餐厅本身不是操作**（踏入入口格不扣点）。烹饪只吃材料，不收金币
+	/// （收金币的是**点菜** = 购买页买入，见 `OrderTimePointCost`）。
+	/// </summary>
+	public static float CookTimePointCost => RunFacilityCosts.OperationCost;
+
+	/// <summary>能否再烹饪一次（当天剩余 ≥ 该次操作的时间点代价；不足 → 先去旅馆 / 民宿过夜或回营地结束当天）。</summary>
+	public static bool CanCook(float remainingToday) => remainingToday + 1e-4f >= CookTimePointCost;
+
+	/// <summary>时间点不足、不能烹饪的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。</summary>
+	public static string CookTimePointShortText(float remainingToday) =>
+		RunTimePoints.ShortRestText(CookTimePointCost, remainingToday, VillageVisit.RestHint);
+
+	/// <summary>
+	/// 每次**点菜**（购买页点「买入」）的时间点代价（餐厅案 §三 / §四，2026-10-05 第四轮口径）：
+	/// **点菜也是一次操作** —— 与烹饪同值（`VillageOperationTimePointCost`，默认 0.1），
+	/// 另外按菜价收金币（`FoodBuyPrice`）。**出售**是纯交易，不收时间点。
+	/// </summary>
+	public static float OrderTimePointCost => RunFacilityCosts.OperationCost;
+
+	/// <summary>能否再点一次菜（当天剩余 ≥ 该次操作的时间点代价；不足 → 先去旅馆 / 民宿过夜或回营地结束当天）。</summary>
+	public static bool CanOrder(float remainingToday) => remainingToday + 1e-4f >= OrderTimePointCost;
+
+	/// <summary>时间点不足、不能点菜的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。</summary>
+	public static string OrderTimePointShortText(float remainingToday) =>
+		RunTimePoints.ShortRestText(OrderTimePointCost, remainingToday, VillageVisit.RestHint);
+
+	/// <summary>
+	/// 购买页货架格数（餐厅案 §三 / 待拍板第 7 条默认 4 格；与商人的食物栏格数分列，商人批接表后统一）。
+	/// </summary>
+	public const int BuyShelfSlots = 4;
+
+	/// <summary>
+	/// 食物的购买价（餐厅案 §五 的价格表：普通 20 / 罕见 40 / 稀有 80）——
+	/// 与商人 `MerchantPrice.csv` 的 `Category=Food` 行**同值**（餐厅案 §三「共用一张表」）。
+	/// 本批直接落常量：商人场景批把价格表接进来时，这里改成查表即可（调用点不变）。
+	/// </summary>
+	public static int FoodBuyPrice(int rarity) => rarity switch
+	{
+		2 => 80,
+		1 => 40,
+		_ => 20,
+	};
 
 	/// <summary>出售比例（餐厅案 §五：购买价 × 40%）。</summary>
 	public const float SellRatio = 0.4f;
@@ -22,12 +66,13 @@ public static class RestaurantTrade
 	/// <summary>现做加成（餐厅案 §五：出售价 ×1.5）。</summary>
 	public const float FreshBonus = 1.5f;
 
-	/// <summary>时间点不足（餐厅案 §九 第 1 条）。</summary>
-	public static string TimePointShortText(float need, float have) =>
-		$"时间点不足：需要 {RunTimePoints.Format(need)}，当前剩余 {RunTimePoints.Format(have)}。";
+	/// <summary>
+	/// 时间点门槛与文案统一走 `RestaurantTrade.CanCook` / `CookTimePointShortText`（烹饪）与
+	/// `RestaurantTrade.CanOrder` / `OrderTimePointShortText`（点菜 = 买入；餐厅案 §一 / §三）。
+	/// </summary>
 
-	/// <summary>本次烹饪次数已满（餐厅案 §四）。</summary>
-	public const string CooksExhaustedText = "本次进入的烹饪次数已用尽，可再次进入（消耗 1 时间点）。";
+	/// <summary>本次烹饪次数已满（餐厅案 §四；进店免费 → 离开再进即可刷新）。</summary>
+	public const string CooksExhaustedText = "本次进入的烹饪次数已用尽，离开餐厅再进即可刷新次数。";
 
 	/// <summary>材料不足（与锻铁铺同一句式）。</summary>
 	public static string MaterialShortText(string displayName, int need, int have) =>

@@ -21,8 +21,14 @@ public static class VillageForage
 	/// <summary>每次搜寻的抽取次数（树林案 §三：固定 2 次）。</summary>
 	public const int PicksPerSearch = 2;
 
-	/// <summary>进入代价（时间点，树林案 §一）。</summary>
-	public const float TimePointCost = 1f;
+	/// <summary>
+	/// 每次**搜寻**的时间点代价（树林案 §一，2026-10-05 第四轮口径）= 全局数据表
+	/// `DataBase/GameVariables.csv` 的 `ForestForageTimePointCost`（**树林专属项**，与村庄其他操作的
+	/// `VillageOperationTimePointCost` = 0.1 **分开配**；由 `GameVariables.ApplyFacilityCosts()` 灌入，
+	/// 表没接上时走 `RunFacilityCosts.DefaultForestForageCost`）。
+	/// **进入树林本身不是操作**（踏入入口格不扣点），只有点 `进入` 执行一次搜寻才扣。
+	/// </summary>
+	public static float TimePointCost => RunFacilityCosts.ForestForageCost;
 
 	/// <summary>稀有度权重（树林案 §三 的 70 / 25 / 5）。</summary>
 	public static readonly (ItemRarity Rarity, int Weight)[] RarityWeights =
@@ -31,6 +37,18 @@ public static class VillageForage
 		(ItemRarity.Uncommon, 25),
 		(ItemRarity.Rare, 5),
 	};
+
+	/// <summary>
+	/// 能否再搜寻一次（当天剩余 ≥ `TimePointCost`；不足 → 先去旅馆 / 民宿过夜或回营地结束当天）。
+	/// 树林是**独立代价**，因此不复用 `VillageVisit.CanOperate`（那个读村庄操作值）。
+	/// </summary>
+	public static bool CanSearch(float remainingToday) => remainingToday + 1e-4f >= TimePointCost;
+
+	/// <summary>
+	/// 时间点不足、不能搜寻的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。
+	/// </summary>
+	public static string SearchTimePointShortText(float remainingToday) =>
+		RunTimePoints.ShortRestText(TimePointCost, remainingToday, VillageVisit.RestHint);
 
 	/// <summary>权重总和（0 = 权重表为空）。</summary>
 	public static int TotalWeight
@@ -47,12 +65,10 @@ public static class VillageForage
 		}
 	}
 
-	/// <summary>时间点不足的文案（树林案 §五，与锻铁铺 / 餐厅同一句式）。</summary>
-	public static string TimePointShortText(float need, float have) =>
-		$"时间点不足：需要 {RunTimePoints.Format(need)}，当前剩余 {RunTimePoints.Format(have)}。";
-
-	/// <summary>时间点是否够进一次（树林案 §五：不足时不弹 tips、只给原因）。</summary>
-	public static bool CanSearch(float remainingToday) => remainingToday + 1e-4f >= TimePointCost;
+	/// <summary>
+	/// 时间点门槛与文案统一走 `VillageForage.CanSearch` / `VillageForage.SearchTimePointShortText`
+	/// （树林案 §一：每次搜寻按**树林专属**表值收点），本文件只持有 `TimePointCost` 这一个数值来源。
+	/// </summary>
 
 	/// <summary>按权重抽一次稀有度档；池里没有该档时退化为「池中实际存在的档」按同权重再抽一次（不空转）。</summary>
 	public static ItemRarity RollRarity(Random random, IReadOnlyList<ForageMaterialEntry> pool)

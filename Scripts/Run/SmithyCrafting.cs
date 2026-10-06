@@ -32,15 +32,30 @@ public static class SmithyCrafting
 	/// <summary>商人锻造炉的金币系数（×1.5，商人工匠费）。</summary>
 	public const float MerchantGoldMultiplier = 1.5f;
 
-	/// <summary>每次进入的时间点代价（锻铁铺案 §一；商人侧为 0，由调用方决定是否扣）。</summary>
-	public const float VisitTimePointCost = 1f;
+	/// <summary>
+	/// 每次**打造**的时间点代价（锻铁铺案 §一，2026-10-05 第四轮口径）= 村庄设施「每次操作」的表值
+	/// `VillageOperationTimePointCost`（默认 0.1，读 `RunFacilityCosts.OperationCost`）；
+	/// 村庄锻铁铺与商人锻造炉同口径（打造属于「操作」），另外各自收配方金币（村庄 ×1 / 商人 ×1.5）。
+	/// **进入设施本身不是操作**（踏入入口格不扣点）。
+	/// </summary>
+	public static float CraftTimePointCost => RunFacilityCosts.OperationCost;
 
-	/// <summary>时间点不足（锻铁铺案 §五）。</summary>
-	public static string TimePointShortText(float need, float have) =>
-		$"时间点不足：需要 {RunTimePoints.Format(need)}，当前剩余 {RunTimePoints.Format(have)}。";
+	/// <summary>能否再打造一次（当天剩余 ≥ 该次操作的时间点代价；不足 → 先去旅馆 / 民宿过夜或回营地结束当天）。</summary>
+	public static bool CanCraft(float remainingToday) => remainingToday + 1e-4f >= CraftTimePointCost;
 
-	/// <summary>本次次数用尽（锻铁铺案 §五）。</summary>
-	public const string CraftsExhaustedText = "本次进入的打造次数已用尽，可再次进入（消耗 1 时间点）。";
+	/// <summary>
+	/// 时间点不足、不能打造的一行原因：句式共用 `RunTimePoints.ShortRestText`，
+	/// 去处指引由调用方的场景给（村庄 = 旅馆 / 民宿；商人 = 回营地）。
+	/// </summary>
+	public static string CraftTimePointShortText(float remainingToday, string restHint) =>
+		RunTimePoints.ShortRestText(CraftTimePointCost, remainingToday, restHint);
+
+	/// <summary>一件装备产物的背包负荷（手数 → 负荷；与背包界面同源，界面与结算共用这一处）。</summary>
+	public static float EquipmentLoad(string definitionId) =>
+		ItemNameResolver.DerivedEquipmentLoad(ItemNameResolver.HandsRequiredOfDefinition(definitionId));
+
+	/// <summary>每次进入可打造次数用尽（锻铁铺案 §五；进店免费 → 离开再进即可刷新）。</summary>
+	public const string CraftsExhaustedText = "本次进入的打造次数已用尽，离开锻铁铺再进即可刷新次数。";
 
 	/// <summary>背包超载（与商人 / 背包同一句式）。</summary>
 	public const string BagOverloadText = "背包已超载，请先整理。";

@@ -12,9 +12,11 @@ public partial class MapScene : Control
 	private bool readOnlyMode;
 	public event Action<string> LevelRequested;
 	public event Action<string> EventRequested;
+	/// <summary>地点场景请求（村庄 / 商人；村庄地图交互案 §十）：值取 `RunSession.PlaceVillage` / `PlaceMerchant`。</summary>
+	public event Action<string> PlaceRequested;
 
 	/// <summary>
-	/// 时间点不足（当天剩余 &lt; 移动消耗 0.3）时触发：宿主应转场到营地休息（地图交互 §五）。
+	/// 时间点不足（当天剩余 &lt; 移动消耗，数值见 <see cref="MoveTimePointCost"/>）时触发：宿主应转场到营地休息（地图交互 §五）。
 	/// 嵌入模式下由宿主 `RunFlowScene` 接管；独立场景模式直接切 `CampScenePath`。
 	/// </summary>
 	public event Action RestRequested;
@@ -54,6 +56,9 @@ public partial class MapScene : Control
 	public const string RunBattleScenePath = "res://Scenes/Run/RunBattleScene.tscn";
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
 	public const string CampScenePath = "res://Scenes/Run/CampScene.tscn";
+
+	/// <summary>村庄地点场景（独立场景模式；嵌入模式由宿主 `RunFlowScene` 装载，村庄案 §十）。</summary>
+	public const string VillageScenePath = "res://Scenes/Run/VillageScene.tscn";
 	[Export] public bool EnableDebugControls = true;
 
 	[Export] public float HexSize = 40f;
@@ -67,6 +72,26 @@ public partial class MapScene : Control
 	private Label timePointLabel;
 	private static readonly Color TimePointTextColor = new("f5d98c");
 	private int currentNodeId = -1;
+
+	/// <summary>
+	/// 本次移动的时间点进程：读全局数据表 `DataBase/GameVariables.csv` 的 `MoveTimePointCost`
+	/// （2026-10-05 用户口径 —— 数值放表里便于修改），表里未配置时回落 `RunTimePoints.MoveCost`（默认 0.3）。
+	/// 按实例懒加载一次（首次访问发生在 `_Ready` 的 `LoadingSystem.EnsureAllDataLoaded()` 之后）。
+	/// </summary>
+	private float moveTimePointCost = float.NaN;
+
+	private float MoveTimePointCost
+	{
+		get
+		{
+			if (float.IsNaN(moveTimePointCost))
+			{
+				moveTimePointCost = GameVariables.Load().MoveTimePointCost ?? RunTimePoints.MoveCost;
+			}
+
+			return moveTimePointCost;
+		}
+	}
 	private CardSimulator.Battlefield.HexBattleDebugPanel debugPanel;
 
 	private static readonly Dictionary<MapNodeType, Color> NodeColors = new Dictionary<MapNodeType, Color>
@@ -597,16 +622,16 @@ public partial class MapScene : Control
 			return;
 		}
 
-		if (!session.Current.MapState.CanSpendTimePoints(RunTimePoints.MoveCost))
+		if (!session.Current.MapState.CanSpendTimePoints(MoveTimePointCost))
 		{
 			SetStatus($"时间点不足（当天剩余 {RunTimePoints.Format(session.Current.MapState.RemainingToday)}，"
-				+ $"移动需要 {RunTimePoints.Format(RunTimePoints.MoveCost)}），转入营地休息。");
+				+ $"移动需要 {RunTimePoints.Format(MoveTimePointCost)}），转入营地休息。");
 			RequestRest();
 			return;
 		}
 
-		// 1) 支付本次移动的时间点进程（0.3）；整笔成功才移动，避免"位置已动、时间点没花"。
-		if (!session.TrySpendTimePoints(RunTimePoints.MoveCost, out string timePointError))
+		// 1) 支付本次移动的时间点进程（表值 MoveTimePointCost，默认 0.3）；整笔成功才移动，避免"位置已动、时间点没花"。
+		if (!session.TrySpendTimePoints(MoveTimePointCost, out string timePointError))
 		{
 			SetStatus($"时间点不足，转入营地休息：{timePointError}");
 			RequestRest();
@@ -631,6 +656,19 @@ public partial class MapScene : Control
 
 		// 2) 首次到达：按「该类型此时能否解析出配置行」分流（与格点类型无关）
 		ResolvedMapContent content = WorldMapContentResolver.Resolve(session.Current.MapState.Act, node, board, session.Current);
+
+		// 2.0) 地点场景（村庄；村庄案 §十）：`FixedNode.csv` 的 Village 行 ContentType = Village →
+		//      不进事件，改请求地点场景（节点**在这里不标记已访问**：标记由离开村庄时落）。
+		if (content?.Type == "Village")
+		{
+			session.BeginRunPlace(RunSession.PlaceVillage, RunSession.VillagePlaceId, node.NodeId);
+			SetStatus("进入村庄。");
+			QueueRedraw();
+			if (EmbeddedMode) PlaceRequested?.Invoke(RunSession.PlaceVillage);
+			else GetTree().ChangeSceneToFile(VillageScenePath);
+			return;
+		}
+
 		if (content?.Type == "Level")
 		{
 			CardSimulator.Battlefield.BattleLevelConfig level;
@@ -681,6 +719,29 @@ public partial class MapScene : Control
 
 	/// <summary>当前可达格点（玩家这一回合点得到的格）。</summary>
 	public IReadOnlyCollection<int> ReachableNodeIds => currentReachable;
+
+	/// <summary>
+	/// 从存档的已访问集合刷新版图上的「已访问」标记（幂等，顺手重绘）。
+	/// 用途（2026-10-05）：访问标记不一定由本场景写 —— 村庄节点是**离开村庄时**才由
+	/// `RunSession.CompletePendingPlaceToMap` 标记（村庄案 §十一 第 7 条），而本场景只在建版图时读一次
+	/// 存档；不刷新的话，同一会话里再点该格会**重复进入**（一次性节点失效）。
+	/// </summary>
+	public void RefreshVisitedFlags()
+	{
+		if (board == null)
+		{
+			return;
+		}
+
+		List<int> visitedIds = RunSession.Instance?.Current?.MapState.VisitedNodeIds;
+		HashSet<int> visited = new HashSet<int>(visitedIds ?? new List<int>());
+		foreach (MapBoardNode node in board.Nodes)
+		{
+			node.Visited = visited.Contains(node.NodeId);
+		}
+
+		QueueRedraw();
+	}
 
 	/// <summary>当前所在格点 Id。</summary>
 	public int CurrentNodeId => currentNodeId;
