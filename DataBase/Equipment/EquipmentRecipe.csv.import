@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dgxmy0adihw2c"
+
+[deps]
+
+files=["res://DataBase/Equipment/EquipmentRecipe.ResultDefinitionId.translation", "res://DataBase/Equipment/EquipmentRecipe.Material1Id.translation", "res://DataBase/Equipment/EquipmentRecipe.Material1Count.translation", "res://DataBase/Equipment/EquipmentRecipe.Material2Id.translation", "res://DataBase/Equipment/EquipmentRecipe.Material2Count.translation", "res://DataBase/Equipment/EquipmentRecipe.Gold.translation", "res://DataBase/Equipment/EquipmentRecipe.Enabled.translation"]
+
+source_file="res://DataBase/Equipment/EquipmentRecipe.csv"
+dest_files=["res://DataBase/Equipment/EquipmentRecipe.ResultDefinitionId.translation", "res://DataBase/Equipment/EquipmentRecipe.Material1Id.translation", "res://DataBase/Equipment/EquipmentRecipe.Material1Count.translation", "res://DataBase/Equipment/EquipmentRecipe.Material2Id.translation", "res://DataBase/Equipment/EquipmentRecipe.Material2Count.translation", "res://DataBase/Equipment/EquipmentRecipe.Gold.translation", "res://DataBase/Equipment/EquipmentRecipe.Enabled.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

@@ -34,6 +34,7 @@
 | `debug.run.next_combat` | — | **一键跳关**：进最近的未访问战斗格（无视可达与只读闸门；时间点照常结算） |
 | `debug.run.enter_node` | `nodeId` | 无视可达 / 只读闸门直接进入指定格 |
 | `debug.run.skip_node` | — | 把当前格标成已访问并推进层内遭遇计数（不打架直接过一关） |
+| `debug.run.complete_level` | — | **完成关卡**：把**当前战斗关卡**直接判胜，随后照常走战斗结算（结算面板 / 选卡 / 回地图）。**只认战斗内容**：事件（或没有内容）一律拒绝（`COMPLETE_LEVEL_REJECTED`），事件不能跳过；已结算的战斗也拒绝 |
 | `debug.run.back_to_map` | — | 放弃当前内容回到可选地图（不结算、不领取）—— **模块级验证的「随时回地图」捷径** |
 | `debug.run.map_state` | — | 全图节点：类型 / 已访问 / 可达 / 当前 / 起终点 |
 | `debug.run.set_time_points` | `value` | **直接设时间点（允许负向）**，可把当天耗光来触发营地转场 |

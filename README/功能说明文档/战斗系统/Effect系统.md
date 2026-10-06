@@ -25,6 +25,10 @@
 | 14 | AddKeyword | 添加运行时关键词 | `[0] cardTargetType`，`[1] keyword`，`[2] keywordFlag`，`[3] count` |
 | 15 | MirrorShieldToAllies | 护盾分给全体友方 | `[1] extraShield`（可省）|
 | 16 | RearrangeMonsterTargets | 怪物单攻目标重定向 | （无参数，本回合触发，**新增 2026-08**）|
+| 17 | HpLoss | 纯扣血 | `[1] extraHp`（**不**叠加来源攻击力）|
+| 18 | ShieldOnFirstHit | 首次受伤额外护盾 | `[1] shield`（在护盾抵扣**之前**生效）|
+| 19 | SurviveFatalOnce | 首次濒死回复 | `[1] percent`（按最大生命百分比，本场一次）|
+| 20 | ShieldByAttack | 按攻击力获得护盾 | `[1] extraShield`（可省）：`Shield += 来源当前攻击力 + extraShield`，**不**叠加 `Defend`（**新增 2026-10-03**，法师「法术护盾」）|
 
 ## 二、EffectTargetType 目标类型
 
@@ -106,6 +110,7 @@ Params:     3;1;2|2
 - **卡牌路径**：`Card.Apply` → 按 `EffectType` switch → `Apply*Effect` 私有方法
 - **怪物路径**：`MonsterIntentionService.TryExecuteMonsterEffect` → 内部调 `EffectSystem.Apply*`
 - **状态牌**：`StateCardPipeline` 负责把状态牌移到 StatePile 并注册 end callback
+- **屏障调点（2026-10-03）**：`AttackEffect` 与 `ShieldSlamEffect.ApplySourceValueDamage` 在 `ModifyIncomingDamage` 之后、扣护盾之前调 `StateSystem.TryConsumeBarrier` —— 消耗 1 层则把该次伤害归 0；规则见[状态系统 §2.5](状态系统.md)。
 
 ## 七、相关文档
 

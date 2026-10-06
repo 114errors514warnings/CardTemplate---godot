@@ -292,6 +292,19 @@ public partial class HexBattleScene : Control
     public void ToggleDebugFromGlobalTopBar() => DebugRequested?.Invoke(this);
     public void TogglePauseFromGlobalTopBar() => SetPaused(true);
 
+    /// <summary>
+    /// **调试通道**（`debug.run.complete_level`）：把本场战斗直接判胜 —— 清空全部敌人，随后由正常胜负判定
+    /// 推进到战斗结算（与调试面板「清空全部敌人」同一条路，不另写结算规则）。
+    /// </summary>
+    public bool DebugResolveVictory(out string error)
+    {
+        error = string.Empty;
+        if (Session == null) { error = "战场尚未就绪（没有战斗会话）。"; return false; }
+        if (IsPostSettlementMode) { error = "本场战斗已经结算，无需再完成。"; return false; }
+        Session.DebugClearEnemies();
+        return true;
+    }
+
     public HexBattleDebugPanel CreateDebugPanel()
     {
         var packed = (PackedScene)ResourceLoader.Load("res://Scenes/UI/HexBattleDebugPanel.tscn");

@@ -72,6 +72,11 @@ public sealed class EffectResult
             return $"来源={BuildUnitLabel(Source)}，目标=自身，获得护盾={ShieldGained}，来源护盾 {SourceShieldBefore}->{SourceShieldAfter}";
         }
 
+        if (string.Equals(EffectName, "ShieldByAttack", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"来源={BuildUnitLabel(Source)}，目标=自身，获得等同于攻击力的格挡={ShieldGained}，来源护盾 {SourceShieldBefore}->{SourceShieldAfter}";
+        }
+
         return $"来源={BuildUnitLabel(Source)}，目标={BuildUnitLabel(Target)}，效果={EffectName}";
     }
 
@@ -143,9 +148,16 @@ public sealed class AttackEffect : IEffect
         int damage = Math.Max(0, context.Source.Attack + context.GetParam(0));
         damage = StateSystem.ModifyIncomingDamage(context.Card, context.Source, context.Target, damage);
 
+        // 屏障（Barrier，2026-10-03）：消耗 1 层把该次攻击伤害降为 0（多段攻击每段各消耗 1 层）。
+        // 放在「首次受伤额外护盾」之前——被屏障吃掉的一击不算吃伤害，不消耗那类「首次受伤」效果。
+        if (StateSystem.TryConsumeBarrier(context.Target, out _))
+        {
+            damage = 0;
+        }
+
         // 食物效果「首次受伤额外护盾」（烤蟾蜍，2026-10-02）：在本次伤害的护盾抵扣**之前**生效，
         // 使它真的挡下这一击；targetShieldBefore 取加盾后的值，结算文案与实际一致。
-        if (context.Target is CharacterInstance shieldedOnFirstHit && shieldedOnFirstHit.PendingShieldOnFirstHit > 0)
+        if (damage > 0 && context.Target is CharacterInstance shieldedOnFirstHit && shieldedOnFirstHit.PendingShieldOnFirstHit > 0)
         {
             int bonusShield = shieldedOnFirstHit.PendingShieldOnFirstHit;
             shieldedOnFirstHit.PendingShieldOnFirstHit = 0;
@@ -413,6 +425,47 @@ public sealed class ShieldEffect : IEffect
 }
 
 /// <summary>
+/// 「法术护盾」（法师，2026-10-03）：获得等同**自身当前攻击力**的格挡。
+/// 公式 = source.Shield += max(0, source.Attack + 参数[0])。
+/// 与 `ShieldEffect` 的差别：不叠加 `Defend`，也不吃「持盾防守」的 +3（该加成本次不加）。
+/// </summary>
+public sealed class ShieldByAttackEffect : IEffect
+{
+    public string Name => "ShieldByAttack";
+
+    public EffectResult Apply(EffectContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+
+        IUnitInstance source = context.Source;
+        if (source == null)
+        {
+            return new EffectResult(Name, context.Source, context.Target);
+        }
+
+        int shieldGain = Math.Max(0, source.Attack + context.GetParam(0));
+        int sourceShieldBefore = source.Shield;
+        if (shieldGain == 0)
+        {
+            return new EffectResult(Name, source, context.Target, sourceShieldBefore: sourceShieldBefore, sourceShieldAfter: source.Shield);
+        }
+
+        source.Shield += shieldGain;
+        return new EffectResult(
+            Name,
+            source,
+            context.Target,
+            totalValue: shieldGain,
+            shieldGained: shieldGain,
+            sourceShieldBefore: sourceShieldBefore,
+            sourceShieldAfter: source.Shield);
+    }
+}
+
+/// <summary>
 /// 不叠加目标防御力的护盾分配效果（用于大地"把累积护盾复制给友军"等场景）。
 /// 公式 = target.Shield += extraShield（不叠加 target.Defend）。
 /// </summary>
@@ -571,6 +624,12 @@ public sealed class ShieldSlamEffect : IEffect
         int damage = Math.Max(0, source.Attack + sourceValue + extraDamage);
         damage = StateSystem.ModifyIncomingDamage(null, source, target, damage);
 
+        // 屏障（Barrier，2026-10-03）：与 AttackEffect 同一口径——消耗 1 层把该次攻击伤害降为 0。
+        if (StateSystem.TryConsumeBarrier(target, out _))
+        {
+            damage = 0;
+        }
+
         int targetShieldBefore = target.Shield;
         int targetHpBefore = target.HP;
 
@@ -601,6 +660,7 @@ public static class EffectSystem
 {
     public static readonly IEffect Attack = new AttackEffect();
     public static readonly IEffect Shield = new ShieldEffect();
+    public static readonly IEffect ShieldByAttack = new ShieldByAttackEffect();
     public static readonly IEffect DistributeShield = new DistributeShieldEffect();
     public static readonly IEffect HpLoss = new HpLossEffect();
     public static readonly IEffect AddCost = new AddCostEffect();
@@ -624,6 +684,12 @@ public static class EffectSystem
     public static EffectResult ApplyShield(IUnitInstance source, int[] effectParams = null)
     {
         return Apply(Shield, new EffectContext(source, effectParams: effectParams));
+    }
+
+    /// <summary>「法术护盾」（法师）：获得等同自身攻击力的格挡；参数见 <see cref="ShieldByAttackEffect"/>。</summary>
+    public static EffectResult ApplyShieldByAttack(IUnitInstance source, int[] effectParams = null)
+    {
+        return Apply(ShieldByAttack, new EffectContext(source, effectParams: effectParams));
     }
 
     public static EffectResult ApplyDistributeShield(IUnitInstance target, int extraShield)

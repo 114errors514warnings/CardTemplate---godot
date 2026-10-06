@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dvkavh3r550wx"
+
+[deps]
+
+files=["res://DataBase/Battlefield/AreaObject.Name.translation", "res://DataBase/Battlefield/AreaObject.TriggerTiming.translation", "res://DataBase/Battlefield/AreaObject.SideFilter.translation", "res://DataBase/Battlefield/AreaObject.MaxTriggers.translation", "res://DataBase/Battlefield/AreaObject.DecayTiming.translation", "res://DataBase/Battlefield/AreaObject.EffectType.translation", "res://DataBase/Battlefield/AreaObject.Params.translation"]
+
+source_file="res://DataBase/Battlefield/AreaObject.csv"
+dest_files=["res://DataBase/Battlefield/AreaObject.Name.translation", "res://DataBase/Battlefield/AreaObject.TriggerTiming.translation", "res://DataBase/Battlefield/AreaObject.SideFilter.translation", "res://DataBase/Battlefield/AreaObject.MaxTriggers.translation", "res://DataBase/Battlefield/AreaObject.DecayTiming.translation", "res://DataBase/Battlefield/AreaObject.EffectType.translation", "res://DataBase/Battlefield/AreaObject.Params.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

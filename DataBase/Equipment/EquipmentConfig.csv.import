@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cl0nh8kcc5pnq"
+
+[deps]
+
+files=["res://DataBase/Equipment/EquipmentConfig.en.translation", "res://DataBase/Equipment/EquipmentConfig.AccessorySlots.translation"]
+
+source_file="res://DataBase/Equipment/EquipmentConfig.csv"
+dest_files=["res://DataBase/Equipment/EquipmentConfig.en.translation", "res://DataBase/Equipment/EquipmentConfig.AccessorySlots.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

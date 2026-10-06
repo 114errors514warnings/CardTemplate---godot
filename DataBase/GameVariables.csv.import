@@ -6,10 +6,10 @@ uid="uid://brcwuqs13oj6n"
 
 [deps]
 
-files=["res://DataBase/GameVariables.CharacterId.translation", "res://DataBase/GameVariables.DefaultEnergyPerTurn.translation", "res://DataBase/GameVariables.DefaultDrawCardsPerTurn.translation", "res://DataBase/GameVariables.MovesPerTurn.translation"]
+files=["res://DataBase/GameVariables.CharacterId.translation", "res://DataBase/GameVariables.DefaultEnergyPerTurn.translation", "res://DataBase/GameVariables.DefaultDrawCardsPerTurn.translation", "res://DataBase/GameVariables.MovesPerTurn.translation", "res://DataBase/GameVariables.MoveTimePointCost.translation"]
 
 source_file="res://DataBase/GameVariables.csv"
-dest_files=["res://DataBase/GameVariables.CharacterId.translation", "res://DataBase/GameVariables.DefaultEnergyPerTurn.translation", "res://DataBase/GameVariables.DefaultDrawCardsPerTurn.translation", "res://DataBase/GameVariables.MovesPerTurn.translation"]
+dest_files=["res://DataBase/GameVariables.CharacterId.translation", "res://DataBase/GameVariables.DefaultEnergyPerTurn.translation", "res://DataBase/GameVariables.DefaultDrawCardsPerTurn.translation", "res://DataBase/GameVariables.MovesPerTurn.translation", "res://DataBase/GameVariables.MoveTimePointCost.translation"]
 
 [params]
 

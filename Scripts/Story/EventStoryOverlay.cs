@@ -7,7 +7,8 @@ public enum StorySide { Auto, Left, Right, Narration }
 public enum StoryBubbleStyle { Plain, LeftSpeaker, RightSpeaker }
 public sealed record StoryLine(string SpeakerId, string SpeakerName, string Text, StorySide Side = StorySide.Auto, StoryBubbleStyle Bubble = StoryBubbleStyle.Plain, float AutoDelay = 1f);
 /// <summary>One event outcome. EffectDescription is visible before the player chooses it.</summary>
-public sealed record StoryChoice(string Text, string EffectDescription, Action Apply)
+/// <param name="EntersBattle">本选项的 `next.type = Battle`：点下即结束事件、直接进入战斗（**不**显示「前往地图」，用户口径 2026-10-03）。</param>
+public sealed record StoryChoice(string Text, string EffectDescription, Action Apply, bool EntersBattle = false)
 {
     public string DisplayText => string.IsNullOrWhiteSpace(EffectDescription) ? Text : $"{Text}（{EffectDescription}）";
 }
@@ -285,7 +286,14 @@ public partial class EventStoryOverlay : Control
         {
             var button = new Button { Text = choice.DisplayText, CustomMinimumSize = new Vector2(420, 52) };
             button.TooltipText = choice.EffectDescription;
-            button.Pressed += () => { choice.Apply?.Invoke(); ShowReturnToMap(); };
+            button.Pressed += () =>
+            {
+                choice.Apply?.Invoke();
+                // 战斗选项（`next.type = Battle`）点下立即进战：宿主在 onClosed 里换内容
+                // （`RunEventScene.OnStoryCompleted` → 关卡战斗），因此这里不经过「前往地图」这一道。
+                if (choice.EntersBattle) { ClearChoices(); Close(); }
+                else ShowReturnToMap();
+            };
             choices.AddChild(button);
         }
     }
@@ -294,10 +302,16 @@ public partial class EventStoryOverlay : Control
         waitingChoice = true;
         choices.Visible = true;
         if (functionButtons.TryGetValue(OverlayFunction.Skip, out var skipButton)) skipButton.Visible = false;
-        foreach (Node child in choices.GetChildren()) { choices.RemoveChild(child); child.QueueFree(); }
+        ClearChoices();
         var button = new Button { Text = "前往地图", CustomMinimumSize = new Vector2(420, 52) };
         button.Pressed += Close;
         choices.AddChild(button);
+    }
+
+    /// <summary>清掉选项容器里的全部控件（换面板 / 让位给内容前调用；`QueueFree` 是延迟的，因此先从树上摘下来）。</summary>
+    private void ClearChoices()
+    {
+        foreach (Node child in choices.GetChildren()) { choices.RemoveChild(child); child.QueueFree(); }
     }
     private void ToggleLog()
     {

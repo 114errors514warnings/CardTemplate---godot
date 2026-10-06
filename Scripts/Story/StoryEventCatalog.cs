@@ -62,7 +62,10 @@ public static class StoryEventCatalog
             Enum.TryParse(x.BubbleStyle, true, out StoryBubbleStyle bubble);
             return new StoryLine(x.ActorId, name, x.Text, side, bubble, Math.Max(0, x.AutoDelay));
         }).ToList();
-        var choices = config.Choices.OrderBy(x => x.Order).Select(x => new StoryChoice(x.Text, x.EffectPreview, actionFactory?.Invoke(x))).ToList();
+        // 选项是否「点下即进战」由配置决定（`next.type = Battle`）：浮层只标标记，不含规则。
+        var choices = config.Choices.OrderBy(x => x.Order).Select(x => new StoryChoice(
+            x.Text, x.EffectPreview, actionFactory?.Invoke(x),
+            !string.IsNullOrWhiteSpace(ResolveBattleLevelId(x.Next)))).ToList();
         return new StoryEventDefinition(config.Title, config.Summary, lines, choices, config.CanSkip, config.Background?.BackgroundId ?? "", config.AutoComplete);
     }
     /// <summary>选项请求进入战斗时返回关卡 Id；非战斗跳转返回空字符串。</summary>

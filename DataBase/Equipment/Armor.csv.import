@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://ba1iwffegdd1m"
+
+[deps]
+
+files=["res://DataBase/Equipment/Armor.DefinitionId.translation", "res://DataBase/Equipment/Armor.Slot.translation", "res://DataBase/Equipment/Armor.HandsRequired.translation", "res://DataBase/Equipment/Armor.DefenseValue.translation", "res://DataBase/Equipment/Armor.DamageBonus.translation", "res://DataBase/Equipment/Armor.MoveBonus.translation", "res://DataBase/Equipment/Armor.ResourceCost.translation", "res://DataBase/Equipment/Armor.Load.translation", "res://DataBase/Equipment/Armor.Rarity.translation"]
+
+source_file="res://DataBase/Equipment/Armor.csv"
+dest_files=["res://DataBase/Equipment/Armor.DefinitionId.translation", "res://DataBase/Equipment/Armor.Slot.translation", "res://DataBase/Equipment/Armor.HandsRequired.translation", "res://DataBase/Equipment/Armor.DefenseValue.translation", "res://DataBase/Equipment/Armor.DamageBonus.translation", "res://DataBase/Equipment/Armor.MoveBonus.translation", "res://DataBase/Equipment/Armor.ResourceCost.translation", "res://DataBase/Equipment/Armor.Load.translation", "res://DataBase/Equipment/Armor.Rarity.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
