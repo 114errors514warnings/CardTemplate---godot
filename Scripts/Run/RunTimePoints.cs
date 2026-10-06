@@ -58,6 +58,19 @@ public static class RunTimePoints
 	/// <summary>时间点是否够支付一项代价；不足时禁止继续前往，转为营地转场（地图交互 §五）。</summary>
 	public static bool CanSpend(float total, float cost) => cost <= 0f || RemainingToday(total) + 1e-4f >= cost;
 
+	/// <summary>
+	/// 「晚上」的时间点阈值（村庄案 §八：当天剩余 ≤ 1.0 视为晚上）。
+	/// 2026-10-06 从 `VillageLayout.NightRemainingThreshold` 迁来（村庄专用版图逻辑撤除；
+	/// 阈值本身是时间点口径，与版图无关）—— 消费方：`VillageLodging.IsNight`（旅馆 / 民宿过夜回复比例）。
+	/// </summary>
+	public const float NightThreshold = 1.0f;
+
+	/// <summary>
+	/// 当天剩余是否已到「晚上」（≤ <see cref="NightThreshold"/>）；
+	/// 浮点容差与 <see cref="CanSpend"/> 同口径（正好 1.0 也算晚上）。
+	/// </summary>
+	public static bool IsNight(float remainingToday) => remainingToday <= NightThreshold + 1e-4f;
+
 	/// <summary>推进到「下一天的开始」：当天剩余作废（主动结束当天与耗尽强制休息都走这里，进程只增不减）。</summary>
 	public static float NextDayStart(float total) => DayIndex(total) * PointsPerDay;
 

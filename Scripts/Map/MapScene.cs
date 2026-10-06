@@ -12,8 +12,6 @@ public partial class MapScene : Control
 	private bool readOnlyMode;
 	public event Action<string> LevelRequested;
 	public event Action<string> EventRequested;
-	/// <summary>地点场景请求（村庄 / 商人；村庄地图交互案 §十）：值取 `RunSession.PlaceVillage` / `PlaceMerchant`。</summary>
-	public event Action<string> PlaceRequested;
 
 	/// <summary>
 	/// 时间点不足（当天剩余 &lt; 移动消耗，数值见 <see cref="MoveTimePointCost"/>）时触发：宿主应转场到营地休息（地图交互 §五）。
@@ -57,8 +55,6 @@ public partial class MapScene : Control
 	public const string RunEventScenePath = "res://Scenes/Run/RunEventScene.tscn";
 	public const string CampScenePath = "res://Scenes/Run/CampScene.tscn";
 
-	/// <summary>村庄地点场景（独立场景模式；嵌入模式由宿主 `RunFlowScene` 装载，村庄案 §十）。</summary>
-	public const string VillageScenePath = "res://Scenes/Run/VillageScene.tscn";
 	[Export] public bool EnableDebugControls = true;
 
 	[Export] public float HexSize = 40f;
@@ -76,7 +72,8 @@ public partial class MapScene : Control
 	/// <summary>
 	/// 本次移动的时间点进程：读全局数据表 `DataBase/GameVariables.csv` 的 `MoveTimePointCost`
 	/// （2026-10-05 用户口径 —— 数值放表里便于修改），表里未配置时回落 `RunTimePoints.MoveCost`（默认 0.3）。
-	/// 按实例懒加载一次（首次访问发生在 `_Ready` 的 `LoadingSystem.EnsureAllDataLoaded()` 之后）。
+	/// `_Ready` 里随 `LoadingSystem.EnsureAllDataLoaded()` 之后的那一次读表**一次填好**（同一份表只解析一次）；
+	/// 保留 `NaN` 兜底：`_Ready` 未走到时会自己再读一次表。
 	/// </summary>
 	private float moveTimePointCost = float.NaN;
 
@@ -135,6 +132,12 @@ public partial class MapScene : Control
 		}
 
 		LoadingSystem.EnsureAllDataLoaded();
+		// 地点设施「操作 / 搜寻」的时间点代价（全局表第 7 / 8 列）：随这一次读表灌进纯逻辑层
+		// `RunFacilityCosts`（2026-10-06 起由这里负责 —— 原调用点 `VillageScene._Ready` 随村庄专用场景
+		// 撤除；地图流程是运行局的常驻入口，进局 / 读档 / 回地图都会经过这里）。
+		GameVariables variables = GameVariables.Load();
+		variables.ApplyFacilityCosts();
+		moveTimePointCost = variables.MoveTimePointCost ?? RunTimePoints.MoveCost;
 		RebuildBoard(session);
 	}
 
@@ -657,17 +660,9 @@ public partial class MapScene : Control
 		// 2) 首次到达：按「该类型此时能否解析出配置行」分流（与格点类型无关）
 		ResolvedMapContent content = WorldMapContentResolver.Resolve(session.Current.MapState.Act, node, board, session.Current);
 
-		// 2.0) 地点场景（村庄；村庄案 §十）：`FixedNode.csv` 的 Village 行 ContentType = Village →
-		//      不进事件，改请求地点场景（节点**在这里不标记已访问**：标记由离开村庄时落）。
-		if (content?.Type == "Village")
-		{
-			session.BeginRunPlace(RunSession.PlaceVillage, RunSession.VillagePlaceId, node.NodeId);
-			SetStatus("进入村庄。");
-			QueueRedraw();
-			if (EmbeddedMode) PlaceRequested?.Invoke(RunSession.PlaceVillage);
-			else GetTree().ChangeSceneToFile(VillageScenePath);
-			return;
-		}
+		// 2.0) 地点场景（村庄 / 商人）：2026-10-06 撤除专用分流（方案甲）—— `ContentType = Village / Merchant`
+		//      的行不再请求专用场景，落到下面「无配置」分支（标记完成 + 停留地图）。
+		//      「统一关卡通道」批落地后，这里会按「是否已到达过」重新分流（已到达 → 进局内地图，非战斗）。
 
 		if (content?.Type == "Level")
 		{
@@ -722,9 +717,10 @@ public partial class MapScene : Control
 
 	/// <summary>
 	/// 从存档的已访问集合刷新版图上的「已访问」标记（幂等，顺手重绘）。
-	/// 用途（2026-10-05）：访问标记不一定由本场景写 —— 村庄节点是**离开村庄时**才由
-	/// `RunSession.CompletePendingPlaceToMap` 标记（村庄案 §十一 第 7 条），而本场景只在建版图时读一次
-	/// 存档；不刷新的话，同一会话里再点该格会**重复进入**（一次性节点失效）。
+	/// 用途（2026-10-05，2026-10-06 修订）：访问标记不一定由本场景写 —— 地点场景（村庄）曾由
+	/// `RunSession.CompletePendingPlaceToMap` 在离开时才落标记，而本场景只在建版图时读一次存档，
+	/// 不刷新的话同一会话里再点该格会**重复进入**（一次性节点失效）。
+	/// 专用地点场景已撤除，本方法保留给「统一关卡通道」批（关卡结束回地图时同样要刷一次）。
 	/// </summary>
 	public void RefreshVisitedFlags()
 	{

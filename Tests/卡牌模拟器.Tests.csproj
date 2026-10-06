@@ -51,8 +51,6 @@
     <None Include="..\DataBase\Card\通用\通用Card.csv" Link="Card\通用\通用Card.csv" CopyToOutputDirectory="PreserveNewest" />
     <!-- 全局变量表（2026-10-05）：供 GameVariablesTableTests 做文件级校验（移动时间点进程 MoveTimePointCost） -->
     <None Include="..\DataBase\GameVariables.csv" Link="GameVariables.csv" CopyToOutputDirectory="PreserveNewest" />
-    <!-- 村庄版图占格表（2026-10-05 地点场景批）：供 VillageLayoutTests 做六条不变式的文件级校验 -->
-    <None Include="..\DataBase\WorldMap\VillageLayout.csv" Link="WorldMap\VillageLayout.csv" CopyToOutputDirectory="PreserveNewest" />
     <!-- 区域物 / 格点效果表（2026-10-04，T3 + T8 批）：供 AreaObjectSpecTests 在纯 .NET 下做文件级校验 -->
     <None Include="..\DataBase\Battlefield\AreaObject.csv" Link="Battlefield\AreaObject.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -80,7 +80,7 @@ public partial class RestaurantUi : Node
 	public TabKind ActiveTab => activeTab;
 	public int FreshMarkCount => freshMarks.Count;
 
-	/// <summary>食物货架（索引 = 界面行序；`run.village.restaurant_state` 用）。</summary>
+	/// <summary>食物货架（索引 = 界面行序；只读快照按行序出）。</summary>
 	public IEnumerable<(int FoodKey, int Price, bool Sold)> ShelfEntries
 	{
 		get
@@ -100,7 +100,7 @@ public partial class RestaurantUi : Node
 	{
 		if (index < 0 || index >= shelf.Count)
 		{
-			SetHint("货架上没有这一格（索引见 run.village.restaurant_state 的 shelf）。");
+			SetHint("货架上没有这一格（按界面行序数）。");
 			return false;
 		}
 
@@ -121,7 +121,7 @@ public partial class RestaurantUi : Node
 		FoodRecipeDefinition recipe = CookableRecipes().FirstOrDefault(x => x.RecipeId == recipeId);
 		if (recipe == null)
 		{
-			SetHint($"材料配方表里没有配方 {recipeId}（可用配方见 run.village.restaurant_state 的 cookableRecipeIds）。");
+			SetHint($"材料配方表里没有配方 {recipeId}（可用配方按列表行序数）。");
 			return false;
 		}
 

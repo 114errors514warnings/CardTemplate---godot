@@ -3,10 +3,11 @@
 //   村庄设施「每次操作」= `VillageOperationTimePointCost`（默认 0.1）/ 树林「单次搜寻」= `ForestForageTimePointCost`
 //   （独立项，当前 1.0）；两项**分开配**，各设施规则层读同一份运行期取值。
 // 分工：表 → `GameVariables` 的解析由 `GameVariablesTableTests` 做文件级校验；
-//   Godot 侧「`GameVariables.Load().ApplyFacilityCosts()` → `RunFacilityCosts`」的接线由地点场景
-//   （`VillageScene._Ready`）覆盖；本文件只验 `Apply` / `Reset` 的语义与各规则层的读数。
+//   Godot 侧「`GameVariables.Load().ApplyFacilityCosts()` → `RunFacilityCosts`」的接线由地图流程
+//   （`MapScene._Ready`，2026-10-06 从 `VillageScene._Ready` 迁来）覆盖；本文件只验 `Apply` / `Reset`
+//   的语义与各规则层的读数。
 // ⚠️ `Apply` 改的是全局静态值：本类用例一律 `try/finally` 复位，且与读同一份取值的
-//   `VillageVisitTests` / `VillageFacilityLogicTests` 同属 `[Collection("RunFacilityCosts")]`（串行，不互相踩）。
+//   `VillageFacilityLogicTests` 同属 `[Collection("RunFacilityCosts")]`（串行，不互相踩）。
 using Xunit;
 
 [Collection("RunFacilityCosts")]
@@ -22,16 +23,16 @@ public class RunFacilityCostsTests
 			Assert.Equal(0.2f, RunFacilityCosts.OperationCost, 5);
 			Assert.Equal(0.5f, RunFacilityCosts.ForestForageCost, 5);
 
-			// 各设施规则层读同一份运行期取值：村庄操作一处改、四处生效；树林是**独立**项。
-			Assert.Equal(0.2f, VillageVisit.OperationTimePointCost, 5);
+			// 各设施规则层读同一份运行期取值：操作一处改、四处生效；树林是**独立**项。
+			Assert.Equal(0.2f, RunFacilityCosts.OperationTimePointCost, 5);
 			Assert.Equal(0.2f, SmithyCrafting.CraftTimePointCost, 5);
 			Assert.Equal(0.2f, RestaurantTrade.CookTimePointCost, 5);
 			Assert.Equal(0.2f, RestaurantTrade.OrderTimePointCost, 5);
 			Assert.Equal(0.5f, VillageForage.TimePointCost, 5);
 
 			// 门槛随表值走（进程 → 当天剩余）：
-			Assert.True(VillageVisit.CanOperate(RunTimePoints.PointsPerDay - 0.2f));    // 剩余正好 = 一次操作
-			Assert.False(VillageVisit.CanOperate(RunTimePoints.PointsPerDay - 0.1f));   // 剩余只有一半 → 不行
+			Assert.True(RunFacilityCosts.CanOperate(RunTimePoints.PointsPerDay - 0.2f));    // 剩余正好 = 一次操作
+			Assert.False(RunFacilityCosts.CanOperate(RunTimePoints.PointsPerDay - 0.1f));   // 剩余只有一半 → 不行
 			Assert.True(VillageForage.CanSearch(0.5f));
 			Assert.False(VillageForage.CanSearch(0.4f));
 			Assert.True(RestaurantTrade.CanOrder(0.2f));

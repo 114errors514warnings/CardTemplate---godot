@@ -32,7 +32,7 @@ public sealed class SmithyContext
 	/// 时间点不足、不能打造时的去处指引（村庄 = 旅馆 / 民宿过夜；商人 = 回营地结束当天）——
 	/// 场景差异只走注入，界面里不出现「在村庄 / 在商人」分支（§2.1）。
 	/// </summary>
-	public string TimePointRestHint = VillageVisit.RestHint;
+	public string TimePointRestHint = RunFacilityCosts.RestHint;
 
 	/// <summary>村庄锻铁铺预设（次数 2 / 金币 ×1）。</summary>
 	public static SmithyContext VillageSmithy => new SmithyContext();
@@ -83,7 +83,7 @@ public partial class SmithyUi : Node
 	public string CostText => costLabel?.Text ?? string.Empty;
 	public bool CraftDisabled => craftButton == null || craftButton.Disabled;
 
-	/// <summary>可选配方的产物定义名（升序，与列表行序一致；`run.village.smithy_state` 用）。</summary>
+	/// <summary>可选配方的产物定义名（升序，与列表行序一致；只读快照按行序出）。</summary>
 	public IReadOnlyList<string> RecipeDefinitionIds
 	{
 		get

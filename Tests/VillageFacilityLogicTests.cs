@@ -218,7 +218,7 @@ public class VillageFacilityLogicTests
 		// 2026-10-05 第四轮口径（用户裁定）：进入树林本身不是操作；每次搜寻按**树林专属**表值收时间点
 		// （`ForestForageTimePointCost`），与村庄其他操作的表值（`VillageOperationTimePointCost`）分开配。
 		// 表值与代码兜底是否一致由 `GameVariablesTableTests` 对 CSV 直接校验。
-		Assert.NotEqual(VillageVisit.OperationTimePointCost, VillageForage.TimePointCost);
+		Assert.NotEqual(RunFacilityCosts.OperationTimePointCost, VillageForage.TimePointCost);
 
 		// 门槛边界全部从代价现算（表值调整后断言不用跟着改）：
 		float cost = VillageForage.TimePointCost;
@@ -245,7 +245,7 @@ public class VillageFacilityLogicTests
 
 		// 2026-10-05 第四轮口径：每次打造 = 一次「操作」= 村庄操作表值的时间点（默认 0.1）+ 配方金币。
 		float cost = SmithyCrafting.CraftTimePointCost;
-		Assert.Equal(VillageVisit.OperationTimePointCost, cost);
+		Assert.Equal(RunFacilityCosts.OperationTimePointCost, cost);
 		Assert.True(SmithyCrafting.CanCraft(cost));            // 剩余正好 = 一次操作 → 可打造
 		Assert.False(SmithyCrafting.CanCraft(cost / 2f));      // 剩余不足一次操作 → 不能打造（先去旅馆 / 民宿过夜）
 	}
@@ -311,7 +311,7 @@ public class VillageFacilityLogicTests
 		// 2026-10-05 第四轮口径：烹饪与**点菜（买入）**各算一次「操作」，各收一次村庄操作表值的时间点
 		// （默认 0.1）+（点菜另按菜价）金币；出售是纯交易，不收时间点。
 		float cost = RestaurantTrade.CookTimePointCost;
-		Assert.Equal(VillageVisit.OperationTimePointCost, cost);
+		Assert.Equal(RunFacilityCosts.OperationTimePointCost, cost);
 		Assert.Equal(cost, RestaurantTrade.OrderTimePointCost);
 		Assert.True(RestaurantTrade.CanCook(cost));            // 剩余正好 = 一次操作 → 可烹饪
 		Assert.False(RestaurantTrade.CanCook(cost / 2f));      // 剩余不足 → 不能烹饪

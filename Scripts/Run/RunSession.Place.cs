@@ -1,79 +1,24 @@
 // RunSession.Place.cs
-// 地点场景（村庄 / 商人）的会话入口：**进 / 出 / 设施结算的唯一出口**（界面与场景只调这里，不直接改存档字段）。
-// 口径出处：村庄地图交互案 §十 / §十一、旅馆交互案 §四、民宿交互案 §六、树林交互案 §四、锻铁铺交互案 §四、
-//   餐厅交互案 §四。
+// 地点**设施结算**的会话入口：设施规则层进 / 出的唯一出口（界面只调这里，不直接改存档字段）。
+// 口径出处：旅馆交互案 §四、民宿交互案 §六、树林交互案 §四、锻铁铺交互案 §四、餐厅交互案 §四。
 // **2026-10-05 第四轮口径**（村庄案 §四，取代第三轮）：进入设施本身**不是操作**（不看、不扣时间点；
-//   旅馆的 1 金币是过夜费）；**每次操作固定消耗少量时间点** —— 村庄操作 = 全局数据表
+//   旅馆的 1 金币是过夜费）；**每次操作固定消耗少量时间点** —— 设施操作 = 全局数据表
 //   `VillageOperationTimePointCost`（默认 **0.1**，见 `RunFacilityCosts.OperationCost`），
 //   **树林搜寻另配** `ForestForageTimePointCost`（当前 1.0）；部分操作额外收少量金币（锻造、点菜）。
 //   → 四处操作结算（`TryForageMaterials` / `TryCraftEquipment` / `TryCookAtRestaurant` / `TryBuyFood`）
 //     都在本文件收时间点；`TrySellFood` 是纯交易，不收。
-// 状态机沿用的既有约定：地点场景与事件同档 —— `GameMode = InBattleStart`（内容进行中 → 地图只读）
-//   + `PendingContentType = Village / Merchant`，`RunFlowScene` 读档时按这个类型原地重进地点场景。
+// **2026-10-06（方案甲）**：原「地点场景会话」部分（`BeginRunPlace` / `CompletePendingPlaceToMap` /
+//   `PlaceVillage` / `PlaceMerchant` / `IsInPlace` / `IsInVillage` / `IsInMerchant`）随村庄专用场景
+//   （`VillageScene` / `VillageVisit` / `VillageLayout` / `run.village.*`）一并撤除；本文件只留设施结算，
+//   待「统一关卡通道」批把设施挂到关卡场景上时，再接新的进入 / 离开入口（届时 `PendingContentType`
+//   与 `GameMode` 的取值口径由那一批统一裁定）。
 using Godot;
 using System;
 using System.Collections.Generic;
 
 public partial class RunSession
 {
-	/// <summary>`PendingContentType`：村庄地点场景。</summary>
-	public const string PlaceVillage = "Village";
-
-	/// <summary>`PendingContentType`：商人地点场景。</summary>
-	public const string PlaceMerchant = "Merchant";
-
-	/// <summary>`PendingContentId`：村庄（地点场景的内容 id，不含具体设施）。</summary>
-	public const string VillagePlaceId = "village";
-
-	/// <summary>是否正在某个地点场景里（村庄 / 商人）。</summary>
-	public bool IsInPlace => Current != null
-		&& (string.Equals(Current.PendingContentType, PlaceVillage, StringComparison.Ordinal)
-			|| string.Equals(Current.PendingContentType, PlaceMerchant, StringComparison.Ordinal));
-
-	/// <summary>是否正在村庄里（读档重进村庄场景的判据）。</summary>
-	public bool IsInVillage => Current != null && string.Equals(Current.PendingContentType, PlaceVillage, StringComparison.Ordinal);
-
-	/// <summary>是否正在商人处。</summary>
-	public bool IsInMerchant => Current != null && string.Equals(Current.PendingContentType, PlaceMerchant, StringComparison.Ordinal);
-
-	/// <summary>
-	/// 进入地点场景（世界地图点村庄 / 商人节点 → 这里 → `RunFlowScene.OpenPlace`）。
-	/// 与 `BeginRunEvent` 同档：置 `InBattleStart`，让世界地图转只读，并把内容写进档（读档可原地重进）。
-	/// </summary>
-	public void BeginRunPlace(string placeType, string placeId, int sourceNodeId)
-	{
-		if (Current == null || string.IsNullOrWhiteSpace(placeType))
-		{
-			return;
-		}
-
-		Current.GameMode = RunGameModes.InBattleStart;
-		Current.PendingContentType = placeType;
-		Current.PendingContentId = placeId ?? string.Empty;
-		Current.PendingSourceNodeId = sourceNodeId;
-		Save();
-	}
-
-	/// <summary>
-	/// 离开地点场景（村庄走离开格 / 商人界面关闭并离开）→ 标记当前世界地图节点已访问并回地图。
-	/// 村庄是**一次性节点**（村庄案 §一）：走过一次之后再点它不会重新进来（地图侧的「已访问」分支负责）。
-	/// </summary>
-	public void CompletePendingPlaceToMap()
-	{
-		if (Current == null)
-		{
-			return;
-		}
-
-		MarkCurrentNodeVisitedAndAdvanceEncounter();
-		Current.GameMode = RunGameModes.OnMap;
-		Current.PendingContentType = string.Empty;
-		Current.PendingContentId = string.Empty;
-		Current.PendingSourceNodeId = -1;
-		Save();
-	}
-
-	// ── 村庄设施：旅馆 / 民宿（旅馆案 §四、民宿案 §六）──
+	// ── 设施：旅馆 / 民宿（旅馆案 §四、民宿案 §六）──
 
 	/// <summary>旅馆过夜：校验 → 扣 1 金币 → 逐槽回复 → 推进新一天 → 置 `InnUsed` / `ChosenLodging` → `Save()`。</summary>
 	public bool TryRestAtInn(out List<int> healed, out string error) => TryLodge(true, out healed, out error);
@@ -160,9 +105,9 @@ public partial class RunSession
 		}
 
 		// 时间点不足是硬门槛（村庄案 §四）：不足一次操作的量不能打造，先说去处。
-		if (!VillageVisit.CanOperate(Current.MapState.TimePoints))
+		if (!RunFacilityCosts.CanOperate(Current.MapState.TimePoints))
 		{
-			error = VillageVisit.OperationTimePointShortText(Current.MapState.TimePoints);
+			error = RunFacilityCosts.OperationTimePointShortText(Current.MapState.TimePoints);
 			return false;
 		}
 

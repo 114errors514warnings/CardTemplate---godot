@@ -36,8 +36,6 @@ public partial class RunFlowScene : Control
     private CanvasLayer campLayer;
     // 营地实例（null = 未在营地）；「结束当天」与时间点不足的强制转场共用 OpenCamp。
     private CampScene camp;
-    // 地点场景实例（村庄；商人同路，商人批接上）。null = 未在地点场景。
-    private VillageScene village;
     // 常驻栏左侧的时间点显示（第 9 条：天数 + 当天剩余，精度 0.1）与主动结束当天入口。
     private HBoxContainer timeRow;
     // 常驻栏右侧通用按钮行（地图 / 定位当前角色 / 调试 / 暂停，几何取自 RunUiLayout）：
@@ -97,7 +95,6 @@ public partial class RunFlowScene : Control
         var packed = GD.Load<PackedScene>("res://Scenes/Map/MapScene.tscn");
         map = packed.Instantiate<MapScene>(); map.EmbeddedMode = true;
         map.LevelRequested += StartLevel; map.EventRequested += StartEvent;
-        map.PlaceRequested += OpenPlace;
         map.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         worldMapLayer.AddChild(map);
         BuildGlobalTopBar();
@@ -127,7 +124,6 @@ public partial class RunFlowScene : Control
         // 不能重播事件（§5.7 / §6.5）。
         if (run?.IsInSettlement == true) StartLevel(run.Current.PendingContentId);
         else if (run?.Current?.PendingContentType == "Event") StartEvent(run.Current.PendingContentId);
-        else if (run?.IsInVillage == true) StartVillage();
         else if (run?.Current?.PendingContentType == "Level" || run?.IsInBattleStart == true) StartLevel(run?.Current?.PendingContentId);
         else if (smokeSegment != null) { map.SetReadOnly(false); CallDeferred(nameof(RunUiSmokeSegment), smokeSegment); }
         else if (uiSmoke) { map.SetReadOnly(false); CallDeferred(nameof(RunUiSmoke)); }
@@ -148,16 +144,12 @@ public partial class RunFlowScene : Control
     public BagUi Bag => bagUi;
     public EquipmentUi Equipment => equipmentUi;
     public CampScene Camp => camp;
-    public VillageScene Village => village;
     public MapScene Map => map;
     public SettlementUi Settlement => settlementUi;
     public HexBattleScene ActiveBattle => activeBattle;
 
     /// <summary>营地（夜间 UI）是否开着。</summary>
     public bool IsCampOpen => camp != null && GodotObject.IsInstanceValid(camp);
-
-    /// <summary>地点场景（村庄）是否开着。</summary>
-    public bool IsVillageOpen => village != null && GodotObject.IsInstanceValid(village);
 
     /// <summary>世界地图是否可见（顶栏「地图」的开合状态）。</summary>
     public bool IsMapVisible => map != null && GodotObject.IsInstanceValid(map) && map.Visible;
@@ -172,8 +164,8 @@ public partial class RunFlowScene : Control
         {
             if (host == null || host.GetChildCount() == 0) return "none";
             Node firstChild = host.GetChild(0);
-            if (firstChild is RunBattleScene) return "battle";
-            return firstChild is VillageScene ? "village" : "event";
+            // 地点场景（村庄 / 商人）已撤除（2026-10-06 方案甲）：内容进行中只剩「战斗」与「事件」两种形态。
+            return firstChild is RunBattleScene ? "battle" : "event";
         }
     }
 
@@ -619,74 +611,13 @@ public partial class RunFlowScene : Control
     }
 
 
-    // ── 地点场景（村庄 / 商人；2026-10-05 批 2）────────────────────────────
-
-    /// <summary>
-    /// 统一地点场景入口（村庄案 §十）：世界地图点村庄 / 商人节点 → 这里。
-    /// `placeType` 取 `RunSession.PlaceVillage` / `RunSession.PlaceMerchant`；未知类型只打日志、不改状态。
-    /// </summary>
-    private void OpenPlace(string placeType)
-    {
-        if (RunSession.Instance?.Current == null || IsSettlementBlocking) return;
-        if (string.Equals(placeType, RunSession.PlaceVillage, StringComparison.Ordinal))
-        {
-            StartVillage();
-            return;
-        }
-
-        // 商人地点场景（商人交互案 §二 / §三）随商人批落地：通路已留，这里不静默降级成事件。
-        GD.PrintErr($"[运行局] 地点场景 `{placeType}` 尚未接入，忽略这次进入请求。");
-    }
-
-    /// <summary>进入村庄地点场景：内容进行中（地图转只读 + 常驻栏「结束当天」不可点；村庄案 §七）。</summary>
-    private void StartVillage()
-    {
-        RunSession run = RunSession.Instance;
-        if (run?.Current == null || IsVillageOpen) return;
-        mapSelectable = false;
-        activeBattle = null;
-        activeContent = null;
-        attachMapRetries = 0;
-        ClearHost();
-        SetWorldMapVisible(false);
-        map.SetReadOnly(true);
-
-        PackedScene packed = GD.Load<PackedScene>("res://Scenes/Run/VillageScene.tscn");
-        if (packed == null)
-        {
-            GD.PrintErr("[运行局] 无法加载 VillageScene.tscn，放弃村庄转场。");
-            ReturnToSelectableMap();
-            return;
-        }
-
-        village = packed.Instantiate<VillageScene>();
-        village.EmbeddedMode = true;
-        village.PlaceExited += OnVillageExited;
-        village.Notice += text => GD.Print($"[村庄] {text}");
-        host.AddChild(village);
-        ConfigureGlobalTopBar(null);
-        GD.Print($"[村庄] 进入村庄场景（金币 {run.Current.Gold}，时间点 {RunTimePoints.Format(run.RemainingToday)}）。");
-    }
-
-    /// <summary>走离开格：销毁村庄场景 → 标记村庄节点已访问 → 回可选世界地图（村庄案 §十一 第 7 条）。</summary>
-    private void OnVillageExited()
-    {
-        if (village != null && GodotObject.IsInstanceValid(village))
-        {
-            village.QueueFree();
-        }
-
-        village = null;
-        ClearHost();
-        RunSession.Instance?.CompletePendingPlaceToMap();
-        // 村庄节点是「离开时才标记已访问」，而地图只在建版图时读一次存档：
-        // 不刷新的话，同一会话里再点该格会重复进入（一次性节点失效）。
-        map.RefreshVisitedFlags();
-        RefreshTimePointText();
-        ReturnToSelectableMap();
-        GD.Print("[村庄] 已离开村庄，村庄节点标记为已访问。");
-    }
-
+    // ── 地点场景：2026-10-06 撤除（方案甲）────────────────────────────────
+    // 村庄专用地点场景（`VillageScene.tscn` / `VillageVisit` / `VillageLayout` / `run.village.*`）
+    // 不符合「统一关卡通道」交互案，已整体撤除：
+    //   · 世界地图不再有地点分流（`MapScene.PlaceRequested` 一并撤除）—— `FixedNode.csv` 里
+    //     `ContentType = Village` 的行暂时走「无配置」分支（停留地图，村庄暂不可达）；
+    //   · 设施规则层（`VillageLodging` / `VillageForage` / `SmithyCrafting` / `RestaurantTrade`）
+    //     与结算入口（`RunSession.Place.cs`）保留，待「统一关卡通道」批挂到关卡场景上。
 
     private void ClearHost()
     {

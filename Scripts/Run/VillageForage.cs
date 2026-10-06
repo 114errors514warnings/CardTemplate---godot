@@ -40,7 +40,7 @@ public static class VillageForage
 
 	/// <summary>
 	/// 能否再搜寻一次（当天剩余 ≥ `TimePointCost`；不足 → 先去旅馆 / 民宿过夜或回营地结束当天）。
-	/// 树林是**独立代价**，因此不复用 `VillageVisit.CanOperate`（那个读村庄操作值）。
+	/// 树林是**独立代价**，因此不复用 `RunFacilityCosts.CanOperate`（那个读村庄操作值）。
 	/// </summary>
 	public static bool CanSearch(float remainingToday) => remainingToday + 1e-4f >= TimePointCost;
 
@@ -48,7 +48,7 @@ public static class VillageForage
 	/// 时间点不足、不能搜寻的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。
 	/// </summary>
 	public static string SearchTimePointShortText(float remainingToday) =>
-		RunTimePoints.ShortRestText(TimePointCost, remainingToday, VillageVisit.RestHint);
+		RunTimePoints.ShortRestText(TimePointCost, remainingToday, RunFacilityCosts.RestHint);
 
 	/// <summary>权重总和（0 = 权重表为空）。</summary>
 	public static int TotalWeight

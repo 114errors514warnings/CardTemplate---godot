@@ -5,8 +5,8 @@
 //     「每次操作」与「树林搜寻」的时间点代价进表，两项**分开配**；用户口径「数值配置到全局数据表里」）。
 // 纯 .NET 读真实 CSV（Tests.csproj 已把它拷进输出目录），不触碰 LoadingSystem / LoadCsv（Godot 依赖）；
 // 运行期接线（`GameVariables.MoveTimePointCost → MapScene` 移动闸门、
-// `GameVariables.ApplyFacilityCosts() → RunFacilityCosts → VillageVisit / VillageForage / SmithyCrafting /
-// RestaurantTrade`）由地图流程与地点场景覆盖 —— `RunFacilityCostsTests` 覆盖表值落地后的纯逻辑取值。
+// `GameVariables.ApplyFacilityCosts() → RunFacilityCosts → VillageForage / SmithyCrafting /
+// RestaurantTrade`）由地图流程（`MapScene._Ready`）覆盖 —— `RunFacilityCostsTests` 覆盖表值落地后的纯逻辑取值。
 using System;
 using System.Globalization;
 using System.IO;

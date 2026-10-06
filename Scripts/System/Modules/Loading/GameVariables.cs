@@ -64,8 +64,9 @@ public sealed class GameVariables
 
     /// <summary>
     /// 把表里的**地点设施操作代价**灌进纯逻辑层 `RunFacilityCosts`（第 7 / 8 列）——
-    /// 地点场景开启时调一次（当前调用点：`VillageScene._Ready`；村庄 / 商人共用的 `SmithyUi` 也从这里取值，
-    /// 商人场景落地时需同样调用一次）。留空 = 保持兜底默认值（与移动代价「留空 = 回落默认」同口径）。
+    /// 读表时调一次（当前调用点：`MapScene._Ready`，2026-10-06 从 `VillageScene._Ready` 迁来 ——
+    /// 村庄专用场景已撤除，而地点设施操作口径（`SmithyCrafting` / `RestaurantTrade` / `VillageForage`）
+    /// 必须在任何设施界面打开前就位）。留空 = 保持兜底默认值（与移动代价「留空 = 回落默认」同口径）。
     /// </summary>
     public void ApplyFacilityCosts() =>
         RunFacilityCosts.Apply(VillageOperationTimePointCost, ForestForageTimePointCost);

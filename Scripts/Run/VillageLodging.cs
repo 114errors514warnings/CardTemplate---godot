@@ -47,7 +47,7 @@ public static class VillageLodging
 	public static string DebuffBlockText(string stateName) => $"民宿因你们的恶名（{stateName}）拒绝收留。";
 
 	/// <summary>是否「晚上」（村庄案 §八：当天剩余 ≤ 1.0）。</summary>
-	public static bool IsNight(RunSaveData run) => VillageLayout.IsNight(run?.MapState?.RemainingToday ?? 0f);
+	public static bool IsNight(RunSaveData run) => RunTimePoints.IsNight(run?.MapState?.RemainingToday ?? 0f);
 
 	/// <summary>本次休息的回复比例：旅馆 50% / 100%，民宿 25% / 40%（越界时段按白天算）。</summary>
 	public static float HealRatio(bool inn, bool night) => inn

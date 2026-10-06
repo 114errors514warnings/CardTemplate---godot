@@ -27,7 +27,7 @@ public static class RestaurantTrade
 
 	/// <summary>时间点不足、不能烹饪的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。</summary>
 	public static string CookTimePointShortText(float remainingToday) =>
-		RunTimePoints.ShortRestText(CookTimePointCost, remainingToday, VillageVisit.RestHint);
+		RunTimePoints.ShortRestText(CookTimePointCost, remainingToday, RunFacilityCosts.RestHint);
 
 	/// <summary>
 	/// 每次**点菜**（购买页点「买入」）的时间点代价（餐厅案 §三 / §四，2026-10-05 第四轮口径）：
@@ -41,7 +41,7 @@ public static class RestaurantTrade
 
 	/// <summary>时间点不足、不能点菜的一行原因（含去处指引；句式共用 `RunTimePoints.ShortRestText`）。</summary>
 	public static string OrderTimePointShortText(float remainingToday) =>
-		RunTimePoints.ShortRestText(OrderTimePointCost, remainingToday, VillageVisit.RestHint);
+		RunTimePoints.ShortRestText(OrderTimePointCost, remainingToday, RunFacilityCosts.RestHint);
 
 	/// <summary>
 	/// 购买页货架格数（餐厅案 §三 / 待拍板第 7 条默认 4 格；与商人的食物栏格数分列，商人批接表后统一）。
