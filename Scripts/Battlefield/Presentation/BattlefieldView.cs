@@ -11,7 +11,7 @@ public partial class BattlefieldView : Control
     public Vector2 Pan { get; private set; }
     public bool Moving { get; private set; }
     public bool HasPendingPresentation => hasActiveMove || hasActiveAttack || presentationQueue.Count > 0;
-    public bool HasCharacterRig(int unitId) => characterRigs.TryGetValue(unitId, out var rig) && rig.IsInsideTree();
+    public bool HasPixelActor(int unitId) => pixelActors.TryGetValue(unitId, out var actor) && actor.IsInsideTree();
     private bool dragging;
     private AxialHex? hover;
     public AxialHex? HoveredCell => hover;
@@ -24,8 +24,8 @@ public partial class BattlefieldView : Control
     private bool hasActiveMove;
     private float activeMoveElapsed;
     private readonly Dictionary<int, Vector2> visualUnitPositions = new();
-    private readonly Dictionary<int, CharacterRig2D> characterRigs = new();
-    private readonly Dictionary<int, float> defeatedRigSeconds = new();
+    private readonly Dictionary<int, PixelHeroActor> pixelActors = new();
+    private readonly Dictionary<int, float> defeatedActorSeconds = new();
     private BattlefieldAttackEvent activeAttack;
     private bool hasActiveAttack;
     private float activeAttackElapsed;
@@ -89,13 +89,13 @@ public partial class BattlefieldView : Control
     public void Bind(BattlefieldSession session)
     {
         if (Session != null) { Session.Changed -= Refresh; Session.UnitEntered -= OnUnitEntered; Session.AttackResolved -= OnAttackResolved; }
-        foreach (CharacterRig2D rig in characterRigs.Values) rig.QueueFree();
-        characterRigs.Clear(); defeatedRigSeconds.Clear();
+        foreach (PixelHeroActor actor in pixelActors.Values) actor.QueueFree();
+        pixelActors.Clear(); defeatedActorSeconds.Clear();
         visualUnitPositions.Clear(); presentationQueue.Clear(); damageLag.Clear();
         moveIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/Images/UI/IntentIcons/intent_move.png");
         attackIntentIcon = ResourceLoader.Load<Texture2D>("res://Resources/Images/UI/IntentIcons/intent_attack.png");
         Session = session; Session.Changed += Refresh; Session.UnitEntered += OnUnitEntered; Session.AttackResolved += OnAttackResolved;
-        SyncCharacterRigs(0);
+        SyncPixelActors(0);
         CenterSelected();
     }
     public override void _ExitTree()
@@ -147,12 +147,12 @@ public partial class BattlefieldView : Control
             {
                 activeMove = step.Move; hasActiveMove = true; activeMoveElapsed = 0;
                 visualUnitPositions[activeMove.UnitId] = CellPosition(activeMove.From);
-                if (characterRigs.TryGetValue(activeMove.UnitId, out var movingRig)) movingRig.PlayMove();
+                if (pixelActors.TryGetValue(activeMove.UnitId, out var movingActor)) movingActor.PlayBattleMove();
             }
             else
             {
                 activeAttack = step.Attack; hasActiveAttack = true; activeAttackElapsed = 0; activeAttackImpactApplied = false;
-                if (characterRigs.TryGetValue(activeAttack.SourceUnitId, out var attackingRig)) attackingRig.PlayAttack();
+                if (pixelActors.TryGetValue(activeAttack.SourceUnitId, out var attackingActor)) attackingActor.PlayBattleAttack();
             }
         }
         if (hasActiveMove)
@@ -166,25 +166,30 @@ public partial class BattlefieldView : Control
                 // Logic may already have committed the next cell before that event is rendered.
                 visualUnitPositions[step.UnitId] = CellPosition(step.To);
                 hasActiveMove = false;
-                if (characterRigs.TryGetValue(step.UnitId, out var stoppedRig)) stoppedRig.PlayIdle();
+                if (pixelActors.TryGetValue(step.UnitId, out var stoppedActor)) stoppedActor.PlayBattleIdle();
             }
         }
         if (hasActiveAttack)
         {
             activeAttackElapsed += (float)delta;
-            // Authored rigs emit their contact/release event. The timer covers enemies and missed frames.
-            float fallbackImpact = characterRigs.ContainsKey(activeAttack.SourceUnitId)
-                ? .42f : AttackPresentationSeconds * .56f;
+            float fallbackImpact = pixelActors.ContainsKey(activeAttack.SourceUnitId)
+                ? AttackPresentationSeconds * .50f : AttackPresentationSeconds * .56f;
             if (!activeAttackImpactApplied && activeAttackElapsed >= fallbackImpact) ApplyAttackImpact();
             if (activeAttackElapsed >= AttackPresentationSeconds)
             {
                 foreach (int unitId in AffectedUnitIds(activeAttack)) presentationStats.Remove(unitId);
+                if (pixelActors.TryGetValue(activeAttack.SourceUnitId, out var sourceActor) && !sourceActor.IsDedicatedDeathVisible)
+                    sourceActor.PlayBattleIdle();
+                foreach (int unitId in AffectedUnitIds(activeAttack))
+                    if (pixelActors.TryGetValue(unitId, out var affectedActor) &&
+                        Session.Occupancy.Placements.TryGetValue(unitId, out var placement) && placement.Presence == BattlefieldPresence.Active)
+                        affectedActor.PlayBattleIdle();
                 hasActiveAttack = false;
             }
         }
         UpdateDamageLag((float)delta);
         if (!hasActiveMove && !hasActiveAttack && presentationQueue.Count == 0) visualUnitPositions.Clear();
-        SyncCharacterRigs((float)delta);
+        SyncPixelActors((float)delta);
         QueueRedraw();
     }
 
@@ -196,11 +201,11 @@ public partial class BattlefieldView : Control
         {
             if (Session.Occupancy.Placements.TryGetValue(unitId, out var target))
                 presentationStats[unitId] = (target.Unit.HP, target.Unit.Shield);
-            if (characterRigs.TryGetValue(unitId, out var hitRig) && !hitRig.IsDead) hitRig.PlayHurt();
+            if (pixelActors.TryGetValue(unitId, out var hitActor)) hitActor.PlayBattleHurt();
         }
     }
 
-    private void SyncCharacterRigs(float delta)
+    private void SyncPixelActors(float delta)
     {
         if (Session == null) return;
         for (int slot = 0; slot < Session.PlayerIds.Count; slot++)
@@ -208,55 +213,49 @@ public partial class BattlefieldView : Control
             int id = Session.PlayerIds[slot];
             int characterId = Session.Definition.PlayerCharacterIds[slot];
             if (characterId is not (1002 or 1003) || !Session.Occupancy.Placements.TryGetValue(id, out var placement)) continue;
-            if (!characterRigs.TryGetValue(id, out CharacterRig2D rig))
+            if (!pixelActors.TryGetValue(id, out PixelHeroActor actor))
             {
-                string path = characterId == 1003 ? "res://Scenes/Characters/IseraRig.tscn" : "res://Scenes/Characters/SwordmasterRig.tscn";
-                rig = ResourceLoader.Load<PackedScene>(path).Instantiate<CharacterRig2D>();
-                rig.Name = $"CharacterRig_{id}";
-                rig.Scale = Vector2.One * .8f;
-                int sourceUnitId = id;
-                rig.AttackImpact += () =>
-                {
-                    if (hasActiveAttack && activeAttack.SourceUnitId == sourceUnitId) ApplyAttackImpact();
-                };
-                AddChild(rig);
-                characterRigs.Add(id, rig);
+                actor = new PixelHeroActor { Name = $"PixelActor_{id}", ZIndex = 2 };
+                AddChild(actor);
+                actor.SetCharacter(characterId == 1003 ? PixelHeroActor.CharacterKind.Elf : PixelHeroActor.CharacterKind.Greatsword);
+                pixelActors.Add(id, actor);
             }
             if (placement.Presence != BattlefieldPresence.Active)
             {
-                if (!defeatedRigSeconds.ContainsKey(id) && delta > 0 && !HasPendingPresentation)
-                { rig.PlayDeath(); defeatedRigSeconds[id] = 0; }
-                if (defeatedRigSeconds.TryGetValue(id, out float seconds))
-                { defeatedRigSeconds[id] = seconds + delta; rig.Visible = seconds < 1.5f; }
+                if (!defeatedActorSeconds.ContainsKey(id) && delta > 0 && !HasPendingPresentation)
+                { actor.PlayBattleDeath(); defeatedActorSeconds[id] = 0; }
+                if (defeatedActorSeconds.TryGetValue(id, out float seconds))
+                { defeatedActorSeconds[id] = seconds + delta; actor.Visible = seconds < 1.5f; }
                 continue;
             }
-            defeatedRigSeconds.Remove(id);
-            rig.Visible = true;
-            CharacterRig2D.RigLoadout nextLoadout = ResolveRigLoadout(Session.GetLoadout(id));
-            if (rig.Loadout != nextLoadout) rig.SetLoadout(nextLoadout);
-            rig.Position = visualUnitPositions.TryGetValue(id, out Vector2 visual) ? visual : CellPosition(placement.Coord);
+            defeatedActorSeconds.Remove(id);
+            actor.Visible = true;
+            PixelHeroActor.Loadout nextLoadout = characterId == 1003 ? PixelHeroActor.Loadout.Bow : ResolvePixelLoadout(Session.GetLoadout(id));
+            if (actor.CurrentLoadout != nextLoadout) actor.SetLoadout(nextLoadout);
+            Vector2 center = visualUnitPositions.TryGetValue(id, out Vector2 visual) ? visual : CellPosition(placement.Coord);
+            actor.SetHomePosition(center + new Vector2(0, -72));
         }
     }
 
-    private static CharacterRig2D.RigLoadout ResolveRigLoadout(BattlefieldSession.PlayerLoadout equipped)
+    private static PixelHeroActor.Loadout ResolvePixelLoadout(BattlefieldSession.PlayerLoadout equipped)
     {
         GroundObject left = equipped?.LeftHand;
         GroundObject right = equipped?.RightHand;
         GroundObject twoHand = left?.HandsRequired == 2 ? left : right?.HandsRequired == 2 ? right : null;
         if (twoHand != null)
         {
-            if (twoHand.DefinitionId.Contains("弓")) return CharacterRig2D.RigLoadout.Bow;
-            if (twoHand.DefinitionId.Contains("典") || twoHand.DefinitionId.Contains("书")) return CharacterRig2D.RigLoadout.Tome;
-            return CharacterRig2D.RigLoadout.TwoHandedWeapon;
+            if (twoHand.DefinitionId.Contains("弓")) return PixelHeroActor.Loadout.Bow;
+            if (twoHand.DefinitionId.Contains("典") || twoHand.DefinitionId.Contains("书")) return PixelHeroActor.Loadout.Tome;
+            return PixelHeroActor.Loadout.TwoHandedWeapon;
         }
         bool shield = left?.DefinitionId.Contains("盾") == true;
         bool leftWeapon = left != null && !shield;
         bool rightWeapon = right != null;
-        if (shield && rightWeapon) return CharacterRig2D.RigLoadout.SwordAndShield;
-        if (shield) return CharacterRig2D.RigLoadout.LeftShield;
-        if (leftWeapon && rightWeapon) return CharacterRig2D.RigLoadout.DualSwords;
-        if (leftWeapon || rightWeapon) return CharacterRig2D.RigLoadout.RightSword;
-        return CharacterRig2D.RigLoadout.None;
+        if (shield && rightWeapon) return PixelHeroActor.Loadout.SwordAndShield;
+        if (shield) return PixelHeroActor.Loadout.LeftShield;
+        if (leftWeapon && rightWeapon) return PixelHeroActor.Loadout.DualSwords;
+        if (leftWeapon || rightWeapon) return PixelHeroActor.Loadout.RightSword;
+        return PixelHeroActor.Loadout.None;
     }
 
     public Vector2 CellPosition(AxialHex coord)
@@ -313,7 +312,7 @@ public partial class BattlefieldView : Control
             visualUnitPositions.Remove(id);
         foreach (int id in presentationStats.Keys.Where(id => !Session.Occupancy.Placements.TryGetValue(id, out var p) || p.Presence != BattlefieldPresence.Active).ToArray())
             presentationStats.Remove(id);
-        SyncCharacterRigs(0);
+        SyncPixelActors(0);
         QueueRedraw();
     }
 
@@ -436,11 +435,11 @@ public partial class BattlefieldView : Control
             if (!new Rect2(-60, -60, Size.X + 120, Size.Y + 120).HasPoint(center)) continue;
             Color color = p.Role == BattlefieldRole.Player ? new Color("69bec9") : new Color("d88885");
             if (hasActiveAttack && activeAttackImpactApplied && AffectedUnitIds(activeAttack).Contains(p.UnitId)) color = Colors.Red;
-            bool hasRig = characterRigs.TryGetValue(p.UnitId, out var rig) && rig.Visible;
-            if (!hasRig) DrawCircle(center + new Vector2(0, -7), 16, color);
-            if (!hasRig) CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
+            bool hasPixelActor = pixelActors.TryGetValue(p.UnitId, out var actor) && actor.Visible;
+            if (!hasPixelActor) DrawCircle(center + new Vector2(0, -7), 16, color);
+            if (!hasPixelActor) CenterText(center + new Vector2(0, -27), p.Name, 14, Colors.White);
             string label = p.Role == BattlefieldRole.Player ? (Session.PlayerIds.IndexOf(p.UnitId) + 1).ToString() : "敌";
-            if (!hasRig) CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
+            if (!hasPixelActor) CenterText(center + new Vector2(0, -1), label, 15, new Color("16202a"));
             var shownStats = presentationStats.TryGetValue(p.UnitId, out var delayed) ? delayed : (p.Unit.HP, p.Unit.Shield);
             DrawUnitHealthBar(center, p, shownStats, (float)Session.Definition.CellRadius / BaseCellRadius);
             if (p.Role == BattlefieldRole.Enemy) CenterText(center + new Vector2(0, -46), Session.GetEnemyIntentionText(p.UnitId), 11, new Color("f0b27a"));

@@ -1,0 +1,674 @@
+[
+	{
+		"cell": [
+			256,
+			256
+		],
+		"foot_anchor": [
+			128,
+			228
+		],
+		"frames": [
+			{
+				"correction": [
+					0,
+					1
+				],
+				"destination": [
+					92,
+					100
+				],
+				"frame": 0,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					127,
+					626
+				],
+				"source_bounds": [
+					32,
+					285,
+					210,
+					628
+				]
+			},
+			{
+				"correction": [
+					3,
+					1
+				],
+				"destination": [
+					88,
+					100
+				],
+				"frame": 1,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					404,
+					626
+				],
+				"source_bounds": [
+					291,
+					285,
+					522,
+					628
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					78,
+					100
+				],
+				"frame": 2,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					697,
+					626
+				],
+				"source_bounds": [
+					559,
+					285,
+					825,
+					628
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					80,
+					100
+				],
+				"frame": 3,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					982,
+					626
+				],
+				"source_bounds": [
+					850,
+					286,
+					1094,
+					628
+				]
+			},
+			{
+				"correction": [
+					-4,
+					1
+				],
+				"destination": [
+					81,
+					52
+				],
+				"frame": 4,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1243,
+					626
+				],
+				"source_bounds": [
+					1130,
+					159,
+					1356,
+					628
+				]
+			},
+			{
+				"correction": [
+					-6,
+					1
+				],
+				"destination": [
+					70,
+					116
+				],
+				"frame": 5,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1528,
+					626
+				],
+				"source_bounds": [
+					1391,
+					327,
+					1814,
+					628
+				]
+			},
+			{
+				"correction": [
+					-8,
+					0
+				],
+				"destination": [
+					71,
+					128
+				],
+				"frame": 6,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1900,
+					628
+				],
+				"source_bounds": [
+					1771,
+					364,
+					2008,
+					631
+				]
+			}
+		],
+		"name": "swordmaster_equipped",
+		"source_sha256": "79da95d45486cc4a6d7bff02a82d54b0c94f0c366ad4f4de84ed4bbe1d46c8e8"
+	},
+	{
+		"cell": [
+			256,
+			256
+		],
+		"foot_anchor": [
+			128,
+			228
+		],
+		"frames": [
+			{
+				"correction": [
+					0,
+					1
+				],
+				"destination": [
+					92,
+					99
+				],
+				"frame": 0,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					127,
+					626
+				],
+				"source_bounds": [
+					31,
+					284,
+					209,
+					629
+				]
+			},
+			{
+				"correction": [
+					3,
+					1
+				],
+				"destination": [
+					88,
+					99
+				],
+				"frame": 1,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					404,
+					626
+				],
+				"source_bounds": [
+					290,
+					284,
+					522,
+					629
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					78,
+					99
+				],
+				"frame": 2,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					697,
+					626
+				],
+				"source_bounds": [
+					559,
+					284,
+					826,
+					629
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					80,
+					100
+				],
+				"frame": 3,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					982,
+					626
+				],
+				"source_bounds": [
+					850,
+					285,
+					1095,
+					629
+				]
+			},
+			{
+				"correction": [
+					-4,
+					1
+				],
+				"destination": [
+					82,
+					86
+				],
+				"frame": 4,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1243,
+					626
+				],
+				"source_bounds": [
+					1131,
+					248,
+					1357,
+					629
+				]
+			},
+			{
+				"correction": [
+					-6,
+					1
+				],
+				"destination": [
+					71,
+					115
+				],
+				"frame": 5,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1528,
+					626
+				],
+				"source_bounds": [
+					1393,
+					326,
+					1676,
+					629
+				]
+			},
+			{
+				"correction": [
+					-8,
+					0
+				],
+				"destination": [
+					72,
+					128
+				],
+				"frame": 6,
+				"scale": 0.378698224852071,
+				"source_anchor": [
+					1900,
+					628
+				],
+				"source_bounds": [
+					1772,
+					363,
+					2010,
+					632
+				]
+			}
+		],
+		"name": "swordmaster_body",
+		"source_sha256": "78a9426f12c1b8fbc5be6ad19787fd8c81bbf868cd36405902a550ef32897ba7"
+	},
+	{
+		"cell": [
+			256,
+			256
+		],
+		"foot_anchor": [
+			128,
+			228
+		],
+		"frames": [
+			{
+				"correction": [
+					-5,
+					1
+				],
+				"destination": [
+					95,
+					101
+				],
+				"frame": 0,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					145,
+					673
+				],
+				"source_bounds": [
+					48,
+					236,
+					255,
+					676
+				]
+			},
+			{
+				"correction": [
+					1,
+					1
+				],
+				"destination": [
+					98,
+					101
+				],
+				"frame": 1,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					435,
+					671
+				],
+				"source_bounds": [
+					330,
+					236,
+					540,
+					674
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					98,
+					102
+				],
+				"frame": 2,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					727,
+					671
+				],
+				"source_bounds": [
+					619,
+					239,
+					831,
+					673
+				]
+			},
+			{
+				"correction": [
+					3,
+					1
+				],
+				"destination": [
+					93,
+					102
+				],
+				"frame": 3,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1014,
+					672
+				],
+				"source_bounds": [
+					884,
+					239,
+					1127,
+					674
+				]
+			},
+			{
+				"correction": [
+					4,
+					1
+				],
+				"destination": [
+					93,
+					83
+				],
+				"frame": 4,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1300,
+					674
+				],
+				"source_bounds": [
+					1168,
+					176,
+					1428,
+					676
+				]
+			},
+			{
+				"correction": [
+					6,
+					1
+				],
+				"destination": [
+					96,
+					86
+				],
+				"frame": 5,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1600,
+					674
+				],
+				"source_bounds": [
+					1469,
+					188,
+					1742,
+					676
+				]
+			},
+			{
+				"correction": [
+					-2,
+					4
+				],
+				"destination": [
+					87,
+					143
+				],
+				"frame": 6,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1875,
+					673
+				],
+				"source_bounds": [
+					1743,
+					371,
+					2005,
+					676
+				]
+			}
+		],
+		"name": "isera_equipped",
+		"source_sha256": "a65253438c87c2eae7ee01cf816d05bc8d8605842831f41de158545c3030a599"
+	},
+	{
+		"cell": [
+			256,
+			256
+		],
+		"foot_anchor": [
+			128,
+			228
+		],
+		"frames": [
+			{
+				"correction": [
+					-5,
+					1
+				],
+				"destination": [
+					97,
+					100
+				],
+				"frame": 0,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					145,
+					673
+				],
+				"source_bounds": [
+					57,
+					234,
+					254,
+					676
+				]
+			},
+			{
+				"correction": [
+					1,
+					1
+				],
+				"destination": [
+					98,
+					101
+				],
+				"frame": 1,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					435,
+					671
+				],
+				"source_bounds": [
+					328,
+					235,
+					535,
+					674
+				]
+			},
+			{
+				"correction": [
+					2,
+					1
+				],
+				"destination": [
+					98,
+					102
+				],
+				"frame": 2,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					727,
+					671
+				],
+				"source_bounds": [
+					619,
+					238,
+					829,
+					673
+				]
+			},
+			{
+				"correction": [
+					3,
+					1
+				],
+				"destination": [
+					93,
+					102
+				],
+				"frame": 3,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1014,
+					672
+				],
+				"source_bounds": [
+					886,
+					238,
+					1104,
+					675
+				]
+			},
+			{
+				"correction": [
+					4,
+					1
+				],
+				"destination": [
+					93,
+					103
+				],
+				"frame": 4,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1300,
+					674
+				],
+				"source_bounds": [
+					1167,
+					244,
+					1425,
+					677
+				]
+			},
+			{
+				"correction": [
+					6,
+					1
+				],
+				"destination": [
+					95,
+					103
+				],
+				"frame": 5,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1600,
+					674
+				],
+				"source_bounds": [
+					1467,
+					244,
+					1739,
+					677
+				]
+			},
+			{
+				"correction": [
+					-2,
+					4
+				],
+				"destination": [
+					87,
+					143
+				],
+				"frame": 6,
+				"scale": 0.293577981651376,
+				"source_anchor": [
+					1875,
+					673
+				],
+				"source_bounds": [
+					1742,
+					370,
+					2002,
+					668
+				]
+			}
+		],
+		"name": "isera_body",
+		"source_sha256": "c5531341a75683d411e17dd44228e9c6af87402a6af796962df5caad5ec211f1"
+	}
+]

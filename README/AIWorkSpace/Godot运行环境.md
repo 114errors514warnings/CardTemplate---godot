@@ -74,8 +74,6 @@ $p = Start-Process -FilePath $exe -PassThru -Wait -ArgumentList @(
 |---|---|---|
 | 纯逻辑烟测（数据加载、战斗流程、战场断言） | `--headless --scene ... -- --battlefield-smoke` | ✅ 可以（2026-09-22 起全绿） |
 | 像素素材烟测 | `--headless --scene res://Scenes/Debug/AnimationMaterialTestScene.tscn -- --animation-material-smoke` | ✅ 可以（截图自动跳过） |
-| 双角色骨骼烟测 | `--headless --scene res://Scenes/Debug/AnimationMaterialTestScene.tscn -- --character-rig-smoke` | ✅ 可以（图形版另存旧图集基准与动作截图） |
-| 骨骼固定姿势出图 | 图形版 `--scene res://Scenes/Debug/AnimationMaterialTestScene.tscn -- --rig-pose-smoke` | ❌ 无界面只验证姿势变化和命中事件，不出图 |
 | 剧情烟测 | `--headless --scene res://Scenes/Battle/HexBattleScene.tscn -- --story-smoke` | ✅ 可以（自检后自动退出） |
 | GUI 输入烟测（如 `--run-flow-ui-smoke`） | **图形版** console exe + 真实窗口 + `--scene res://Scenes/Run/RunFlowScene.tscn` | ❌ 不可以 |
 | 出图烟测（`--animation-material-smoke`、`--battlefield-bow-capture`、`--story-capture`） | **图形版** console exe（可 `--position 3000,3000`） | ❌ 不可以 |

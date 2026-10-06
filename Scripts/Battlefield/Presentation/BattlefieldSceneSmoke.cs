@@ -50,7 +50,7 @@ public static partial class BattlefieldSceneSmoke
                 Check(initialCapture == Error.Ok, "initial hand capture saved");
             }
             Check(session.PlayerIds.Count == 3 && session.Occupancy.Occupants.Count == 9, "deployment");
-            Check(session.PlayerIds.Skip(1).All(view.HasCharacterRig), "swordmaster and elf rigs bound to battlefield units");
+            Check(session.PlayerIds.Skip(1).All(view.HasPixelActor), "swordmaster and elf pixel actors bound to battlefield units");
             Check(session.Selected.BaseMovesPerTurn == 3, "CSV MovesPerTurn reaches runtime");
             int firstId = session.SelectedId;
             int hp = session.Selected.Unit.HP;
@@ -913,9 +913,6 @@ public static partial class BattlefieldSceneSmoke
             "res://Resources/Images/Characters/Pixel/swordmaster_death_pose_v2.png",
             "res://Resources/Images/Characters/Pixel/fx_bow_arrow_trail.png",
             "res://Resources/Images/Characters/Pixel/fx_tome_cast_rune.png",
-            "res://Resources/Images/Characters/Rigs/Isera/isera_parts_atlas_v1.png",
-            "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v1.png",
-            "res://Resources/Images/Characters/Rigs/Isera/isera_continuous_skin_v2.png",
         };
         foreach (string path in required) Check(ResourceLoader.Exists(path), $"asset path resolves: {path}");
         Check(!ResourceLoader.Exists("res://Images/UI/IntentIcons/intent_move.png"), "legacy root Images/ folder is gone");

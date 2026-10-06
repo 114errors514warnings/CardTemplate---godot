@@ -1,0 +1,40 @@
+[gd_resource type="SpriteFrames" load_steps=9 format=3]
+
+[ext_resource type="Texture2D" path="res://Resources/Images/Characters/FrameV2/swordmaster_body.png" id="1"]
+
+[sub_resource type="AtlasTexture" id="frame0"]
+atlas = ExtResource("1")
+region = Rect2(0, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame1"]
+atlas = ExtResource("1")
+region = Rect2(256, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame2"]
+atlas = ExtResource("1")
+region = Rect2(512, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame3"]
+atlas = ExtResource("1")
+region = Rect2(768, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame4"]
+atlas = ExtResource("1")
+region = Rect2(1024, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame5"]
+atlas = ExtResource("1")
+region = Rect2(1280, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="frame6"]
+atlas = ExtResource("1")
+region = Rect2(1536, 0, 256, 256)
+
+[resource]
+animations = [
+{"name": &"idle", "loop": true, "speed": 1.5, "frames": [{"duration": 1.0, "texture": SubResource("frame0")},{"duration": 1.0, "texture": SubResource("frame1")},]},
+{"name": &"walk", "loop": true, "speed": 8.0, "frames": [{"duration": 1.0, "texture": SubResource("frame2")},{"duration": 1.0, "texture": SubResource("frame3")},]},
+{"name": &"attack", "loop": false, "speed": 9.0, "frames": [{"duration": 1.0, "texture": SubResource("frame4")},{"duration": 1.0, "texture": SubResource("frame5")},{"duration": 1.0, "texture": SubResource("frame0")},]},
+{"name": &"hurt", "loop": false, "speed": 8.0, "frames": [{"duration": 1.0, "texture": SubResource("frame6")},{"duration": 1.0, "texture": SubResource("frame0")},]},
+{"name": &"death", "loop": false, "speed": 1.0, "frames": [{"duration": 1.0, "texture": SubResource("frame6")},]},
+]
