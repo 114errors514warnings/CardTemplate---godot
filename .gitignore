@@ -59,6 +59,10 @@ _tmp/
 # 仅本机可用的工程记忆，换个机器无意义 → 不入库
 .ai-memory/
 
+# HarnessIntelligenceLayer（HIL）本地索引（.hil/index.json 等）
+# 与 .ai-memory/ 同类：本机 AI 工具产物，删掉可重建 → 不入库
+.hil/
+
 # 代码侧历史实现归档（`*/_archived/`，文件后缀 `.cs.archived` 已退出编译）
 # 用户口径 2026-10-02：**只存在本地**，供人或 AI 回看旧实现，不入库；
 # 目录内 `归档说明.md` 记归档日期与原因（替代 git 历史）。
