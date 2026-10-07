@@ -745,6 +745,15 @@ public partial class MapScene : Control
 	/// <summary>起点格 Id。</summary>
 	public int StartNodeId => board?.StartNodeId ?? -1;
 
+	/// <summary>
+	/// 固定地点格（村庄）的 NodeId（-1 = 本图没有该点）；内容按 `FixedNode.csv` 的 `Village` 行解析。
+	/// 供 AI 接口 / 烟测直接落到地点关（§33 统一关卡通道：地点关与战斗关同级走 `Level` 通道）。
+	/// </summary>
+	public int VillageNodeId => board?.VillageNodeId ?? -1;
+
+	/// <summary>商人格的 NodeId（-1 = 本图没有该点）；内容按 `FixedNode.csv` 的 `Merchant` 行解析。</summary>
+	public int MerchantNodeId => board?.MerchantNodeId ?? -1;
+
 	/// <summary>按玩家口径进入一个可达格（走 `OnNodeClicked` → 前置闸门 → `EnterNode`）。</summary>
 	public bool TryEnterReachableNode(int nodeId)
 	{
@@ -774,7 +783,10 @@ public partial class MapScene : Control
 		bool previousReadOnly = readOnlyMode;
 		readOnlyMode = false;
 		try { EnterNode(nodeId); }
-		finally { readOnlyMode = previousReadOnly; }
+		// 进入内容时 `RunFlowScene.StartLevel` 会把地图设成只读（内容进行中）—— 那一笔**不能**被还原：
+		// 否则调试通道一进内容，地图就停在可点状态，与「玩家自己点格进入」的结果不一致
+		// （2026-10-07 地点关烟测实测：进村庄后 `IsReadOnly` 仍是 false）。
+		finally { readOnlyMode = previousReadOnly || readOnlyMode; }
 		return true;
 	}
 

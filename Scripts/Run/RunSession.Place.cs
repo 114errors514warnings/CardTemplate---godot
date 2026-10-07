@@ -23,14 +23,21 @@ public partial class RunSession
 	/// <summary>地点关里队伍所在格的 NodeId（-1 = 未进入）；村庄与商人共用同一处落档。</summary>
 	public int PlacePlayerNodeId => Current?.PlacePlayerNodeId ?? -1;
 
-	/// <summary>写地点关里队伍所在格并落档（走一格落一次，读档重进回到同一格）。</summary>
-	public void SetPlacePlayerNodeId(int nodeId)
+	/// <summary>上面那个格号属于哪个地点关（`LevelId`；空串 = 没有有效落点）；格号只在同一张版图内有意义。</summary>
+	public string PlacePlayerLevelId => Current?.PlacePlayerLevelId ?? string.Empty;
+
+	/// <summary>
+	/// 写地点关里队伍所在格并落档（走一格落一次，读档重进回到同一格）。
+	/// `levelId` 与格号一起落：换关卡必须回入口格（2026-10-07，防跨地点串味）。
+	/// </summary>
+	public void SetPlacePlayerNodeId(string levelId, int nodeId)
 	{
 		if (Current == null)
 		{
 			return;
 		}
 
+		Current.PlacePlayerLevelId = levelId ?? string.Empty;
 		Current.PlacePlayerNodeId = nodeId;
 		Save();
 	}

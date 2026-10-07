@@ -88,6 +88,14 @@ public sealed class RunSaveData
 	/// </summary>
 	public int PlacePlayerNodeId { get; set; } = -1;
 
+	/// <summary>
+	/// 上面那个格号属于**哪个地点关**（`LevelId`；空串 = 没有有效落点）。
+	/// 2026-10-07 补：村庄与商人共用同一份走格逻辑，但**格号只在同一张版图里有意义** —— 不记关卡 Id
+	/// 就会出现「从村庄出来再进商人，队伍落在商人版图的同号格」（实测落成格 5，不是入口格）。
+	/// 纯新增字段、不升 `SchemaVersion`（与 §35 的 `PlacePlayerNodeId` 同一口径）。
+	/// </summary>
+	public string PlacePlayerLevelId { get; set; } = string.Empty;
+
 	// ── 待处理战斗（InBattleStart）──
 	/// <summary>遭遇层目录名（第一层…）。</summary>
 	public string PendingEncounterLayer = string.Empty;

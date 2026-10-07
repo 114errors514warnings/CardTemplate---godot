@@ -34,7 +34,7 @@ $p = Start-Process -FilePath $exe -PassThru -ArgumentList @(
 
 | 项 | 口径 |
 |---|---|
-| 段名 | `event-battle`（危险事件战斗选项点下即进战）、`time-point-camp`（时间点闸门 / 营地 / 食物烹饪 / 休息结算）；大小写不敏感 |
+| 段名 | `event-battle`（危险事件战斗选项点下即进战）、`time-point-camp`（时间点闸门 / 营地 / 食物烹饪 / 休息结算）、`place`（地点关：村庄设施 tips / 锻铁铺 / 树林搜寻 / 商人买入 / 离开格回地图）；大小写不敏感 |
 | 产物行 | 成功 `RUN_FLOW_UI_SMOKE_SEGMENT_PASS: <段名>`（退出码 0）；失败 `RUN_FLOW_UI_SMOKE_SEGMENT_FAIL: <段名>: <原因>`（退出码 1） |
 | 断言口径 | 与整套**共用同一条**建档 / 存档备份 / 收尾路径，不缩水 |
 | 新增段 | 在 `RunFlowScene.RunUiSmokeSegment` 的 switch 里登记一行，段方法自带「摆场景 → 断言 → 收尾」 |

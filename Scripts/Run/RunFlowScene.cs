@@ -668,6 +668,14 @@ public partial class RunFlowScene : Control
         HexBattleScene battle = FindBattle(host);
         if (battle == null || battle.MapView == null)
         {
+            // 地点关（村庄 / 商人）本就没有战场：表现由 `PlaceLevelView` 负责，没有「战场接管按钮栏」这一步。
+            // 少了这个早退，每次进地点关都会跑满 `AttachMapRetryLimit` 次 deferred 重试并打一条
+            // 「内容没有战场视图」的日志（2026-10-07 地点关烟测实测；行为与「重试到上限后放弃」等价）。
+            if (activeContent != null && GodotObject.IsInstanceValid(activeContent) && activeContent.IsPlaceLevel)
+            {
+                return;
+            }
+
             // 部分内容没有战场视图（读档重进的结算界面）：限量重试，避免 deferred 自我重排无限自旋，
             // 否则退出游戏时挂起的 deferred 调用会落到正在拆除的实例上（native 访问违例）。
             if (++attachMapRetries > AttachMapRetryLimit)
@@ -1044,8 +1052,12 @@ public partial class RunFlowScene : Control
                     Require(RunSession.Instance?.Current != null, "单段烟测需要一局进行中的本局。");
                     await RunTimePointAndCampSmoke();
                     break;
+                case "place":
+                    Require(RunSession.Instance?.Current != null, "单段烟测需要一局进行中的本局。");
+                    await RunPlaceFlowSmoke(RunSession.Instance);
+                    break;
                 default:
-                    throw new InvalidOperationException($"未知的单段烟测段名「{segment}」；可用段：event-battle、time-point-camp。");
+                    throw new InvalidOperationException($"未知的单段烟测段名「{segment}」；可用段：event-battle、time-point-camp、place。");
             }
             GD.Print($"RUN_FLOW_UI_SMOKE_SEGMENT_PASS: {segment}");
             RestoreRunSaveFile();
@@ -2022,8 +2034,11 @@ public partial class RunFlowScene : Control
             await RunEventBattleChoiceSmoke(run);
 
             await RunTimePointAndCampSmoke();
+
+            // 地点关（村庄 / 商人，§33 统一关卡通道）：进地点格 → 设施 tips / 商人界面 → 踏离开格回地图。
+            await RunPlaceFlowSmoke(run);
             RunSessionReconstructionSmoke();
-            GD.Print("RUN_FLOW_UI_SMOKE_PASS: canvas layers, map modal input, debug close, map return after content, camp food/cook, run session reconstruction");
+            GD.Print("RUN_FLOW_UI_SMOKE_PASS: canvas layers, map modal input, debug close, map return after content, camp food/cook, place (village/merchant), run session reconstruction");
             RestoreRunSaveFile();
             GetTree().Quit();
         }
@@ -2238,7 +2253,89 @@ public partial class RunFlowScene : Control
         GD.Print($"RUN_FLOW_UI_SMOKE_CAMP: 时间点闸门 + 营地休息两轮通过（当前 {RunTimePoints.FormatDayAndRemaining(state.TimePoints)}）。");
     }
 
+    /// <summary>
+    /// **地点关 UI 烟测段**（2026-10-07，10 月施工文档 §33 统一关卡通道）：村庄 + 商人两截，
+    /// 各截自带「摆场景 → 断言」，段尾把世界收回地图态（段间纪律见 Skill/smoke-test-choice §五）。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunPlaceFlowSmoke(RunSession run)
+    {
+        StagePlaceSmoke(run);
+        await RunPlaceVillageSmoke(run);
+        await RunPlaceVillageLodgingSmoke(run);
+        await RunPlaceVillageFacilitySmoke(run);
+        await RunPlaceMerchantSmoke(run);
+        await RunPlaceMerchantBuySmoke(run);
+    }
 
+    /// <summary>
+    /// 地点关烟测的摆场景（同步、不改任何生产口径）：清两处地点格的「已访问」标记（地点关是一次性节点，
+    /// 不清就会按「已访问格」跳过内容）→ 清队伍落点（落点只在同一张版图内有意义）→ 时间点摆「当天满额」
+    /// （进程 =（第 N 天 − 1）× PointsPerDay；直接写字段 = 营地段口径，不走 `TryAddTimePoints`）→
+    /// 角色半血（旅馆回复断言要有实际回复量）→ 金币 20。
+    /// </summary>
+    private void StagePlaceSmoke(RunSession run)
+    {
+        Require(run?.Current != null, "地点关烟测需要一局进行中的本局。");
+        RunSaveData state = run.Current;
+        state.MapState.VisitedNodeIds.Remove(map.VillageNodeId);
+        state.MapState.VisitedNodeIds.Remove(map.MerchantNodeId);
+        state.MapState.TimePoints = (state.MapState.CurrentDay - 1) * RunTimePoints.PointsPerDay;
+        state.MapState.PendingRestDay = false;
+        state.MapState.RestRemainingTimePoints = RunTimePoints.PointsPerDay;
+        foreach (RunCharacterSlotSave slot in state.CharacterSlots) slot.CurrentHp = Math.Max(1, slot.MaxHp / 2);
+        Require(run.DebugSetGold(20, out string goldError), $"地点关烟测摆金币应成功：{goldError}");
+        run.SetPlacePlayerNodeId(string.Empty, -1);
+        map.RefreshVisitedFlags();
+    }
+
+    /// <summary>村庄截（一）：进村庄格（关卡通道 + `PlaceLevelView`）→ 旅馆门口格 tips（文案 / 按钮 / 截图）。</summary>
+    private async System.Threading.Tasks.Task RunPlaceVillageSmoke(RunSession run)
+    {
+        ReturnToSelectableMap();
+        await WaitFrames(2);
+        RunSaveData state = run.Current;
+        Require(run.IsOnMap && map.Visible && !map.IsReadOnly,
+            $"地点关烟测应从可选地图起步，实际 {state.GameMode} / 可见 {map.Visible} / 只读 {map.IsReadOnly}。");
+        int villageNode = map.VillageNodeId;
+        Require(villageNode >= 0 && map.MerchantNodeId >= 0, "本层地图应同时有村庄格与商人格。");
+
+        // ① 进村庄格：一次移动代价 + 非战斗地点关形态 + 版图规模对配表。
+        float moveCost = GameVariables.Load().MoveTimePointCost ?? RunTimePoints.MoveCost;
+        float beforeEnter = state.MapState.TimePoints;
+        Require(map.TryForceEnterNode(villageNode), "村庄格应能强制进入（调试通道）。");
+        await WaitFrames(8);
+        PlaceLevelView place = PlaceView;
+        Require(place != null && GodotObject.IsInstanceValid(place), "进入村庄格应挂上地点视图 `PlaceLevelView`。");
+        Require(string.Equals(place.LevelId, "F1-V-001", StringComparison.Ordinal)
+                && string.Equals(place.LevelType, "Village", StringComparison.OrdinalIgnoreCase),
+            $"村庄格应解析到 F1-V-001 / Village，实际 {place.LevelId} / {place.LevelType}。");
+        Require(ContentKind == "place", $"地点关的内容形态应报 place，实际 {ContentKind}。");
+        Require(map.IsReadOnly && !mapSelectable && !run.IsOnMap,
+            $"地点关进行中：地图必须只读不可选、本局不停在 OnMap，实际 只读 {map.IsReadOnly} / 可选 {mapSelectable} / 模式 {state.GameMode}。");
+        Require(Math.Abs(state.MapState.TimePoints - (beforeEnter + moveCost)) < 1e-4f,
+            $"进地点格应按表值扣移动代价 {RunTimePoints.Format(moveCost)}，实际 {beforeEnter} → {state.MapState.TimePoints}。");
+        Require(place.CellCount == 37 && place.GroupCount == 7 && place.DoorCount == 7,
+            $"F1-V-001 应是 37 格（R=3 六边形整版图）/ 7 交互点 / 7 门口格，实际 {place.CellCount} / {place.GroupCount} / {place.DoorCount}。");
+        int entranceNode = place.DoorNodeId(CardSimulator.Battlefield.InteractPointCatalog.EntranceId);
+        Require(entranceNode >= 0 && place.PartyNodeId == entranceNode,
+            $"地点关应从入口格开局（期望 {entranceNode}，实际 {place.PartyNodeId}）。");
+        Require(!place.HasOpenModal, "刚进地点关不该有界面开着（确认 tips 初值必须不可见）。");
+        int innDoor = place.DoorNodeId("Inn");
+        Require(innDoor >= 0, "旅馆应有门口格（村庄案 §二）。");
+
+        // ② 旅馆：门口格 → 确认 tips。
+        Require(place.TryMoveToNode(innDoor), "应能走向旅馆门口格（沿可走格自动寻路）。");
+        float beforeWalk = state.MapState.TimePoints;
+        await WaitUntilPlaceIdle(place);
+        Require(!place.IsMoving && place.IsTipsOpen, "踏入旅馆门口格应弹出确认 tips。");
+        Require(Math.Abs(state.MapState.TimePoints - beforeWalk) < 1e-4f, "地点内走格不得消耗时间点（村庄案 §四）。");
+        Require(place.Tips.TitleText == "旅馆" && place.Tips.EnterButtonText == PlaceConfirmTips.EnterText,
+            $"旅馆 tips 标题 / 按钮不对：{place.Tips.TitleText} / {place.Tips.EnterButtonText}。");
+        Require(place.Tips.EnterEnabled && place.Tips.CostText == VillageLodging.DescribeCost(true)
+                && place.Tips.EffectText == VillageLodging.DescribeEffect(run.Current, true),
+            $"旅馆 tips 文案必须与 VillageLodging 同源：{place.Tips.CostText} / {place.Tips.EffectText} / 可进入 {place.Tips.EnterEnabled}。");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-place-village-tips.png");
+    }
 
     /// <summary>
     /// 营地食物 / 烹饪面板（2026-10-02 批 C）的端到端断言：
@@ -2385,6 +2482,240 @@ public partial class RunFlowScene : Control
         Require(camp.FoodPanelVisible && camp.PlannedEntryCount == 3, "收尾应回到食物面板且草稿保持 3 件食物。");
         GD.Print($"RUN_FLOW_UI_SMOKE_CAMP_FOOD: 篝火饱食度 {camp.PlannedSatiety}/10（计入效果 {camp.PlannedEffectiveSatiety}）、"
             + $"本次休息已烹饪 {camp.CookedThisRest}/2、已放行配方 {CampScene.EnabledRecipes().Count} 条。");
+    }
+
+    /// <summary>
+    /// 村庄截（二）：锻铁铺门口格（踏入即开界面）→ 走回旅馆门口格看「本局只能进一次」的禁用态 tips
+    /// → 树林一次搜寻（扣表值时间点 + 材料入包）→ 踏离开格回可选地图。
+    /// 旅馆 / 锻铁铺 / 树林的门口格距离都靠「离开格只作寻路目的地」保证：否则自动寻路会穿出村庄。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunPlaceVillageFacilitySmoke(RunSession run)
+    {
+        RunSaveData state = run.Current;
+        PlaceLevelView place = PlaceView;
+        Require(place != null && GodotObject.IsInstanceValid(place) && state != null,
+            "村庄截（二）应接在「已进村庄」之后（地点视图与存档都要在）。");
+        int smithyDoor = place.DoorNodeId("Smithy");
+        int forestDoor = place.DoorNodeId("Forest");
+        int exitDoor = place.DoorNodeId(CardSimulator.Battlefield.InteractPointCatalog.ExitId);
+        Require(smithyDoor >= 0 && forestDoor >= 0 && exitDoor >= 0,
+            $"锻铁铺 / 树林 / 离开格都应有门口格，实际 {smithyDoor} / {forestDoor} / {exitDoor}。");
+
+        // ③ 锻铁铺（踏入即开专用界面）→ 关掉继续走。
+        Require(place.TryMoveToNode(smithyDoor), "应能走向锻铁铺门口格。");
+        await WaitUntilPlaceIdle(place);
+        Require(place.IsSmithyOpen, "踏入锻铁铺门口格应打开锻铁铺界面。");
+        Require(place.CloseOpenModals(), "锻铁铺界面应能被关掉（AI 接口 `CloseOpenModals`）。");
+        await WaitFrames(1);
+        Require(!place.HasOpenModal, "关掉锻铁铺后不该再有界面开着。");
+
+        // ③ b 走回旅馆门口格：本局已用 → tips 必须禁用并给原因，「稍后」不得改任何状态。
+        int innDoor = place.DoorNodeId("Inn");
+        Require(place.TryMoveToNode(innDoor), "应能走回旅馆门口格（走开即解除抑制，可再次触发）。");
+        await WaitUntilPlaceIdle(place);
+        Require(place.IsTipsOpen && place.Tips.TitleText == "旅馆", "走回旅馆门口格应重新弹 tips。");
+        Require(!place.Tips.EnterEnabled && place.Tips.CostText == VillageLodging.InnUsedText,
+            $"本局已用过旅馆 → tips 必须禁用并给原因「{VillageLodging.InnUsedText}」，实际"
+            + $"「{place.Tips.CostText}」/可进入 {place.Tips.EnterEnabled}。");
+        int goldBeforeDecline = state.Gold;
+        Require(!place.AcceptTips(), "禁用态下点「进入」不得生效。");
+        Require(place.DeclineTips(), "点「稍后」应关掉 tips。");
+        Require(state.Gold == goldBeforeDecline && !place.IsTipsOpen, "点「稍后」不得改任何状态。");
+
+        // ④ 树林：一次搜寻 = 扣表值时间点 + 材料入包（同材料合并）。
+        int materialsBefore = MaterialCountOf(state);
+        Require(place.TryMoveToNode(forestDoor), "应能走向树林门口格。");
+        await WaitUntilPlaceIdle(place);
+        Require(place.IsTipsOpen && place.Tips.TitleText == "树林", $"踏入树林门口格应弹「树林」tips，实际「{place.Tips.TitleText}」。");
+        float beforeForage = state.MapState.TimePoints;
+        Require(place.AcceptTips(), "点「进入」应执行一次搜寻。");
+        await WaitFrames(3);
+        Require(Math.Abs(state.MapState.TimePoints - (beforeForage + VillageForage.TimePointCost)) < 1e-4f,
+            $"树林搜寻应按表值扣 {RunTimePoints.Format(VillageForage.TimePointCost)} 时间点，实际 {beforeForage} → {state.MapState.TimePoints}。");
+        Require(MaterialCountOf(state) == materialsBefore + VillageForage.PicksPerSearch,
+            $"一次搜寻应入包 {VillageForage.PicksPerSearch} 件材料（同材料合并），实际 {materialsBefore} → {MaterialCountOf(state)}。");
+        Require(place.CurrentFloatText.StartsWith("搜寻："), $"搜寻后应有结果浮字，实际「{place.CurrentFloatText}」。");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-place-village-forest.png");
+
+        // ⑤ 踏离开格：节点落已访问 → 回可选地图（内容不销毁，地图铺在关卡之上）。
+        Require(place.TryMoveToNode(exitDoor), "应能走向离开格。");
+        await WaitUntilPlaceIdle(place);
+        await WaitFrames(4);
+        int villageNode = map.VillageNodeId;
+        Require(state.MapState.VisitedNodeIds.Contains(villageNode), "踏离开格后村庄格应落「已访问」。");
+        Require(place.PartyNodeId == exitDoor, $"离开时应站在离开格上（期望 {exitDoor}，实际 {place.PartyNodeId}）。");
+        Require(run.IsOnMap && map.Visible && !map.IsReadOnly && mapSelectable,
+            $"地点关完成应回可选地图，实际 {state.GameMode} / 可见 {map.Visible} / 只读 {map.IsReadOnly} / 可选 {mapSelectable}。");
+        GD.Print($"RUN_FLOW_UI_SMOKE_PLACE_VILLAGE: 旅馆过夜 / 锻铁铺 / 树林搜寻 / 离开格通过"
+            + $"（当前 {RunTimePoints.FormatDayAndRemaining(state.MapState.TimePoints)}）。");
+    }
+
+    /// <summary>村庄截（一·b）：旅馆 tips 点「进入」= 过夜结算（金币 / 逐步回复 / 新一天 / 状态位 / 浮字）。</summary>
+    private async System.Threading.Tasks.Task RunPlaceVillageLodgingSmoke(RunSession run)
+    {
+        RunSaveData state = run.Current;
+        PlaceLevelView place = PlaceView;
+        Require(place != null && GodotObject.IsInstanceValid(place) && state != null && place.IsTipsOpen,
+            "旅馆过夜断言应接在「tips 已弹出」之后。");
+        int dayBeforeLodge = state.MapState.CurrentDay;
+        int goldBeforeLodge = state.Gold;
+        int[] hpBeforeLodge = new int[state.CharacterSlots.Count];
+        int[] healExpected = new int[state.CharacterSlots.Count];
+        float innRatio = VillageLodging.HealRatio(true, VillageLodging.IsNight(run.Current));
+        for (int i = 0; i < state.CharacterSlots.Count; i++)
+        {
+            hpBeforeLodge[i] = state.CharacterSlots[i].CurrentHp;
+            healExpected[i] = VillageLodging.PreviewHeal(state.CharacterSlots[i], innRatio);
+        }
+
+        Require(place.AcceptTips(), "点 tips 的「进入」应生效（金币足够）。");
+        await WaitFrames(3);
+        Require(!place.IsTipsOpen && state.Gold == goldBeforeLodge - VillageLodging.InnGold,
+            $"过夜应关掉 tips 并按旅馆案扣 {VillageLodging.InnGold} 金币，实际 开着={place.IsTipsOpen} / 金币 {goldBeforeLodge} → {state.Gold}。");
+        Require(state.MapState.CurrentDay == dayBeforeLodge + 1 && !state.MapState.PendingRestDay,
+            $"过夜应推进新一天并清待休息，实际 第 {state.MapState.CurrentDay} 天 / 待休息 {state.MapState.PendingRestDay}。");
+        Require(state.VillageState.InnUsed && state.VillageState.ChosenLodging == RunLodgingChoice.Inn,
+            $"过夜应落「本局已用 + 选定旅馆」，实际 {state.VillageState.InnUsed} / {state.VillageState.ChosenLodging}。");
+        for (int i = 0; i < state.CharacterSlots.Count; i++)
+        {
+            int expected = Math.Min(state.CharacterSlots[i].MaxHp, hpBeforeLodge[i] + healExpected[i]);
+            Require(state.CharacterSlots[i].CurrentHp == expected,
+                $"旅馆回复应按 VillageLodging 口径（槽 {i} 期望 {expected}，实际 {state.CharacterSlots[i].CurrentHp}）。");
+        }
+        Require(place.CurrentFloatText.Contains("旅馆过夜"), $"过夜后应有结果浮字，实际「{place.CurrentFloatText}」。");
+    }
+
+    /// <summary>商人截（二）：买一件（扣金币 + 该格转已售出）→ 同一格再买给「已售出」→ 关界面 → 踏离开格回可选地图。</summary>
+    private async System.Threading.Tasks.Task RunPlaceMerchantBuySmoke(RunSession run)
+    {
+        RunSaveData state = run.Current;
+        PlaceLevelView shop = PlaceView;
+        Require(shop != null && GodotObject.IsInstanceValid(shop) && state != null, "商人截（二）应接在「商人界面已打开」之后。");
+        MerchantUi merchantUi = shop.Merchant;
+        Require(merchantUi?.IsOpen == true && state.MerchantState != null, "商人截（二）需要已打开的界面与已生成的货架快照。");
+
+        // 挑第一件「未售出且买得起」的货架格：价格按**快照**读（生成时锁定），不猜表值。
+        MerchantCategory buyCategory = default;
+        int buySlot = -1;
+        int buyPrice = 0;
+        foreach (MerchantCategory category in MerchantStock.CategoryOrder)
+        {
+            for (int slot = 0; slot < merchantUi.StockSlotCount(category); slot++)
+            {
+                RunMerchantStockEntrySave entry = MerchantStock.FindEntry(state.MerchantState.Stock, category, slot);
+                if (entry != null && !entry.Sold && entry.Price <= state.Gold)
+                {
+                    buyCategory = category;
+                    buySlot = slot;
+                    buyPrice = entry.Price;
+                    break;
+                }
+            }
+
+            if (buySlot >= 0) break;
+        }
+
+        Require(buySlot >= 0, $"金币 {state.Gold} 应至少买得起货架上的一件（否则本截摆的初始金币不够）。");
+        int goldBeforeBuy = state.Gold;
+        Require(merchantUi.BuyStock(buyCategory, buySlot), $"买下货架 {buyCategory} #{buySlot} 应成功。");
+        Require(state.Gold == goldBeforeBuy - buyPrice, $"买货应扣该格价格 {buyPrice}，实际 {goldBeforeBuy} → {state.Gold}。");
+        Require(MerchantStock.FindEntry(state.MerchantState.Stock, buyCategory, buySlot).Sold, "买下后该格必须转「已售出」。");
+        Require(merchantUi.HintText.Contains("买入完成"), $"买成功后提示行应给结果，实际「{merchantUi.HintText}」。");
+        Require(!merchantUi.BuyStock(buyCategory, buySlot), "同一格再买一次必须被拒。");
+        Require(merchantUi.HintText == MerchantStock.SoldOutText,
+            $"再买同一格应给「{MerchantStock.SoldOutText}」，实际「{merchantUi.HintText}」。");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-place-merchant-bought.png");
+
+        Require(shop.CloseMerchant(), "商人界面应能关掉（AI 接口 `CloseMerchant`）。");
+        await WaitFrames(1);
+        Require(!shop.HasOpenModal, "关掉商人界面后不该再有界面开着。");
+        int shopExit = shop.DoorNodeId(CardSimulator.Battlefield.InteractPointCatalog.ExitId);
+        Require(shopExit >= 0 && shop.TryMoveToNode(shopExit), "应能走向商人的离开格。");
+        await WaitUntilPlaceIdle(shop);
+        await WaitFrames(4);
+        Require(state.MapState.VisitedNodeIds.Contains(map.MerchantNodeId), "踏离开格后商人格应落「已访问」。");
+        Require(run.IsOnMap && map.Visible && !map.IsReadOnly && mapSelectable,
+            $"商人地点关完成应回可选地图，实际 {state.GameMode} / 可见 {map.Visible} / 只读 {map.IsReadOnly} / 可选 {mapSelectable}。");
+        Require(run.MerchantSnapshotReady, "商人快照不因离开而重置（商人节点只进一次）。");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-place-back-map.png");
+        GD.Print($"RUN_FLOW_UI_SMOKE_PLACE_MERCHANT: 相邻触发 / 买入 / 已售出 / 离开格通过"
+            + $"（当前 {RunTimePoints.FormatDayAndRemaining(state.MapState.TimePoints)}）。");
+
+        // 段尾收尾（段间纪律）：把世界收回地图态。
+        ApiBackToMap();
+        await WaitFrames(2);
+        Require(run.IsOnMap && map.Visible && !map.IsReadOnly && PlaceView == null,
+            "地点关烟测段尾必须把世界收回地图态（内容宿主已清空）。");
+    }
+
+    /// <summary>等地点关的自动寻路走完（每格 0.12 s 是秒级：写死帧数在低帧率下会假失败）。</summary>
+    private async System.Threading.Tasks.Task WaitUntilPlaceIdle(PlaceLevelView place)
+    {
+        int frames = 0;
+        while (place != null && GodotObject.IsInstanceValid(place) && place.IsMoving && frames++ < 600)
+        {
+            await WaitFrames(1);
+        }
+
+        Require(place == null || !GodotObject.IsInstanceValid(place) || !place.IsMoving, "地点关自动寻路应在限帧内走完。");
+    }
+
+    /// <summary>背包里的材料总件数（树林搜寻入包断言用；同材料会合并成一条，所以看件数而不是条目数）。</summary>
+    private static int MaterialCountOf(RunSaveData state)
+    {
+        int total = 0;
+        foreach (RunBagEntrySave entry in state.BagEntries)
+        {
+            if (entry.CategoryEnum == BagCategory.Material) total += entry.Count;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// 商人截（一）：进商人格（换地点必须回入口格）→ 走相邻格自动开界面（商人案 §二）→ 快照本局一次
+    /// → 界面格数对 `MerchantCatalog.StockSlots`。
+    /// </summary>
+    private async System.Threading.Tasks.Task RunPlaceMerchantSmoke(RunSession run)
+    {
+        RunSaveData state = run.Current;
+        Require(state != null && run.IsOnMap && map.Visible && !map.IsReadOnly,
+            "商人截应接在「村庄已回到可选地图」之后。");
+        int merchantNode = map.MerchantNodeId;
+        Require(merchantNode >= 0, "本层地图应有商人格。");
+        Require(run.DebugSetGold(60, out string goldError), $"商人截摆金币应成功：{goldError}");
+
+        float moveCost = GameVariables.Load().MoveTimePointCost ?? RunTimePoints.MoveCost;
+        float beforeMerchant = state.MapState.TimePoints;
+        Require(map.TryForceEnterNode(merchantNode), "商人格应能强制进入（调试通道）。");
+        await WaitFrames(8);
+        PlaceLevelView shop = PlaceView;
+        Require(shop != null && GodotObject.IsInstanceValid(shop), "进商人格应挂上地点视图 `PlaceLevelView`。");
+        Require(string.Equals(shop.LevelId, "F1-M-001", StringComparison.Ordinal)
+                && string.Equals(shop.LevelType, "Merchant", StringComparison.OrdinalIgnoreCase),
+            $"商人格应解析到 F1-M-001 / Merchant，实际 {shop.LevelId} / {shop.LevelType}。");
+        Require(shop.CellCount == 37 && shop.GroupCount == 3 && shop.DoorCount == 2,
+            $"F1-M-001 应是 37 格（R=3 六边形整版图）/ 3 交互点 / 2 门口格，实际 {shop.CellCount} / {shop.GroupCount} / {shop.DoorCount}。");
+        Require(Math.Abs(state.MapState.TimePoints - (beforeMerchant + moveCost)) < 1e-4f, "进商人格同样只扣一次移动代价。");
+        Require(shop.PartyNodeId == shop.DoorNodeId(CardSimulator.Battlefield.InteractPointCatalog.EntranceId),
+            "换地点必须回该地点的入口格开局（格号不得跨版图串味）。");
+        Require(!shop.IsMerchantOpen && !run.MerchantSnapshotReady,
+            "刚进商人版图（入口格）不该开着界面、也不该已生成快照（快照在界面第一次打开时生成）。");
+
+        int merchantStand = shop.AdjacentWalkableNodeId(CardSimulator.Battlefield.InteractPointCatalog.MerchantId);
+        Require(merchantStand >= 0, "商人版图上应存在与商人相邻的可走格。");
+        Require(shop.TryMoveToNode(merchantStand), "应能走到商人相邻格。");
+        await WaitUntilPlaceIdle(shop);
+        Require(shop.IsMerchantOpen, "走到与商人相邻的格应自动打开商人界面（相邻触发，商人案 §二）。");
+        Require(run.MerchantSnapshotReady, "商人界面打开后货架 / 卡包快照必须已生成（本局一次）。");
+        MerchantUi merchantUi = shop.Merchant;
+        Require(merchantUi != null && merchantUi.PackCount == 5
+                && merchantUi.StockSlotCount(MerchantCategory.Material) == 3 && merchantUi.StockSlotCount(MerchantCategory.Food) == 3
+                && merchantUi.StockSlotCount(MerchantCategory.Equipment) == 3 && merchantUi.StockSlotCount(MerchantCategory.Item) == 3
+                && merchantUi.StockSlotCount(MerchantCategory.Key) == 1,
+            "商人格数应按 MerchantCatalog.StockSlots（材料 / 食物 / 装备 / 道具各 3 + 钥匙 1 + 5 个卡包）。");
+        Require(merchantUi.HintText == MerchantUi.DefaultHintText, $"刚打开应给默认提示行，实际「{merchantUi.HintText}」。");
+        await CaptureSmoke("res://Tests/run-flow-ui-smoke-place-merchant.png");
     }
 
     /// <summary>

@@ -144,7 +144,10 @@ public partial class PlaceConfirmTips : Control
 
 	private void BuildUi()
 	{
-		panel = new PanelContainer { CustomMinimumSize = new Vector2(BubbleWidth, 0f) };
+		// 初始必须**不可见**：`IsOpen` 读的就是 `panel.Visible` —— 内层面板默认 `true` 会让气泡从建好那刻起
+		// 就被当成「开着」（`HasOpenModal` → 走格与一切交互全被闸住；2026-10-07 实测整个地点关走不动、
+		// 商人也开不出来，玩家观感 =「进不去」）。
+		panel = new PanelContainer { CustomMinimumSize = new Vector2(BubbleWidth, 0f), Visible = false };
 		AddChild(panel);
 
 		MarginContainer margin = new MarginContainer();

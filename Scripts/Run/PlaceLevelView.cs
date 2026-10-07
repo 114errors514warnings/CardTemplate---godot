@@ -316,6 +316,14 @@ public partial class PlaceLevelView : Control
 		return false;
 	}
 
+	/// <summary>
+	/// 该格是不是「离开格」（`Exit` 交互点；踏入即该关卡完成）。
+	/// **它只作寻路目的地、不作中转** —— 允许穿过去 = 点远处的格会被半路送出地点（2026-10-07 烟测实测）。
+	/// </summary>
+	private bool IsExitCell(AxialHex cell) =>
+		cellInfo.TryGetValue(cell, out InteractCellInfo info)
+		&& string.Equals(info.Definition?.DefinitionId, InteractPointCatalog.ExitId, StringComparison.OrdinalIgnoreCase);
+
 	private List<AxialHex> Neighbors(AxialHex cell)
 	{
 		List<AxialHex> found = new List<AxialHex>();
@@ -409,8 +417,12 @@ public partial class PlaceLevelView : Control
 	private void RestorePartyPosition()
 	{
 		party = EntranceCell();
-		int saved = RunSession.Instance?.PlacePlayerNodeId ?? -1;
-		if (saved >= 0 && CellAtNodeId(saved, out AxialHex cell) && walkable.Contains(cell))
+		RunSession session = RunSession.Instance;
+		int saved = session?.PlacePlayerNodeId ?? -1;
+		// 只在**同一地点关**内沿用落点：格号属于关卡版图，跨关沿用会落到另一个地点版图的同号格
+		// （2026-10-07 实测：从村庄出来再进商人，队伍落在商人格 5 而不是入口格 0）。
+		bool sameLevel = string.Equals(session?.PlacePlayerLevelId, LevelId, StringComparison.OrdinalIgnoreCase);
+		if (sameLevel && saved >= 0 && CellAtNodeId(saved, out AxialHex cell) && walkable.Contains(cell))
 		{
 			party = cell;
 		}
@@ -440,7 +452,7 @@ public partial class PlaceLevelView : Control
 		return cells.Count > 0 ? cells[0] : new AxialHex(0, 0);
 	}
 
-	private void SavePartyPosition() => RunSession.Instance?.SetPlacePlayerNodeId(PartyNodeId);
+	private void SavePartyPosition() => RunSession.Instance?.SetPlacePlayerNodeId(LevelId, PartyNodeId);
 
 	/// <summary>这一格点得到的格（BFS 走可走格；按 NodeId 升序）。</summary>
 	public List<int> ReachableNodeIds
@@ -517,6 +529,15 @@ public partial class PlaceLevelView : Control
 		while (queue.Count > 0 && !found)
 		{
 			AxialHex current = queue.Dequeue();
+			// 离开格只作**目的地**：它一旦当前沿，最短路径就会「穿过」离开格 ——
+			// 走格是 `_Process` 里逐格触发 `OnEnteredCell`，穿过它等于半路结算离开
+			// （2026-10-07 烟测实测：从旅馆门口格点树林门口格，最短路径正是穿过离开格）。
+			// 它仍会被发现 / 入队（所以仍能作为目的地被找到），只是不再往外扩展。
+			if (IsExitCell(current))
+			{
+				continue;
+			}
+
 			foreach (AxialHex next in Neighbors(current))
 			{
 				if (!walkable.Contains(next) || !visited.Add(next))
