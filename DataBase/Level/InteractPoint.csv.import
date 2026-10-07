@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://vrdftehp6kkj"
+
+[deps]
+
+files=["res://DataBase/Level/InteractPoint.Name.translation", "res://DataBase/Level/InteractPoint.Trigger.translation", "res://DataBase/Level/InteractPoint.Ui.translation", "res://DataBase/Level/InteractPoint.en.translation", "res://DataBase/Level/InteractPoint.en.translation", "res://DataBase/Level/InteractPoint.en.translation"]
+
+source_file="res://DataBase/Level/InteractPoint.csv"
+dest_files=["res://DataBase/Level/InteractPoint.Name.translation", "res://DataBase/Level/InteractPoint.Trigger.translation", "res://DataBase/Level/InteractPoint.Ui.translation", "res://DataBase/Level/InteractPoint.en.translation", "res://DataBase/Level/InteractPoint.en.translation", "res://DataBase/Level/InteractPoint.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
