@@ -1630,19 +1630,34 @@ public sealed partial class BattlefieldSession : IDisposable
         }
         else if (type == EffectType.Shield)
         {
-            if (spec.TargetPolicy == EnemyTargetPolicy.AllyRange)
-            {
-                foreach (BattleUnitPlacement ally in Occupancy.Placements.Values.Where(p => p.Role == BattlefieldRole.Enemy &&
-                    p.Presence == BattlefieldPresence.Active && BattleRangeResolver.Distance(enemy.Coord, p.Coord) <= spec.AreaRadius))
-                    EffectSystem.ApplyShield(ally.Unit, effect.Skip(1).ToArray());
-            }
-            else EffectSystem.ApplyShield(enemy.Unit, effect.Skip(1).ToArray());
+            // 半径口径与 `AddState` 段共用（P2-25）：`AllyRange` = 半径内友方（含自身），其余策略只罩自己。
+            foreach (BattleUnitPlacement warded in ResolveMonsterAllyTargets(enemy, spec))
+                EffectSystem.ApplyShield(warded.Unit, effect.Skip(1).ToArray());
         }
         else if (type == EffectType.AddState && effect.Length > 2 && Enum.IsDefined(typeof(StateType), effect[2]))
         {
             int stacks = effect.Length > 3 ? effect[3] : 1;
-            StateSystem.AddOrUpdateState(target.Unit, (StateType)effect[2], stacks, ownerUnit: enemy.Unit);
+            // 目标类型取效果段第二位（P2-25）：`3;1;…` 落自身、`3;3;…` 落全体角色、`3;5;…` 落半径内友方、
+            // `3;0;…` 仍按索敌目标（最近角色），因此未改写法位的旧行行为不变。
+            foreach (BattleUnitPlacement stateTarget in EnemyIntentEffectTargets.Resolve(
+                EnemyIntentEffectTargets.ParseTargetType(effect), enemy, target, Occupancy.Placements.Values,
+                spec.TargetPolicy, spec.AreaRadius))
+            {
+                StateSystem.AddOrUpdateState(stateTarget.Unit, (StateType)effect[2], stacks, ownerUnit: enemy.Unit);
+            }
         }
+    }
+
+    /// <summary>怪物「友方（怪物）」效果段的目标（P2-25：把原先只在 `Shield` 分支里的半径迭代提升为通用规则）：
+    /// `TargetPolicy = AllyRange` → 半径 `AreaRadius` 内的**其余**友方怪物 + 自身（`AreaRadius = 0` 即只剩自身）；
+    /// 其余策略 → 只有自身。</summary>
+    private IReadOnlyList<BattleUnitPlacement> ResolveMonsterAllyTargets(BattleUnitPlacement enemy, EnemyIntentSpec spec)
+    {
+        if (spec.TargetPolicy != EnemyTargetPolicy.AllyRange) return new[] { enemy };
+        var targets = new List<BattleUnitPlacement>(EnemyIntentEffectTargets.Resolve(EffectTargetType.AllAllies, enemy,
+            null, Occupancy.Placements.Values, EnemyTargetPolicy.AllyRange, spec.AreaRadius));
+        if (!targets.Contains(enemy)) targets.Add(enemy);
+        return targets;
     }
 
     private IReadOnlyList<BattleUnitPlacement> ResolveEnemyAffectedTargets(BattleUnitPlacement enemy, BattleUnitPlacement target,
