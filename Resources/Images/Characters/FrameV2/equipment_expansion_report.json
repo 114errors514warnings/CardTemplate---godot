@@ -1,0 +1,800 @@
+[
+	{
+		"anchor": [
+			192,
+			228
+		],
+		"cell": [
+			384,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					151,
+					76
+				],
+				"frame": 0,
+				"source_anchor": [
+					135,
+					509
+				],
+				"source_bounds": [
+					66,
+					253,
+					190,
+					511
+				]
+			},
+			{
+				"destination": [
+					148,
+					76
+				],
+				"frame": 1,
+				"source_anchor": [
+					378,
+					509
+				],
+				"source_bounds": [
+					305,
+					253,
+					433,
+					511
+				]
+			},
+			{
+				"destination": [
+					132,
+					101
+				],
+				"frame": 2,
+				"source_anchor": [
+					693,
+					509
+				],
+				"source_bounds": [
+					593,
+					295,
+					828,
+					511
+				]
+			},
+			{
+				"destination": [
+					132,
+					101
+				],
+				"frame": 3,
+				"source_anchor": [
+					1013,
+					509
+				],
+				"source_bounds": [
+					913,
+					295,
+					1143,
+					511
+				]
+			},
+			{
+				"destination": [
+					133,
+					70
+				],
+				"frame": 4,
+				"source_anchor": [
+					1308,
+					509
+				],
+				"source_bounds": [
+					1209,
+					244,
+					1410,
+					511
+				]
+			},
+			{
+				"destination": [
+					101,
+					123
+				],
+				"frame": 5,
+				"source_anchor": [
+					1652,
+					509
+				],
+				"source_bounds": [
+					1501,
+					332,
+					1889,
+					511
+				]
+			},
+			{
+				"destination": [
+					124,
+					146
+				],
+				"frame": 6,
+				"source_anchor": [
+					2030,
+					509
+				],
+				"source_bounds": [
+					1917,
+					371,
+					2146,
+					511
+				]
+			}
+		],
+		"name": "swordmaster_spear_equipped",
+		"source_sha256": "8268c035cc447bd1eaef748db18d1dfaa7955026da029bf2eb91e74927a9b6a5"
+	},
+	{
+		"anchor": [
+			128,
+			228
+		],
+		"cell": [
+			256,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					88,
+					103
+				],
+				"frame": 0,
+				"source_anchor": [
+					144,
+					616
+				],
+				"source_bounds": [
+					50,
+					324,
+					239,
+					619
+				]
+			},
+			{
+				"destination": [
+					91,
+					103
+				],
+				"frame": 1,
+				"source_anchor": [
+					429,
+					616
+				],
+				"source_bounds": [
+					342,
+					324,
+					529,
+					619
+				]
+			},
+			{
+				"destination": [
+					84,
+					103
+				],
+				"frame": 2,
+				"source_anchor": [
+					731,
+					616
+				],
+				"source_bounds": [
+					628,
+					324,
+					822,
+					619
+				]
+			},
+			{
+				"destination": [
+					84,
+					103
+				],
+				"frame": 3,
+				"source_anchor": [
+					1019,
+					616
+				],
+				"source_bounds": [
+					917,
+					324,
+					1113,
+					619
+				]
+			},
+			{
+				"destination": [
+					82,
+					92
+				],
+				"frame": 4,
+				"source_anchor": [
+					1288,
+					616
+				],
+				"source_bounds": [
+					1181,
+					298,
+					1431,
+					619
+				]
+			},
+			{
+				"destination": [
+					81,
+					96
+				],
+				"frame": 5,
+				"source_anchor": [
+					1592,
+					616
+				],
+				"source_bounds": [
+					1482,
+					307,
+					1709,
+					619
+				]
+			},
+			{
+				"destination": [
+					99,
+					117
+				],
+				"frame": 6,
+				"source_anchor": [
+					1856,
+					616
+				],
+				"source_bounds": [
+					1789,
+					357,
+					1980,
+					619
+				]
+			}
+		],
+		"name": "swordmaster_bow_equipped",
+		"source_sha256": "39de74a135e86c8b5e49557fd50c1654573ce732b903adf1abe33006b6fc6d68"
+	},
+	{
+		"anchor": [
+			128,
+			228
+		],
+		"cell": [
+			256,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					90,
+					101
+				],
+				"frame": 0,
+				"source_anchor": [
+					146,
+					616
+				],
+				"source_bounds": [
+					55,
+					311,
+					234,
+					619
+				]
+			},
+			{
+				"destination": [
+					89,
+					101
+				],
+				"frame": 1,
+				"source_anchor": [
+					439,
+					616
+				],
+				"source_bounds": [
+					346,
+					311,
+					524,
+					619
+				]
+			},
+			{
+				"destination": [
+					83,
+					101
+				],
+				"frame": 2,
+				"source_anchor": [
+					726,
+					616
+				],
+				"source_bounds": [
+					619,
+					312,
+					832,
+					619
+				]
+			},
+			{
+				"destination": [
+					81,
+					101
+				],
+				"frame": 3,
+				"source_anchor": [
+					1024,
+					616
+				],
+				"source_bounds": [
+					913,
+					312,
+					1117,
+					619
+				]
+			},
+			{
+				"destination": [
+					73,
+					102
+				],
+				"frame": 4,
+				"source_anchor": [
+					1318,
+					616
+				],
+				"source_bounds": [
+					1187,
+					313,
+					1423,
+					618
+				]
+			},
+			{
+				"destination": [
+					69,
+					110
+				],
+				"frame": 5,
+				"source_anchor": [
+					1613,
+					616
+				],
+				"source_bounds": [
+					1473,
+					332,
+					1716,
+					618
+				]
+			},
+			{
+				"destination": [
+					94,
+					116
+				],
+				"frame": 6,
+				"source_anchor": [
+					1886,
+					616
+				],
+				"source_bounds": [
+					1804,
+					347,
+					1964,
+					619
+				]
+			}
+		],
+		"name": "swordmaster_tome_equipped",
+		"source_sha256": "4ad0e0949a23a5868c25db577452919f87b9452320e364ed782e06a310020a7f"
+	},
+	{
+		"anchor": [
+			192,
+			228
+		],
+		"cell": [
+			384,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					160,
+					67
+				],
+				"frame": 0,
+				"source_anchor": [
+					120,
+					547
+				],
+				"source_bounds": [
+					50,
+					195,
+					185,
+					550
+				]
+			},
+			{
+				"destination": [
+					159,
+					67
+				],
+				"frame": 1,
+				"source_anchor": [
+					345,
+					547
+				],
+				"source_bounds": [
+					274,
+					196,
+					412,
+					550
+				]
+			},
+			{
+				"destination": [
+					132,
+					83
+				],
+				"frame": 2,
+				"source_anchor": [
+					604,
+					547
+				],
+				"source_bounds": [
+					473,
+					231,
+					762,
+					550
+				]
+			},
+			{
+				"destination": [
+					138,
+					97
+				],
+				"frame": 3,
+				"source_anchor": [
+					880,
+					547
+				],
+				"source_bounds": [
+					763,
+					261,
+					1053,
+					550
+				]
+			},
+			{
+				"destination": [
+					111,
+					129
+				],
+				"frame": 4,
+				"source_anchor": [
+					1184,
+					547
+				],
+				"source_bounds": [
+					1007,
+					330,
+					1409,
+					550
+				]
+			},
+			{
+				"destination": [
+					106,
+					124
+				],
+				"frame": 5,
+				"source_anchor": [
+					1587,
+					547
+				],
+				"source_bounds": [
+					1401,
+					320,
+					1898,
+					550
+				]
+			},
+			{
+				"destination": [
+					130,
+					158
+				],
+				"frame": 6,
+				"source_anchor": [
+					2013,
+					550
+				],
+				"source_bounds": [
+					1879,
+					396,
+					2162,
+					553
+				]
+			}
+		],
+		"name": "isera_spear_equipped",
+		"source_sha256": "1da398ab3632f4b8c45626f9bf1f3682cf22e081348f69355130b993730cfcea"
+	},
+	{
+		"anchor": [
+			128,
+			228
+		],
+		"cell": [
+			256,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					98,
+					104
+				],
+				"frame": 0,
+				"source_anchor": [
+					155,
+					565
+				],
+				"source_bounds": [
+					79,
+					254,
+					233,
+					568
+				]
+			},
+			{
+				"destination": [
+					96,
+					105
+				],
+				"frame": 1,
+				"source_anchor": [
+					445,
+					565
+				],
+				"source_bounds": [
+					364,
+					255,
+					531,
+					568
+				]
+			},
+			{
+				"destination": [
+					88,
+					106
+				],
+				"frame": 2,
+				"source_anchor": [
+					753,
+					563
+				],
+				"source_bounds": [
+					653,
+					256,
+					841,
+					566
+				]
+			},
+			{
+				"destination": [
+					84,
+					106
+				],
+				"frame": 3,
+				"source_anchor": [
+					1065,
+					562
+				],
+				"source_bounds": [
+					954,
+					254,
+					1153,
+					565
+				]
+			},
+			{
+				"destination": [
+					93,
+					104
+				],
+				"frame": 4,
+				"source_anchor": [
+					1340,
+					565
+				],
+				"source_bounds": [
+					1253,
+					254,
+					1440,
+					568
+				]
+			},
+			{
+				"destination": [
+					76,
+					105
+				],
+				"frame": 5,
+				"source_anchor": [
+					1678,
+					565
+				],
+				"source_bounds": [
+					1549,
+					256,
+					1818,
+					568
+				]
+			},
+			{
+				"destination": [
+					74,
+					145
+				],
+				"frame": 6,
+				"source_anchor": [
+					2048,
+					565
+				],
+				"source_bounds": [
+					1913,
+					355,
+					2127,
+					568
+				]
+			}
+		],
+		"name": "isera_tome_equipped",
+		"source_sha256": "df727863f058d6a0db684ddf2b20d84502fbaebd0eca38e633282844463f6b28"
+	},
+	{
+		"anchor": [
+			160,
+			228
+		],
+		"cell": [
+			320,
+			256
+		],
+		"frames": [
+			{
+				"destination": [
+					128,
+					103
+				],
+				"frame": 0,
+				"source_anchor": [
+					145,
+					570
+				],
+				"source_bounds": [
+					71,
+					275,
+					219,
+					573
+				]
+			},
+			{
+				"destination": [
+					134,
+					101
+				],
+				"frame": 1,
+				"source_anchor": [
+					379,
+					570
+				],
+				"source_bounds": [
+					319,
+					274,
+					470,
+					573
+				]
+			},
+			{
+				"destination": [
+					118,
+					111
+				],
+				"frame": 2,
+				"source_anchor": [
+					690,
+					563
+				],
+				"source_bounds": [
+					593,
+					290,
+					922,
+					566
+				]
+			},
+			{
+				"destination": [
+					119,
+					112
+				],
+				"frame": 3,
+				"source_anchor": [
+					1029,
+					563
+				],
+				"source_bounds": [
+					933,
+					292,
+					1227,
+					566
+				]
+			},
+			{
+				"destination": [
+					123,
+					61
+				],
+				"frame": 4,
+				"source_anchor": [
+					1320,
+					564
+				],
+				"source_bounds": [
+					1235,
+					174,
+					1453,
+					567
+				]
+			},
+			{
+				"destination": [
+					98,
+					114
+				],
+				"frame": 5,
+				"source_anchor": [
+					1661,
+					564
+				],
+				"source_bounds": [
+					1517,
+					298,
+					1963,
+					567
+				]
+			},
+			{
+				"destination": [
+					107,
+					151
+				],
+				"frame": 6,
+				"source_anchor": [
+					1994,
+					577
+				],
+				"source_bounds": [
+					1870,
+					396,
+					2148,
+					580
+				]
+			}
+		],
+		"name": "isera_greatsword_equipped",
+		"source_sha256": "5666aa4c275fd8df03961874d68b6a2df03cc011d6b5df6826cce07b7ff42966"
+	}
+]

@@ -1,0 +1,120 @@
+{
+	"actions_sha256": "bbcd3c51caaffd00d29981a4eb1053e2e2d8f256df728a8240adb8d55c1606a2",
+	"cell": [
+		384,
+		256
+	],
+	"death_sha256": "52e9164f539d33e15491cbe785e218f266e925e9e48af688f9d8c74600d0cc27",
+	"frames": [
+		{
+			"anchor_x": 148,
+			"destination": [
+				151,
+				101
+			],
+			"frame": 0,
+			"kind": "action",
+			"source_left": 43
+		},
+		{
+			"anchor_x": 403,
+			"destination": [
+				150,
+				101
+			],
+			"frame": 1,
+			"kind": "action",
+			"source_left": 295
+		},
+		{
+			"anchor_x": 700,
+			"destination": [
+				144,
+				103
+			],
+			"frame": 2,
+			"kind": "action",
+			"source_left": 577
+		},
+		{
+			"anchor_x": 980,
+			"destination": [
+				143,
+				103
+			],
+			"frame": 3,
+			"kind": "action",
+			"source_left": 855
+		},
+		{
+			"anchor_x": 1230,
+			"destination": [
+				149,
+				91
+			],
+			"frame": 4,
+			"kind": "action",
+			"source_left": 1121
+		},
+		{
+			"anchor_x": 1580,
+			"destination": [
+				125,
+				116
+			],
+			"frame": 5,
+			"kind": "action",
+			"source_left": 1407
+		},
+		{
+			"anchor_x": 1910,
+			"destination": [
+				151,
+				127
+			],
+			"frame": 6,
+			"kind": "action",
+			"source_left": 1805
+		},
+		{
+			"anchor_x": 225,
+			"destination": [
+				120,
+				78
+			],
+			"frame": 7,
+			"kind": "death",
+			"source_left": 41
+		},
+		{
+			"anchor_x": 730,
+			"destination": [
+				118,
+				118
+			],
+			"frame": 8,
+			"kind": "death",
+			"source_left": 539
+		},
+		{
+			"anchor_x": 1295,
+			"destination": [
+				69,
+				158
+			],
+			"frame": 9,
+			"kind": "death",
+			"source_left": 980
+		},
+		{
+			"anchor_x": 1930,
+			"destination": [
+				55,
+				174
+			],
+			"frame": 10,
+			"kind": "death",
+			"source_left": 1579
+		}
+	]
+}
