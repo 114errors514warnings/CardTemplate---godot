@@ -51,3 +51,6 @@ description: "当开始任何任务、或觉得某层耗时不正常时使用（
 ## 六、收尾把工具事实落档
 
 每轮结束时，把新查实的**工具能力边界 / 坑 / 命令**补进本目录对应 skill，或写进项目记忆（`hil__record_project_memory`）。下一轮不必再试错一遍 —— 本目录就是为此存在的。
+
+- **2026-10-07 实测（Godot 烟测的编排）**：`--battlefield-smoke`（headless）在本机**超过 5 分钟仍没有 PASS 行**（stdout 被缓冲、进程还在跑），而单次 `run_commands` 有 **30 s 上限** → 起 Godot 烟测必须 `Start-Process -PassThru` **后台起 + 分次轮询**（把 PID 落文件，收尾只 `Stop-Process -Id <自己的 PID>`），别指望一条命令里等完。
+- **配表类自检有更便宜的替代**：`dotnet test` 里的**文件级单测**能覆盖同一批不变式且只花 0.2 s —— 例：2026-10-07 的 `PlaceLevelConfigTests` 直接读 `Level/Config/*.csv` + `BattleMap/Maps/*.json` 复核版图逐格与六条不变式（等价于 `VerifyLevelConfigs` / `VerifyPlaceLevel` 的断言，但不需要起 Godot）。
