@@ -54,6 +54,23 @@ public class ItemTableFileTests
 		Assert.Contains(101, ids); // DropTable.csv 的 `Material,101` 引用锚点（P1-4 的悬空引用修复）
 	}
 
+	// ── 显示名兜底（P1-1，2026-10-07：文案路径不静默显示空名）──
+
+	[Fact]
+	public void DisplayMaterial_FallsBackToExplicitMarker()
+	{
+		// UI 文案统一走 `DisplayXxx`：未定义时给「未定义材料(9001)」这类显式兜底名（村庄 / 营地文案已全部改到这条路径）。
+		// 旧路径 `Material()` 仍返回空串，本断言把它锁在「不得再被 UI 使用」的位置上。
+		ItemNameResolver.RegisterMaterials(new Dictionary<int, MaterialDefinition>
+		{
+			[101] = new MaterialDefinition { MaterialId = 101, DefinitionId = "药草" },
+		});
+
+		Assert.Equal("药草", ItemNameResolver.DisplayMaterial(101));
+		Assert.Equal("未定义材料(9001)", ItemNameResolver.DisplayMaterial(9001));
+		Assert.Equal(string.Empty, ItemNameResolver.Material(9001));
+	}
+
 	// ── 掉落表 → 物品表引用 ──
 
 	[Fact]

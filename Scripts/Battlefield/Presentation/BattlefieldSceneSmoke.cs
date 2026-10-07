@@ -23,6 +23,7 @@ public static partial class BattlefieldSceneSmoke
             VerifyHealthBarPresentation();
             VerifyMonsterInitialStates();
             VerifyLevelConfigs();
+            VerifyPlaceNodeEntry();
             VerifyMonsterTableColumns();
             VerifyCardSpatialTables();
             VerifyNewSpatialCardGeometry();
@@ -40,6 +41,7 @@ public static partial class BattlefieldSceneSmoke
             VerifyGoldStealLedger();
             VerifyMonsterStealTrigger();
             VerifyMonsterStateIntentTargets();
+            VerifyMonsterStateTargetTypes();
             if (OS.GetCmdlineUserArgs().Contains("--battlefield-bow-capture"))
                 await CaptureBowRangePreview(scene, scene.Session);
             var session = scene.Session; var view = scene.MapView;
@@ -198,7 +200,7 @@ public static partial class BattlefieldSceneSmoke
                 Error error = scene.GetViewport().GetTexture().GetImage().SavePng(path);
                 Check(error == Error.Ok, "capture saved");
             }
-            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, item tables, monster state target, monster turn, states, health text, victory");
+            GD.Print("BATTLEFIELD_SMOKE_PASS: deployment, CSV, click, hover, pan, fixed scale, movement, equipment, items, card pipeline, thrust, burst self exclusion, spatial damage, monster minion column, item tables, monster state target, monster state target types, monster turn, states, health text, victory");
             scene.GetTree().Quit();
         }
         catch (Exception ex)
@@ -567,7 +569,16 @@ public static partial class BattlefieldSceneSmoke
                 Check(doorRows == 1, $"place level {levelId}: {pair.Key} 恰有一个门口格（实际 {doorRows}）");
             }
 
-            if (doorRows != 1)
+            // 入口格 / 离开格 = **纯门口格**（§33.2.1：整个交互点只有那一个可通行、踏入触发的格，没有本体格）。
+            // 豁免「门口格挨着本体格」这条 —— 原判据一视同仁地套了设施规则，2026-10-07 实测在 F1-V-001 判红
+            // （`Entrance 的门口格与本体格相邻`：入口没有本体格，判据自己错）。
+            if (IsPureDoorPoint(pair.Key))
+            {
+                Check(pair.Value.Count == 1, $"place level {levelId}: {pair.Key} 只有一个格（实际 {pair.Value.Count}）");
+                continue;
+            }
+
+            if (!needsDoor || doorRows != 1)
             {
                 continue;
             }
@@ -581,6 +592,64 @@ public static partial class BattlefieldSceneSmoke
 
         GD.Print($"BATTLEFIELD_PLACE_LEVEL_PASS: 地点关 {levelId}（{level.LevelType} / {level.MapId}）"
             + $"版图 {cells.Count} 格、交互点 {interactPoints} 个、{byDefinition.Count} 类");
+    }
+
+    /// <summary>纯门口格交互点（入口 / 离开）：整个交互点只有那一个可通行、踏入触发的格，没有本体格。</summary>
+    private static bool IsPureDoorPoint(string definitionId) =>
+        string.Equals(definitionId, InteractPointCatalog.EntranceId, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(definitionId, InteractPointCatalog.ExitId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 世界地图 → 地点关的**节点解析链**自检（2026-10-07 补，§35 遗漏面）：
+    /// `FixedNode.csv` 的 `NodeKey` 必须与「版图上那个格」对得上 —— 村庄靠固定坐标 `(0,0)`、
+    /// 商人靠 `MapGeometry.Generate` 随机落下并记下的 `MerchantNodeId`。
+    /// 起因：`VerifyPlaceLevel` 只自检了**配表**（版图 / 交互点），没自检**世界地图侧**的解析。
+    ///   商人格一旦与解析键脱钩（`MerchantNodeId` 没记 / 记到别的格 / 全图多出一个商人类型格），
+    ///   `WorldMapContentResolver` 的键就退成 `Merchant` 之外的路径 → `EventPool.csv` 的商人行已删 →
+    ///   解析出 null → `MapScene` 落「已到达（无配置遭遇），停留地图」——玩家看到的就是「点商人格没反应」，
+    ///   而配表自检全绿。多跑几个种子是为了挡住「某个种子下商人格与村庄格撞车」这类偶发。
+    /// </summary>
+    private static void VerifyPlaceNodeEntry()
+    {
+        var cases = new (string NodeKey, string LevelId)[]
+        {
+            ("Village", "F1-V-001"),
+            ("Merchant", "F1-M-001"),
+        };
+
+        foreach (int seed in new[] { 1, 77, 1234, 20260904, 20261007 })
+        {
+            HexBoardData board = MapGeometry.Generate(HexBoardData.DefaultRadius, seed);
+            var run = new RunSaveData();
+            run.MapState.Act = 1;
+            run.MapState.Seed = seed;
+
+            // 全图只允许有一个商人格：多出来的商人类型格没有对应的 `FixedNode.csv` 键，点它只会停留地图。
+            int merchantNodes = board.Nodes.Count(x => x.Type == MapNodeType.Merchant);
+            Check(merchantNodes == 1, $"世界地图 seed {seed}：商人格数量应为 1（实际 {merchantNodes}）");
+
+            foreach ((string nodeKey, string levelId) in cases)
+            {
+                int nodeId = string.Equals(nodeKey, "Village", StringComparison.Ordinal) ? board.VillageNodeId : board.MerchantNodeId;
+                Check(nodeId >= 0, $"世界地图 seed {seed}：{nodeKey} 没记下 NodeId（解析键会退成事件池）");
+
+                MapBoardNode node = board.GetNode(nodeId);
+                Check(node != null && string.Equals(node.Type.ToString(), nodeKey, StringComparison.Ordinal),
+                    $"世界地图 seed {seed}：{nodeKey} 的 NodeId {nodeId} 指向 {node?.Type}（NodeKey 必须与格点类型同名）");
+
+                ResolvedMapContent content = WorldMapContentResolver.Resolve(run.MapState.Act, node, board, run);
+                Check(content != null, $"世界地图 seed {seed}：{nodeKey} 格解析不出内容（点它只会停留地图）");
+                Check(content.Type == "Level" && content.Id == levelId,
+                    $"世界地图 seed {seed}：{nodeKey} 格应解析成关卡 {levelId}，实际 {content.Type} / {content.Id}");
+
+                BattleLevelConfig level = BattleLevelCatalog.Load(content.Id);
+                Check(PlaceLevelTypes.IsPlace(level.LevelType),
+                    $"世界地图 seed {seed}：{nodeKey} 解析出的 {content.Id} 不是地点关（LevelType={level.LevelType}）");
+            }
+        }
+
+        GD.Print("BATTLEFIELD_PLACE_NODE_ENTRY_PASS: 村庄 / 商人格在 5 个种子下都解析得出地点关"
+            + "（FixedNode NodeKey ↔ 版图格点类型 ↔ LevelType 三处对齐）");
     }
 
     /// <summary>
@@ -1119,6 +1188,89 @@ public static partial class BattlefieldSceneSmoke
         Check(playerWeak == 1, $"state intention lands on a player (total weak {playerWeak})");
         battle.Dispose();
         GD.Print("BATTLEFIELD_MONSTER_STATE_TARGET_PASS: `3;0;<状态>;<层数>` 的弱化落在角色身上（怪物自身不加状态）");
+    }
+
+    /// <summary>状态意图的**目标类型落地**（P2-25，代码需求清单验收 ①②）：`3;1;…`（`Self`）必须落在
+    /// **怪物自己**身上（修复「反向增益」）、`3;3;…`（`AllEnemies`）必须落到**全体角色**（修复「只打 1 人」）。
+    /// 两条都跑现役 `Monster.csv` 行并走真实怪物阶段，不构造假数据；尚未配表的 `3;5;…`（`AllAllies`）与
+    /// `AllyRange` 半径口径由单测 `Tests/EnemyIntentEffectTargetsTests.cs` 覆盖。</summary>
+    private static void VerifyMonsterStateTargetTypes()
+    {
+        // ① 3123 失控男法师的 `3;1;6;1` = 自身 +1 层增加攻击力（修复前会加给索敌目标 = 角色）。
+        // 意图**按内容定位**、不写死下标：现役行里它是第 2 条意图（第 1 条是普攻 `1`），配表调整意图槽位
+        // 不该把这条断言打红（`Monster.csv` 意图列可空可错序）。
+        var selfBattle = NewMonsterIntentBattle(3123);
+        BattleUnitPlacement selfMonster = selfBattle.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy);
+        var selfInstance = (MonsterInstance)selfMonster.Unit;
+        MoveAdjacentToFirstPlayer(selfBattle, selfMonster);
+        int selfIndex = FindAddStateIntention(selfInstance, EffectTargetType.Self);
+        Check(selfIndex >= 0, "3123 declares a `3;1;…` (Self) AddState intention");
+        selfInstance.SetSelectedIntention(selfIndex, selfInstance.Table[selfIndex]);
+        RunMonsterPhase(selfBattle);
+        int monsterAttack = StateSystem.TryGetStateStacks(selfInstance, StateType.AddAttack, out int ownAttack) ? ownAttack : 0;
+        int playersAttack = selfBattle.PlayerIds.Sum(id => StateSystem.TryGetStateStacks(
+            selfBattle.Occupancy.Placements[id].Unit, StateType.AddAttack, out int stacks) ? stacks : 0);
+        // 增加攻击力衰减 = Never，取到的层数就是本次落下的层数。
+        Check(monsterAttack == 1, $"`3;1;…` buffs the monster itself (monster attack +{monsterAttack}, expected 1)");
+        Check(playersAttack == 0, $"`3;1;…` must not buff players (players attack +{playersAttack})");
+        selfBattle.Dispose();
+
+        // ② 3125 教授法师的 `3;3;1;3` = 全体角色 3 层易伤（修复前只打索敌目标 1 人）。
+        var areaBattle = NewMonsterIntentBattle(3125);
+        BattleUnitPlacement areaMonster = areaBattle.Occupancy.Placements.Values.First(x => x.Role == BattlefieldRole.Enemy);
+        var areaInstance = (MonsterInstance)areaMonster.Unit;
+        MoveAdjacentToFirstPlayer(areaBattle, areaMonster);
+        int areaIndex = FindAddStateIntention(areaInstance, EffectTargetType.AllEnemies);
+        int[] areaEffect = areaIndex >= 0 ? areaInstance.Table[areaIndex][0] : Array.Empty<int>();
+        Check(areaIndex >= 0 && areaEffect.Length > 3 &&
+            areaEffect[2] == (int)StateType.Vulnerable && areaEffect[3] == 3,
+            "3125 declares a `3;3;…` (AllEnemies) vulnerable-3 AddState intention");
+        areaInstance.SetSelectedIntention(areaIndex, areaInstance.Table[areaIndex]);
+        RunMonsterPhase(areaBattle);
+        int[] playerVulnerable = areaBattle.PlayerIds.Select(id => StateSystem.TryGetStateStacks(
+            areaBattle.Occupancy.Placements[id].Unit, StateType.Vulnerable, out int stacks) ? stacks : 0).ToArray();
+        int monsterVulnerable = StateSystem.TryGetStateStacks(areaInstance, StateType.Vulnerable, out int ownVulnerable) ? ownVulnerable : 0;
+        // 易伤按 OnTurnStart/Flat 1 衰减，而 `RunMonsterPhase` 末尾已开下一轮玩家回合 → 3 层应剩 2 层。
+        Check(playerVulnerable.All(x => x >= 2), $"`3;3;…` lands on every player ([{string.Join(",", playerVulnerable)}])");
+        Check(monsterVulnerable == 0, $"`3;3;…` must not debuff the monster itself (monster vulnerable {monsterVulnerable})");
+        areaBattle.Dispose();
+        GD.Print("BATTLEFIELD_MONSTER_STATE_TYPE_PASS: `3;1;…` 落在怪物自身（角色 0 层）、`3;3;…` 落在全体 3 名角色（衰减后 ≥2 层）");
+    }
+
+    /// <summary>按现役 `M-F1-001` 地图 + 指定现役怪物建一场（3 名角色；与 `VerifyMonsterStateIntentTargets` 同口径）。</summary>
+    private static BattlefieldSession NewMonsterIntentBattle(params int[] monsterIds)
+    {
+        string path = BattleLevelCatalog.ResolveMapPath("M-F1-001");
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        var definition = BattleMapDefinition.Parse(file.GetAsText());
+        definition.PlayerCharacterIds = new List<int> { 1002, 1003, 1004 };
+        definition.MonsterIds = monsterIds.ToList();
+        return new BattlefieldSession(definition);
+    }
+
+    /// <summary>把怪物挪到 1 号玩家的六向邻格（既有烟测口径）：保证直线弹道的索敌链路能成立。</summary>
+    private static void MoveAdjacentToFirstPlayer(BattlefieldSession battle, BattleUnitPlacement monster)
+    {
+        AxialHex playerCoord = battle.Occupancy.Placements[battle.PlayerIds[0]].Coord;
+        battle.Occupancy.CommitMove(monster, BattleRangeResolver.Neighbors(playerCoord)
+            .First(c => battle.Board.IsWalkable(c) && battle.Occupancy.At(c) == null));
+    }
+
+    /// <summary>在怪物意图表里按**内容**找第一条「单段 `AddState` + 指定目标类型」的意图，返回其下标（找不到 = -1）。
+    /// 断言不写死下标：`Monster.csv` 的意图列可空可错序（3123 的 `3;1;…` 现役在第 2 条意图上，第 1 条是普攻 `1`）。
+    /// 只认**单段**意图 —— 多段意图会连带攻击，用在本烟测需要的「纯状态意图」上会污染断言。</summary>
+    private static int FindAddStateIntention(MonsterInstance monster, EffectTargetType targetType)
+    {
+        if (monster?.Table == null) return -1;
+        for (int intentionIndex = 0; intentionIndex < monster.Table.Length; intentionIndex++)
+        {
+            int[][] intention = monster.Table[intentionIndex];
+            if (intention == null || intention.Length != 1 || intention[0] == null || intention[0].Length <= 2) continue;
+            int[] effect = intention[0];
+            if (effect[0] == (int)EffectType.AddState && effect[1] == (int)targetType) return intentionIndex;
+        }
+
+        return -1;
     }
 
     private static void VerifyFirstFormalLevel()

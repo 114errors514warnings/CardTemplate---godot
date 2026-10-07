@@ -104,6 +104,67 @@ public class VillageMerchantPrepTests
 			new[] { "1", "行军短剑", "202", "2", "", "", "20", "TRUE", "999" }));
 	}
 
+	// ── ②b 装备配方 → 材料表 / 装备表的引用校验（P1-2，2026-10-07）──
+
+	[Fact]
+	public void EquipmentRecipeCatalog_ReferenceValidation_ListsEveryDanglingReference()
+	{
+		List<EquipmentRecipe> recipes = new List<EquipmentRecipe>
+		{
+			new EquipmentRecipe { RecipeId = 2, ResultDefinitionId = "长剑", Material1Id = 101, Material1Count = 2 },
+			new EquipmentRecipe
+			{
+				RecipeId = 1, ResultDefinitionId = "失踪剑", Material1Id = 999, Material1Count = 2,
+				Material2Id = 998, Material2Count = 1,
+			},
+			// 禁用行 = 正在配的配方：允许悬空、不上灯（与 FoodRecipe 材料通道同一口径）。
+			new EquipmentRecipe { RecipeId = 3, ResultDefinitionId = "禁用剑", Material1Id = 997, Material1Count = 2, Enabled = false },
+		};
+
+		// 通过态：装备名在装备命名空间里、材料在材料表里。
+		EquipmentRecipeCatalog.ValidateReferences(
+			new[] { recipes[0] },
+			materialId => materialId == 101,
+			definitionId => definitionId == "长剑");
+
+		List<string> missing = EquipmentRecipeCatalog.CollectMissingReferences(
+			recipes,
+			materialId => materialId == 101,
+			definitionId => definitionId == "长剑");
+
+		// 一次列全 3 条（装备名 1 + 第一材料 1 + 第二材料 1）、按 RecipeId 升序；禁用行不进结果。
+		Assert.Equal(3, missing.Count);
+		Assert.Contains("失踪剑", missing[0]);
+		Assert.Contains("999", missing[1]);
+		Assert.Contains("998", missing[2]);
+		Assert.DoesNotContain(missing, text => text.Contains("禁用剑"));
+
+		FormatException error = Assert.Throws<FormatException>(() => EquipmentRecipeCatalog.ValidateReferences(
+			recipes,
+			materialId => materialId == 101,
+			definitionId => definitionId == "长剑"));
+		Assert.Contains("失踪剑", error.Message);
+		Assert.Contains("999", error.Message);
+		Assert.Contains("998", error.Message);
+	}
+
+	[Fact]
+	public void EquipmentRecipeTable_PassesTheRuntimeValidator()
+	{
+		// 与运行期 LoadingSystem.ValidateEquipmentRecipeReferences 走同一个纯逻辑入口（P1-2）：
+		// 真实配方表 × 真实材料表 × 真实装备两表命名空间 → 必须零缺口（否则加载期直接抛 FormatException）。
+		HashSet<int> materialIds = ReadTable(Path.Combine("Item", "Material.csv")).Skip(1)
+			.Select(row => int.Parse(Cell(Cells(row), 0))).ToHashSet();
+		HashSet<string> equipmentNames = ReadTable("Weapon.csv").Skip(1).Select(row => Cell(Cells(row), 1))
+			.Concat(ReadTable(Path.Combine("Equipment", "Armor.csv")).Skip(1).Select(row => Cell(Cells(row), 1)))
+			.ToHashSet(StringComparer.Ordinal);
+
+		EquipmentRecipeCatalog.ValidateReferences(
+			EquipmentRecipeCatalog.ParseLines(ReadTable(Path.Combine("Equipment", "EquipmentRecipe.csv"))),
+			materialIds.Contains,
+			equipmentNames.Contains);
+	}
+
 	// ── ③ 状态表民宿封门列（阻断项 B6）──
 
 	[Fact]

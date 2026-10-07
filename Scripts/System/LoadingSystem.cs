@@ -1029,6 +1029,21 @@ public partial class LoadingSystem : Node
 		}
 	}
 
+	/// <summary>
+	/// 装备配方 → 材料表 / 装备命名空间的引用校验（P1-2，2026-10-07）：与
+	/// <see cref="ValidateDropTableItemReferences"/> 同口径 —— 结果装备必须在 Weapon / Armor 两表里、
+	/// 两条材料必须在材料表里，缺口一次列全后抛 <see cref="FormatException"/>（不静默显示空名）。
+	/// 材料表由本方法自己触达（走缓存），调用点无需关心预热顺序；纯逻辑在 `EquipmentRecipeCatalog.ValidateReferences`。
+	/// </summary>
+	public static void ValidateEquipmentRecipeReferences()
+	{
+		Dictionary<int, MaterialDefinition> materials = LoadMaterialsByKey();
+		EquipmentRecipeCatalog.ValidateReferences(
+			LoadEquipmentRecipeCsv.LoadByKey().Values,
+			materialId => materials.ContainsKey(materialId),
+			definitionId => ItemNameResolver.TryGetEquipmentKey(definitionId, out _));
+	}
+
 	/// <summary>加载材料表（FilePathRegistry: Data.Item.Material）。</summary>
 	public static Dictionary<int, MaterialDefinition> LoadMaterialsByKey(string pathKey = MaterialCsvPathKey, bool useCache = true)
 	{
@@ -1094,6 +1109,7 @@ public partial class LoadingSystem : Node
 	/// 并把「装备名 / 名字反查 / 占用手数 / 单件负荷」与「队伍负荷上限」注册进 <see cref="ItemNameResolver"/> ——
 	/// 背包 / 装备界面与纯逻辑模块（`RunBagSystem` / `RunEquipmentSystem`）只读那份注册表，不各自读配表。
 	/// 2026-10-02 装备界面批追加：`Armor.csv`（部位装备）与 `EquipmentConfig.csv`（饰品格数）。
+	/// 2026-10-07（P1-2）追加：注册完成后跑一次装备配方的跨表引用校验（见 <see cref="ValidateEquipmentRecipeReferences"/>）。
 	/// </summary>
 	public static void LoadEquipmentTablesByKey(bool useCache = true)
 	{
@@ -1120,6 +1136,10 @@ public partial class LoadingSystem : Node
 		ItemNameResolver.SetInventoryCapacity(InventoryCapacity);
 		ItemNameResolver.SetAccessorySlotCount(
 			equipmentConfigCache?.AccessorySlots ?? EquipmentConfigDefinition.DefaultAccessorySlotCount);
+
+		// 装备配方（EquipmentRecipe.csv）的跨表校验放在装备名注册之后（P1-2，2026-10-07）：
+		// 配方表引用的是「装备名」而不是数字 ID，名字反查还没注册时校验必然全红。
+		ValidateEquipmentRecipeReferences();
 	}
 
 	/// <summary>加载武器表（FilePathRegistry: Data.Equipment.Weapon）。</summary>

@@ -125,6 +125,67 @@ public static class EquipmentRecipeCatalog
 		return recipes;
 	}
 
+	/// <summary>
+	/// 跨表引用校验的**纯逻辑**部分（P1-2，2026-10-07）：返回全部悬空引用（空列表 = 通过）。
+	/// 只为 `Enabled=TRUE` 的行校验（禁用行 = 正在配的配方，允许悬空），与 `LoadFoodCsv.ValidateReferences` 同口径；
+	/// 一次收集**全部**问题而不是遇到第一条就中断，输出按 `RecipeId` 升序 → 报错文本与表行序无关。
+	/// </summary>
+	public static List<string> CollectMissingReferences(
+		IEnumerable<EquipmentRecipe> recipes,
+		Func<int, bool> isMaterialDefined,
+		Func<string, bool> isEquipmentDefined)
+	{
+		List<string> missing = new List<string>();
+		List<EquipmentRecipe> ordered = new List<EquipmentRecipe>();
+		foreach (EquipmentRecipe recipe in recipes ?? Array.Empty<EquipmentRecipe>())
+		{
+			if (recipe != null && recipe.Enabled)
+			{
+				ordered.Add(recipe);
+			}
+		}
+
+		ordered.Sort((a, b) => a.RecipeId.CompareTo(b.RecipeId));
+		foreach (EquipmentRecipe recipe in ordered)
+		{
+			// 装备名走「装备命名空间」（Weapon + Armor 共用一份名字反查），与锻铁铺出件时的反查同源。
+			if (isEquipmentDefined != null && !isEquipmentDefined(recipe.ResultDefinitionId))
+			{
+				missing.Add($"结果装备 {recipe.ResultDefinitionId}（配方 {recipe.RecipeId}）不在装备两表里");
+			}
+
+			if (isMaterialDefined != null && !isMaterialDefined(recipe.Material1Id))
+			{
+				missing.Add($"{recipe.ResultDefinitionId} 的第一材料 {recipe.Material1Id}（配方 {recipe.RecipeId}）未定义");
+			}
+
+			if (recipe.HasSecondMaterial && isMaterialDefined != null && !isMaterialDefined(recipe.Material2Id))
+			{
+				missing.Add($"{recipe.ResultDefinitionId} 的第二材料 {recipe.Material2Id}（配方 {recipe.RecipeId}）未定义");
+			}
+		}
+
+		return missing;
+	}
+
+	/// <summary>
+	/// 装备配方的跨表校验（P1-2，2026-10-07）：结果装备必须在装备两表里、材料必须在材料表里，
+	/// 否则一次列全后抛 <see cref="FormatException"/>（与 `LoadingSystem.ValidateDropTableItemReferences` 同口径，不静默降级）。
+	/// 运行期调用点见 `LoadingSystem.ValidateEquipmentRecipeReferences`。
+	/// </summary>
+	public static void ValidateReferences(
+		IEnumerable<EquipmentRecipe> recipes,
+		Func<int, bool> isMaterialDefined,
+		Func<string, bool> isEquipmentDefined)
+	{
+		List<string> missing = CollectMissingReferences(recipes, isMaterialDefined, isEquipmentDefined);
+		if (missing.Count > 0)
+		{
+			throw new FormatException(
+				"[EquipmentRecipe] 引用了未定义的材料 / 装备（请在 DataBase/Item 与 DataBase/Equipment 下补定义）：" + string.Join("；", missing));
+		}
+	}
+
 	private static string ParseName(string raw, string context)
 	{
 		string text = (raw ?? string.Empty).Trim();
