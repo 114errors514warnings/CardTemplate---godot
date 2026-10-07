@@ -24,10 +24,17 @@ public partial class RunBattleScene : Control
 	/// <summary>本内容的战场视图（烟测断言 / 宿主接管表现用）；没有实机战场时为 null。</summary>
 	public HexBattleScene BattleView => battleView;
 
+	/// <summary>本内容的地点视图（非战斗地点关 `Village` / `Merchant`；战斗关为 null）。</summary>
+	public PlaceLevelView PlaceView => placeLevelView;
+
+	/// <summary>本内容是否**非战斗地点关**（走 `PlaceLevelView`，不建战场、不发结算）。</summary>
+	public bool IsPlaceLevel => placeLevelView != null && GodotObject.IsInstanceValid(placeLevelView);
+
 	public const string MapScenePath = "res://Scenes/Map/MapScene.tscn";
 	public const string MainMenuScenePath = "res://Scenes/MainMenu/MainMenuScene.tscn";
 
 	private HexBattleScene battleView;
+	private PlaceLevelView placeLevelView;
 	private BattlefieldSession battlefield;
 	private bool outcomeResolved;
 	private bool resultShown;
@@ -58,6 +65,16 @@ public partial class RunBattleScene : Control
 		{
 			TryRestorePostBattleBattlefield(session);
 			SettlementReady?.Invoke(0);
+			return;
+		}
+
+		// **地点关（`LevelType = Village / Merchant`）走统一关卡通道的非战斗形态**（2026-10-07）：
+		// 同一份 `PendingContentType = Level` 落档、同一个宿主，只把表现从战场换成 `PlaceLevelView`
+		// （§33：地点一律走关卡统一流程，不得有专用场景）。
+		BattleLevelConfig placeLevel = LoadPendingLevel(session);
+		if (placeLevel != null && PlaceLevelTypes.IsPlace(placeLevel.LevelType))
+		{
+			CreatePlaceView(session, placeLevel);
 			return;
 		}
 
@@ -381,6 +398,64 @@ public partial class RunBattleScene : Control
 
 			session.Current.DeckSlots[i] = deckSnapshot;
 		}
+	}
+
+	/// <summary>待处理内容的关卡配置（非关卡路径 / 配置加载失败时返回 null，调用方按原路径处理）。</summary>
+	private static BattleLevelConfig LoadPendingLevel(RunSession session)
+	{
+		string levelId = session?.Current?.PendingLevelId;
+		if (string.IsNullOrWhiteSpace(levelId))
+		{
+			return null;
+		}
+
+		try
+		{
+			return BattleLevelCatalog.Load(levelId);
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[RunBattle] 关卡 {levelId} 配置加载失败，按战斗关卡处理：{ex.Message}");
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// 地点关形态：按关卡配置的 `MapId` 读版图 JSON，挂一份 `PlaceLevelView`（走格 + 交互点 + 离开格）。
+	/// 不建战场、不计折损、不发结算 —— 完成时走「关卡完成」语义（标记节点已访问 + 回世界地图）。
+	/// </summary>
+	private void CreatePlaceView(RunSession session, BattleLevelConfig level)
+	{
+		string mapPath = BattleLevelCatalog.ResolveMapPath(level.MapId);
+		using FileAccess file = FileAccess.Open(mapPath, FileAccess.ModeFlags.Read);
+		if (file == null)
+		{
+			GD.PrintErr($"[RunBattle] 无法打开地点版图 JSON：{mapPath}");
+			CallDeferred(nameof(GoToMainMenuAbort));
+			return;
+		}
+
+		BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
+		placeLevelView = new PlaceLevelView();
+		placeLevelView.Configure(level, definition);
+		placeLevelView.Finished += OnPlaceLevelFinished;
+		AddChild(placeLevelView);
+		GD.Print($"[RunBattle] 地点关 {level.LevelId}（{level.LevelType}）已就绪：版图 {level.MapId}。");
+	}
+
+	/// <summary>地点关完成（踏入离开格）：标记节点已访问 → 清待处理内容 → 通知宿主回可选地图。</summary>
+	private void OnPlaceLevelFinished()
+	{
+		RunSession session = RunSession.Instance;
+		if (session?.Current == null)
+		{
+			GoToMainMenuAbort();
+			return;
+		}
+
+		// 与事件完成同一套语义（`CompletePendingEventToMap` = 标记节点 + 清待处理内容 + OnMap）。
+		session.CompletePendingEventToMap();
+		ContentFinished?.Invoke();
 	}
 
 	/// <summary>

@@ -1,0 +1,6 @@
+MapId,DropTableId,LevelType,Difficulty,InstanceId,ObjectType,DefinitionId,Q,R,Facing,InitialValue,Extra,BattleRule
+M-M-001,0,Merchant,Low,F1-M-001-MER01,InteractPoint,Merchant,0,0,,,,
+M-M-001,0,Merchant,Low,F1-M-001-MER02,InteractPoint,Merchant,1,0,,,,
+M-M-001,0,Merchant,Low,F1-M-001-MER03,InteractPoint,Merchant,2,0,,,,
+M-M-001,0,Merchant,Low,F1-M-001-ENT,InteractPoint,Entrance,-3,0,,,Door,
+M-M-001,0,Merchant,Low,F1-M-001-EXT,InteractPoint,Exit,3,-2,,,Door,

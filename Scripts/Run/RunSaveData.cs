@@ -81,6 +81,13 @@ public sealed class RunSaveData
 	/// <summary>商人状态（货架与卡包快照 / 卡牌操作次数 / 当前所在格）。</summary>
 	public RunMerchantStateSave MerchantState { get; set; } = new RunMerchantStateSave();
 
+	/// <summary>
+	/// 地点关（`LevelType = Village / Merchant`）里队伍所在格的 NodeId（-1 = 未进入）。
+	/// 2026-10-07 统一关卡通道批新增：村庄与商人共用**同一个**字段 —— 走格逻辑只有一份 `PlaceLevelView`，
+	/// 落档也就不该按地点类型分两处（`VillageState.PlayerNodeId` / `MerchantState.PlayerNodeId` 保留为历史字段，不再读写）。
+	/// </summary>
+	public int PlacePlayerNodeId { get; set; } = -1;
+
 	// ── 待处理战斗（InBattleStart）──
 	/// <summary>遭遇层目录名（第一层…）。</summary>
 	public string PendingEncounterLayer = string.Empty;

@@ -18,6 +18,23 @@ using System.Collections.Generic;
 
 public partial class RunSession
 {
+	// ── 地点关（村庄 / 商人）的队伍位置（统一字段）──
+
+	/// <summary>地点关里队伍所在格的 NodeId（-1 = 未进入）；村庄与商人共用同一处落档。</summary>
+	public int PlacePlayerNodeId => Current?.PlacePlayerNodeId ?? -1;
+
+	/// <summary>写地点关里队伍所在格并落档（走一格落一次，读档重进回到同一格）。</summary>
+	public void SetPlacePlayerNodeId(int nodeId)
+	{
+		if (Current == null)
+		{
+			return;
+		}
+
+		Current.PlacePlayerNodeId = nodeId;
+		Save();
+	}
+
 	// ── 设施：旅馆 / 民宿（旅馆案 §四、民宿案 §六）──
 
 	/// <summary>旅馆过夜：校验 → 扣 1 金币 → 逐槽回复 → 推进新一天 → 置 `InnUsed` / `ChosenLodging` → `Save()`。</summary>

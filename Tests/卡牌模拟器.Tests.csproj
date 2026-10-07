@@ -53,6 +53,11 @@
     <None Include="..\DataBase\GameVariables.csv" Link="GameVariables.csv" CopyToOutputDirectory="PreserveNewest" />
     <!-- 区域物 / 格点效果表（2026-10-04，T3 + T8 批）：供 AreaObjectSpecTests 在纯 .NET 下做文件级校验 -->
     <None Include="..\DataBase\Battlefield\AreaObject.csv" Link="Battlefield\AreaObject.csv" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 关卡 / 地点关配表（2026-10-07，§33 统一关卡通道）：关卡清单 + 交互点定义表 + 关卡配置 + 地图清单 -->
+    <None Include="..\DataBase\Level\InteractPoint.csv" Link="Level\InteractPoint.csv" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\DataBase\Level\LevelIndex.csv" Link="Level\LevelIndex.csv" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\DataBase\Level\Config\*.csv" Link="Level\Config\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\DataBase\BattleMap\MapIndex.csv" Link="BattleMap\MapIndex.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

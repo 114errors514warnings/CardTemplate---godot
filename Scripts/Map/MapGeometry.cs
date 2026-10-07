@@ -38,6 +38,37 @@ public static class MapGeometry
 			&& System.Math.Abs(hex.Q + hex.R) <= radius;
 	}
 
+	/// <summary>
+	/// 按 **NodeId 生成序**（q 升序 + r 升序）列出半径 R 六边形盘面的全部格坐标：**索引 = NodeId**。
+	/// 地点关（村庄 / 商人）的版图自检与 `Q,R` ↔ NodeId 对齐都走这一处枚举
+	/// （`Generate` 内部的第 2 步也调它，两边不会漂移）。
+	/// </summary>
+	public static List<AxialHex> EnumerateCells(int radius)
+	{
+		if (radius < 1)
+		{
+			radius = HexBoardData.DefaultRadius;
+		}
+
+		List<AxialHex> coords = new List<AxialHex>();
+		for (int q = -radius; q <= radius; q++)
+		{
+			int rMin = Math.Max(-radius, -radius - q);
+			int rMax = Math.Min(radius, radius - q);
+			for (int r = rMin; r <= rMax; r++)
+			{
+				coords.Add(new AxialHex(q, r));
+			}
+		}
+
+		coords.Sort((a, b) =>
+		{
+			int byQ = a.Q.CompareTo(b.Q);
+			return byQ != 0 ? byQ : a.R.CompareTo(b.R);
+		});
+		return coords;
+	}
+
 	/// <summary>生成一次版图：radius 默认 6（127 格）。seed 为空时使用随机种子。</summary>
 	public static HexBoardData Generate(int radius = HexBoardData.DefaultRadius, int? seed = null)
 	{
@@ -62,22 +93,8 @@ public static class MapGeometry
 		};
 
 		// 2) 生成全部格点坐标并排序（q 升序、r 升序），得到稳定 NodeId
-		List<AxialHex> coords = new List<AxialHex>();
-		for (int q = -radius; q <= radius; q++)
-		{
-			int rMin = Math.Max(-radius, -radius - q);
-			int rMax = Math.Min(radius, radius - q);
-			for (int r = rMin; r <= rMax; r++)
-			{
-				coords.Add(new AxialHex(q, r));
-			}
-		}
-
-		coords.Sort((a, b) =>
-		{
-			int byQ = a.Q.CompareTo(b.Q);
-			return byQ != 0 ? byQ : a.R.CompareTo(b.R);
-		});
+		//    （枚举口径收在 `EnumerateCells` 一处：地点关的版图自检也要按同一序对齐 NodeId）
+		List<AxialHex> coords = EnumerateCells(radius);
 
 		// 3) 建节点：固定特殊点就位；其余按占比分配类型（先保证一个商人格）
 		List<MapBoardNode> merchantCandidates = new List<MapBoardNode>();
@@ -107,7 +124,10 @@ public static class MapGeometry
 		// 至少保留一个商人格（占普通格一个名额）
 		if (merchantCandidates.Count > 0)
 		{
-			merchantCandidates[random.Next(merchantCandidates.Count)].Type = MapNodeType.Merchant;
+			MapBoardNode merchant = merchantCandidates[random.Next(merchantCandidates.Count)];
+			merchant.Type = MapNodeType.Merchant;
+			// 记下它：地点关（商人）走 `FixedNode.csv` 的 `Merchant` 行解析内容，靠这个 NodeId 对齐 NodeKey。
+			board.MerchantNodeId = merchant.NodeId;
 		}
 
 		// 4) 记录特殊节点 id

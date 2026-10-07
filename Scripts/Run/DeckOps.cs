@@ -47,6 +47,21 @@ public static class DeckOps
 		return true;
 	}
 
+	/// <summary>「删除卡牌」每次进入商人的次数上限（商人案 §5.2：1 次）。</summary>
+	public const int RemovePerMerchant = 1;
+
+	/// <summary>「转移卡牌」每次进入商人的次数上限（商人案 §5.2：1 次）。</summary>
+	public const int TransferPerMerchant = 1;
+
+	/// <summary>次数已用尽（§6.3 失败原因表）。</summary>
+	public const string UsedText = "本次进入的该操作次数已用尽。";
+
+	/// <summary>变化卡牌找不到同等级可替换卡（§6.3 失败原因表）。</summary>
+	public const string NoSameTierText = "没有可替换的同等级卡牌。";
+
+	/// <summary>源卡下标越界（与「卡组至少保留 1 张」区分开，便于界面提示）。</summary>
+	public const string IndexOutOfRangeText = "该卡不在卡组中（下标越界）。";
+
 	/// <summary>升级校验：未到永久升级上限。</summary>
 	public static bool CanUpgradeCard(int permanentUpgradeLevel, out string error)
 	{

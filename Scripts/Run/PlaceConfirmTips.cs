@@ -101,6 +101,30 @@ public partial class PlaceConfirmTips : Control
 		Resolved?.Invoke(false);
 	}
 
+	/// <summary>**AI 接口用**：等同点「进入」（气泡没开或按钮禁用时不生效）。</summary>
+	public bool TriggerEnter()
+	{
+		if (!IsOpen || !EnterEnabled)
+		{
+			return false;
+		}
+
+		OnEnterPressed();
+		return true;
+	}
+
+	/// <summary>**AI 接口用**：等同点「稍后」。</summary>
+	public bool TriggerLater()
+	{
+		if (!IsOpen)
+		{
+			return false;
+		}
+
+		OnLaterPressed();
+		return true;
+	}
+
 	/// <summary>把气泡摆到跟随目标上方（夹在视口内，避免贴边被裁）。</summary>
 	private void Reposition()
 	{

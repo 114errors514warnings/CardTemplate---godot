@@ -97,6 +97,22 @@ public sealed class ApiRequest
     public string Reason { get; set; }
     public List<int> CharacterIds { get; set; }
     public int Seed { get; set; }
+
+    // —— 地点关（村庄 / 商人；2026-10-07 §33 统一关卡通道） ——
+    /// <summary>卡包序号（1–5）。</summary>
+    public int PackIndex { get; set; }
+
+    /// <summary>卡包内第几张（0 起，按 `run.place.state` 的 pack 行序）。</summary>
+    public int CardIndex { get; set; }
+
+    /// <summary>归属槽位（包 4 / 5 用；**不传 = 用包绑定槽位**，所以是 `int?`）。</summary>
+    public int? TargetSlot { get; set; }
+
+    /// <summary>确认 tips：true = 点「进入」、false = 点「稍后」。</summary>
+    public bool Accept { get; set; }
+
+    /// <summary>卡牌操作（`remove` / `change` / `transfer` / `upgrade`）。</summary>
+    public string Operation { get; set; }
 }
 
 /// <summary>轴坐标（战场格点）。</summary>

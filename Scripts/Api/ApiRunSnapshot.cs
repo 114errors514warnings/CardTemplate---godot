@@ -10,6 +10,107 @@ using System.Linq;
 /// <summary>运行局 API 的只读投影。</summary>
 public static class ApiRunSnapshot
 {
+    /// <summary>
+    /// 地点关（村庄 / 商人）的只读投影（2026-10-07，§33 统一关卡通道）：`isPlace = false` 表示当前不是地点关。
+    /// 商人部分直接读快照（货架 / 卡包 / 次数），界面开合状态读 `PlaceLevelView` 的只读访问面。
+    /// </summary>
+    public static object Place(RunFlowScene scene)
+    {
+        PlaceLevelView place = scene?.PlaceView;
+        if (place == null) return new { isPlace = false };
+
+        RunSaveData run = RunSession.Instance?.Current;
+        List<object> interactPoints = new List<object>();
+        foreach (string id in new[] { "Entrance", "Exit", "Inn", "Guesthouse", "Smithy", "Restaurant", "Forest", "Merchant" })
+        {
+            int door = place.DoorNodeId(id);
+            int nearest = place.NearestBodyNodeId(id);
+            if (door >= 0 || nearest >= 0)
+            {
+                interactPoints.Add(new { definitionId = id, doorNodeId = door, nearestBodyNodeId = nearest });
+            }
+        }
+
+        MerchantUi merchant = place.Merchant;
+        List<object> packs = new List<object>();
+        List<object> stock = new List<object>();
+        if (run?.MerchantState != null)
+        {
+            foreach (RunMerchantCardPackSave pack in run.MerchantState.CardPacks)
+            {
+                packs.Add(new
+                {
+                    packIndex = pack.PackIndex,
+                    kind = pack.Kind,
+                    ownerSlot = pack.OwnerSlot,
+                    remaining = MerchantCardPacks.RemainingCount(pack),
+                    total = pack.Cards?.Count ?? 0,
+                });
+            }
+
+            foreach (RunMerchantStockEntrySave entry in run.MerchantState.Stock)
+            {
+                stock.Add(new
+                {
+                    category = entry.Category,
+                    categoryName = ((MerchantCategory)entry.Category).ToString(),
+                    slotIndex = entry.SlotIndex,
+                    name = entry.DefinitionId,
+                    price = entry.Price,
+                    sold = entry.Sold,
+                });
+            }
+        }
+
+        object tips = place.IsTipsOpen
+            ? new
+            {
+                open = true,
+                title = place.Tips.TitleText,
+                effect = place.Tips.EffectText,
+                cost = place.Tips.CostText,
+                enterEnabled = place.Tips.EnterEnabled,
+            }
+            : (object)null;
+
+        return new
+        {
+            isPlace = true,
+            levelId = place.LevelId,
+            levelType = place.LevelType,
+            partyNodeId = place.PartyNodeId,
+            cellCount = place.CellCount,
+            groupCount = place.GroupCount,
+            doorCount = place.DoorCount,
+            reachableNodeIds = place.ReachableNodeIds,
+            interactPoints = interactPoints,
+            isMoving = place.IsMoving,
+            floatText = place.CurrentFloatText,
+            tips = tips,
+            smithyOpen = place.IsSmithyOpen,
+            restaurantOpen = place.IsRestaurantOpen,
+            merchant = merchant?.IsOpen == true
+                ? new
+                {
+                    open = true,
+                    forgeOpen = merchant.IsForgeOpen,
+                    packDetailOpen = merchant.IsPackDetailOpen,
+                    deckOpsOpen = merchant.IsDeckOpsOpen,
+                    openPackIndex = merchant.OpenPackIndex,
+                    hint = merchant.HintText,
+                    packHint = merchant.PackHintTextValue,
+                    deckOpsHint = merchant.DeckOpsHintTextValue,
+                    gold = run?.Gold ?? 0,
+                    removeUsed = run?.MerchantState?.RemoveUsed ?? 0,
+                    transferUsed = run?.MerchantState?.TransferUsed ?? 0,
+                    packSlots = merchant.PackCount,
+                    packs = packs,
+                    stock = stock,
+                }
+                : (object)null,
+        };
+    }
+
     /// <summary>本局全景：时间点 / 天数 / 模式 / 角色槽 / 背包负荷 / 界面形态。</summary>
     public static object State(RunFlowScene scene)
     {

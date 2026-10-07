@@ -10,7 +10,7 @@ public static class WorldMapContentResolver
     public static ResolvedMapContent Resolve(int act, MapBoardNode node, HexBoardData board, RunSaveData run)
     {
         if (node == null || run == null) return null;
-        string key = node.NodeId == board.VillageNodeId ? "Village" : node.NodeId == board.EliteMidNodeId ? "EliteMid" : node.NodeId == board.EliteUpNodeId ? "EliteUp" : node.NodeId == board.EliteDownNodeId ? "EliteDown" : node.NodeId == board.BossNodeId ? "Boss" : "";
+        string key = node.NodeId == board.VillageNodeId ? "Village" : node.NodeId == board.MerchantNodeId ? "Merchant" : node.NodeId == board.EliteMidNodeId ? "EliteMid" : node.NodeId == board.EliteUpNodeId ? "EliteUp" : node.NodeId == board.EliteDownNodeId ? "EliteDown" : node.NodeId == board.BossNodeId ? "Boss" : "";
         if (!string.IsNullOrEmpty(key)) return PickFixed(act, key, node.Type, run.MapState.Seed + node.NodeId);
         if (node.Type == MapNodeType.NormalCombat)
         {

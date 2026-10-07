@@ -50,8 +50,16 @@ public sealed class PlayerApiRun : IApiDomain
         new("run.settlement.claim", ApiLane.Player, "领一件物品（按 claimKey；= 点列表里那一行）。", false, "claimKey"),
         new("run.settlement.claim_card", ApiLane.Player, "在某个卡牌份里选一张（= 点卡面）：入该槽卡组。", false, "slotIndex,cardId"),
         new("run.settlement.close_panel", ApiLane.Player, "点「关闭」（未领完 → 待领取态 + 浮窗；领完 → 回地图）。"),
-        // 地点场景指令（`run.village.*`，15 条）：2026-10-06 随村庄专用场景撤除（方案甲）——
-        // 不进本表；「统一关卡通道」批接上关卡场景时，按新案重新出指令（不照搬村庄版）。
+        // 地点关指令（村庄 / 商人；2026-10-07 §33 统一关卡通道）：旧 `run.village.*`（15 条）已随村庄专用场景撤除，
+        // 这一批按**统一载体**重新出指令 —— 同一个地点视图服务所有地点关，指令面也不按地点分家。
+        new("run.place.state", ApiLane.Player, "地点关（村庄 / 商人）：关卡 / 队伍所在格 / 可达格 / 交互点 / 开着的界面 / 商人快照。", true),
+        new("run.place.move", ApiLane.Player, "在地点关里点一个可达格走过去（局内移动不消耗时间点）。", false, "nodeId"),
+        new("run.place.tips", ApiLane.Player, "点确认 tips 的「进入」（accept=true）或「稍后」（accept=false）。", false, "accept"),
+        new("run.place.close", ApiLane.Player, "逐层关掉地点关里开着的界面（锻造炉 / 卡包详细 / 卡牌操作 / 商人 / 餐厅 / 锻铁铺 / tips）。"),
+        new("run.merchant.pack", ApiLane.Player, "打开某卡包（1–5）看包内 5 张卡（= 点上部卡包格）。", false, "packIndex"),
+        new("run.merchant.buy", ApiLane.Player, "买货架一格（= 点那一格，点一下即结算）。", false, "category,slotIndex"),
+        new("run.merchant.card", ApiLane.Player, "买卡包里的一张卡（= 点那张卡）；包 4 / 5 用 targetSlot 指定归属槽位。", false, "packIndex,cardIndex,targetSlot"),
+        new("run.merchant.deckop", ApiLane.Player, "做一次卡牌操作（= 选操作 / 槽位 / 卡 / 目标槽位再点「确认」）。", false, "operation,slotIndex,cardIndex,targetSlot"),
     };
 
     private readonly ApiRunContext context;
@@ -97,6 +105,14 @@ public sealed class PlayerApiRun : IApiDomain
             ["run.settlement.claim"] = ClaimSettlementItem,
             ["run.settlement.claim_card"] = ClaimSettlementCard,
             ["run.settlement.close_panel"] = CloseSettlementPanel,
+            ["run.place.state"] = PlaceState,
+            ["run.place.move"] = PlaceMove,
+            ["run.place.tips"] = PlaceTips,
+            ["run.place.close"] = PlaceClose,
+            ["run.merchant.pack"] = MerchantPack,
+            ["run.merchant.buy"] = MerchantBuy,
+            ["run.merchant.card"] = MerchantCard,
+            ["run.merchant.deckop"] = MerchantDeckOperation,
         };
     }
 
@@ -122,6 +138,122 @@ public sealed class PlayerApiRun : IApiDomain
 
     private static ApiResult Fail(ApiRequest request, string code, string message) =>
         ApiResult.Fail(request.Type, ApiLane.Player, code, message);
+
+    // ── 地点关（村庄 / 商人；2026-10-07 §33 统一关卡通道）─────────────
+    // 边界：这 8 条都是「界面上真能点的那一下」——走一格 / 点 tips 的按钮 / 点卡包格 / 点货架格 /
+    // 点卡包里那张卡 / 选操作+选卡+确认。地点关本身怎么进（点村庄或商人节点）走 `run.map.enter_node`。
+
+    private PlaceLevelView Place => Scene?.PlaceView;
+
+    private ApiResult PlaceState(ApiRequest request) => Ok(request, "地点状态读取成功。", ApiRunSnapshot.Place(Scene));
+
+    private ApiResult PlaceMove(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place == null) return Fail(request, "NO_PLACE", "当前不是地点关（村庄 / 商人）：先点地图上的村庄或商人节点。");
+        if (!place.TryMoveToNode(request.NodeId))
+            return Fail(request, "MOVE_REJECTED",
+                $"走不到格 {request.NodeId}（不可达 / 正在移动 / 有界面开着；可达格见 run.place.state 的 reachableNodeIds）。");
+        return Ok(request, $"已走向格 {request.NodeId}。", ApiRunSnapshot.Place(Scene));
+    }
+
+    private ApiResult PlaceTips(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place == null) return Fail(request, "NO_PLACE", "当前不是地点关（村庄 / 商人）。");
+        bool accepted = request.Accept;
+        bool ok = accepted ? place.AcceptTips() : place.DeclineTips();
+        if (!ok) return Fail(request, "NO_TIPS", "确认 tips 没开着，或「进入」按钮当前被禁用（原因见 tips.cost）。");
+        return Ok(request, accepted ? "已点「进入」。" : "已点「稍后」。", ApiRunSnapshot.Place(Scene));
+    }
+
+    private ApiResult PlaceClose(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place == null) return Fail(request, "NO_PLACE", "当前不是地点关（村庄 / 商人）。");
+        if (!place.CloseOpenModals()) return Fail(request, "NO_MODAL", "地点关里没有开着的界面。");
+        return Ok(request, "已关掉一层界面。", ApiRunSnapshot.Place(Scene));
+    }
+
+    private ApiResult MerchantPack(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place?.Merchant == null) return Fail(request, "NO_MERCHANT", "商人界面没开着（走到商人相邻格会自动打开）。");
+        place.Merchant.OpenPackDetail(request.PackIndex);
+        if (place.Merchant.OpenPackIndex != request.PackIndex)
+            return Fail(request, "NO_PACK", $"没有卡包 {request.PackIndex}（1–5；见 run.place.state 的 packs）。");
+        return Ok(request, $"已打开卡包 {request.PackIndex}。", ApiRunSnapshot.Place(Scene));
+    }
+
+    private ApiResult MerchantBuy(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place?.Merchant == null) return Fail(request, "NO_MERCHANT", "商人界面没开着。");
+        if (!TryParseCategory(request.Category, out MerchantCategory category))
+            return Fail(request, "INVALID_CATEGORY",
+                $"category 不认识：`{request.Category}`（可用：material / food / equipment / item / key）。");
+        bool ok = place.Merchant.BuyStock(category, request.SlotIndex);
+        return ok
+            ? Ok(request, "已买入。", ApiRunSnapshot.Place(Scene))
+            : Fail(request, "BUY_REJECTED", place.Merchant.HintText);
+    }
+
+    private ApiResult MerchantCard(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place?.Merchant == null) return Fail(request, "NO_MERCHANT", "商人界面没开着。");
+        int target = request.TargetSlot ?? -1;
+        bool ok = place.Merchant.BuyPackCard(request.PackIndex, request.CardIndex, target);
+        return ok
+            ? Ok(request, "已买入。", ApiRunSnapshot.Place(Scene))
+            : Fail(request, "BUY_REJECTED", place.Merchant.HintText);
+    }
+
+    private ApiResult MerchantDeckOperation(ApiRequest request)
+    {
+        PlaceLevelView place = Place;
+        if (place?.Merchant == null) return Fail(request, "NO_MERCHANT", "商人界面没开着。");
+        if (!TryParseDeckOp(request.Operation, out MerchantDeckOp op))
+            return Fail(request, "INVALID_OPERATION",
+                $"operation 不认识：`{request.Operation}`（可用：remove / change / transfer / upgrade）。");
+        bool ok = place.Merchant.DeckOp(op, request.SlotIndex, request.CardIndex, request.TargetSlot ?? -1);
+        return ok
+            ? Ok(request, "已完成卡牌操作。", ApiRunSnapshot.Place(Scene))
+            : Fail(request, "OP_REJECTED", place.Merchant.DeckOpsHintTextValue);
+    }
+
+    /// <summary>货架类目名（英文或中文；不静默降级）。</summary>
+    private static bool TryParseCategory(string raw, out MerchantCategory category)
+    {
+        category = MerchantCategory.Material;
+        string text = (raw ?? string.Empty).Trim();
+        if (text.Length == 0) return false;
+        switch (text.ToLowerInvariant())
+        {
+            case "material": case "材料": category = MerchantCategory.Material; return true;
+            case "food": case "食物": category = MerchantCategory.Food; return true;
+            case "equipment": case "装备": category = MerchantCategory.Equipment; return true;
+            case "item": case "道具": category = MerchantCategory.Item; return true;
+            case "key": case "钥匙": category = MerchantCategory.Key; return true;
+            default: return Enum.TryParse(text, true, out category) && Enum.IsDefined(category);
+        }
+    }
+
+    /// <summary>卡牌操作名（英文或中文）。</summary>
+    private static bool TryParseDeckOp(string raw, out MerchantDeckOp op)
+    {
+        op = MerchantDeckOp.Remove;
+        string text = (raw ?? string.Empty).Trim();
+        if (text.Length == 0) return false;
+        switch (text.ToLowerInvariant())
+        {
+            case "remove": case "删除": op = MerchantDeckOp.Remove; return true;
+            case "change": case "变化": op = MerchantDeckOp.Change; return true;
+            case "transfer": case "转移": op = MerchantDeckOp.Transfer; return true;
+            case "upgrade": case "升级": op = MerchantDeckOp.Upgrade; return true;
+            default: return Enum.TryParse(text, true, out op) && Enum.IsDefined(op);
+        }
+    }
 
     private ApiResult RequireOpenBag(ApiRequest request, out BagUi bag)
     {

@@ -22,5 +22,5 @@ Data.Equipment.Recipe,res://DataBase/Equipment/EquipmentRecipe.csv
 Data.WorldMarket.Price,res://DataBase/WorldMarket/MerchantPrice.csv
 Data.WorldMarket.CardPrice,res://DataBase/WorldMarket/MerchantCardPrice.csv
 Data.WorldMarket.CardPack,res://DataBase/WorldMarket/MerchantCardPack.csv
-Data.WorldMap.VillageLayout,res://DataBase/WorldMap/VillageLayout.csv
+Data.Level.InteractPoint,res://DataBase/Level/InteractPoint.csv
 

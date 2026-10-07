@@ -514,6 +514,76 @@ public static partial class BattlefieldSceneSmoke
     }
 
     /// <summary>
+    /// 非战斗地点关（`LevelType = Village / Merchant`）的自检（2026-10-07，§33）：这类关卡**没有怪物**，
+    /// 不能走「建怪」那条断言，改为校验「版图能开 / 交互点都解析得出定义 / 每格只占一个交互点 /
+    /// 恰好一个 `Entrance` 与一个 `Exit` / 每个可走交互点有且仅有一个门口格、且它与本体格相邻」。
+    /// 起因：`LevelIndex.csv` 是战斗关与地点关**共用**的清单，加一个地点关会让下面的「怪物数 &gt; 0」判红。
+    /// </summary>
+    private static void VerifyPlaceLevel(string levelId, BattleLevelConfig level)
+    {
+        string mapPath = BattleLevelCatalog.ResolveMapPath(level.MapId);
+        using var file = FileAccess.Open(mapPath, FileAccess.ModeFlags.Read);
+        Check(file != null, $"place level {levelId} map opened ({level.MapId})");
+        BattleMapDefinition definition = BattleMapDefinition.Parse(file.GetAsText());
+        List<AxialHex> cells = MapGeometry.EnumerateCells(definition.Radius);
+        Check(cells.Count == 3 * definition.Radius * (definition.Radius + 1) + 1,
+            $"place level {levelId} board cell count = 3R(R+1)+1（实际 {cells.Count}）");
+
+        List<InteractPointDefinition> table = InteractPointCatalog.Load();
+        Check(table.Count > 0, "InteractPoint.csv 有定义行");
+
+        var byDefinition = new Dictionary<string, List<BattleLevelObject>>();
+        var occupiedCells = new HashSet<AxialHex>();
+        var instanceIds = new HashSet<string>();
+        int interactPoints = 0;
+        foreach (BattleLevelObject obj in level.Objects.Where(x => x.ObjectType == "InteractPoint"))
+        {
+            interactPoints++;
+            AxialHex hex = new AxialHex(obj.Q, obj.R);
+            Check(cells.Contains(hex), $"place level {levelId}: {obj.InstanceId} 在版图内（{obj.Q},{obj.R}）");
+            Check(occupiedCells.Add(hex), $"place level {levelId}: {obj.InstanceId} 独占格（{obj.Q},{obj.R}）");
+            Check(instanceIds.Add(obj.InstanceId), $"place level {levelId}: InstanceId 唯一（{obj.InstanceId}）");
+            Check(InteractPointCatalog.Find(table, obj.DefinitionId) != null,
+                $"place level {levelId}: {obj.InstanceId} 的 DefinitionId `{obj.DefinitionId}` 在定义表内");
+            if (!byDefinition.TryGetValue(obj.DefinitionId, out List<BattleLevelObject> rows))
+            {
+                rows = new List<BattleLevelObject>();
+                byDefinition[obj.DefinitionId] = rows;
+            }
+
+            rows.Add(obj);
+        }
+
+        Check(interactPoints > 0, $"place level {levelId} 至少有一个 InteractPoint");
+        Check(byDefinition.ContainsKey(InteractPointCatalog.EntranceId), $"place level {levelId} 有入口格");
+        Check(byDefinition.ContainsKey(InteractPointCatalog.ExitId), $"place level {levelId} 有离开格");
+
+        foreach (var pair in byDefinition)
+        {
+            int doorRows = pair.Value.Count(x => string.Equals(x.Extra, InteractPointCatalog.DoorExtraValue, StringComparison.OrdinalIgnoreCase));
+            bool needsDoor = pair.Key != InteractPointCatalog.MerchantId; // 商人靠「相邻自动触发」，没有门口格
+            if (needsDoor)
+            {
+                Check(doorRows == 1, $"place level {levelId}: {pair.Key} 恰有一个门口格（实际 {doorRows}）");
+            }
+
+            if (doorRows != 1)
+            {
+                continue;
+            }
+
+            BattleLevelObject door = pair.Value.First(x => string.Equals(x.Extra, InteractPointCatalog.DoorExtraValue, StringComparison.OrdinalIgnoreCase));
+            AxialHex doorHex = new AxialHex(door.Q, door.R);
+            Check(pair.Value.Where(x => !string.Equals(x.Extra, InteractPointCatalog.DoorExtraValue, StringComparison.OrdinalIgnoreCase))
+                    .Any(x => AxialHex.Distance(new AxialHex(x.Q, x.R), doorHex) == 1),
+                $"place level {levelId}: {pair.Key} 的门口格与本体格相邻");
+        }
+
+        GD.Print($"BATTLEFIELD_PLACE_LEVEL_PASS: 地点关 {levelId}（{level.LevelType} / {level.MapId}）"
+            + $"版图 {cells.Count} 格、交互点 {interactPoints} 个、{byDefinition.Count} 类");
+    }
+
+    /// <summary>
     /// 全关卡配置自检（2026-09-28 新增）：`LevelIndex.csv` 里的**每个**关卡都按运行局真实路径走一遍
     /// （`BattleLevelCatalog.Load` → `ApplyMonstersTo` → `BattlefieldSession`），保证「地图能开、怪能建、`InitialValue` 能解析」。
     /// 起因：`F1-H-001`（「危」节点）的 `InitialValue` 列误写成字面量 `None`（表格导出的空值），
@@ -548,6 +618,14 @@ public static partial class BattlefieldSceneSmoke
 
             // ② 按运行局路径建场：怪物 ID / 出生点 / 初始值 / 实例键都走 `ApplyMonstersTo`，
             //    建会话这一步会真正解析 `InitialValue`（= 玩家点进节点时的同一入口）。
+            //    非战斗地点关（村庄 / 商人）没有怪物，改走 `VerifyPlaceLevel`（2026-10-07，§33）。
+            if (PlaceLevelTypes.IsPlace(level.LevelType))
+            {
+                VerifyPlaceLevel(levelId, level);
+                builtLevelIds.Add(levelId);
+                continue;
+            }
+
             string mapPath = BattleLevelCatalog.ResolveMapPath(level.MapId);
             using (var file = FileAccess.Open(mapPath, FileAccess.ModeFlags.Read))
             {

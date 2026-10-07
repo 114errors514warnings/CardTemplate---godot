@@ -1,0 +1,9 @@
+DefinitionId,Name,Trigger,Ui,TimePointCost,GoldCost,Params
+Entrance,入口格,Door,None,,,
+Exit,离开格,Door,None,,,
+Inn,旅馆,Door,Inn,,,
+Guesthouse,民宿,Door,Guesthouse,,,
+Smithy,锻铁铺,Door,Smithy,,,
+Restaurant,餐厅,Door,Restaurant,,,
+Forest,树林,Door,Forest,,,
+Merchant,商人,Adjacent,Merchant,,,

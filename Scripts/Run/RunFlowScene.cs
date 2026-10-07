@@ -148,6 +148,13 @@ public partial class RunFlowScene : Control
     public SettlementUi Settlement => settlementUi;
     public HexBattleScene ActiveBattle => activeBattle;
 
+    /// <summary>
+    /// 当前内容的**地点视图**（非战斗地点关 `Village` / `Merchant`；战斗 / 事件 / 没有内容时为 null）。
+    /// 2026-10-07（§33 统一关卡通道）：地点关与战斗关共用 `RunBattleScene` 宿主，只是表现换成 `PlaceLevelView`。
+    /// </summary>
+    public PlaceLevelView PlaceView =>
+        activeContent != null && GodotObject.IsInstanceValid(activeContent) ? activeContent.PlaceView : null;
+
     /// <summary>营地（夜间 UI）是否开着。</summary>
     public bool IsCampOpen => camp != null && GodotObject.IsInstanceValid(camp);
 
@@ -165,7 +172,11 @@ public partial class RunFlowScene : Control
             if (host == null || host.GetChildCount() == 0) return "none";
             Node firstChild = host.GetChild(0);
             // 地点场景（村庄 / 商人）已撤除（2026-10-06 方案甲）：内容进行中只剩「战斗」与「事件」两种形态。
-            return firstChild is RunBattleScene ? "battle" : "event";
+            // 2026-10-07（§33 统一关卡通道）：地点关（村庄 / 商人）走 `RunBattleScene` 宿主 + `PlaceLevelView`
+            // 表现，内容形态报 `place`（战斗关仍是 `battle`）。
+            return firstChild is RunBattleScene battle
+                ? (battle.IsPlaceLevel ? "place" : "battle")
+                : "event";
         }
     }
 
@@ -532,6 +543,10 @@ public partial class RunFlowScene : Control
         mapSelectable = true;
         SetWorldMapVisible(true);
         map.SetReadOnly(false);
+        // 内容完成回地图前刷一次「已访问」标记（2026-10-07，§33 地点关）：地点关的节点是**离开格**那一刻
+        // 才由 `RunSession.CompletePendingEventToMap` 落标记，而本场景只在建版图时读一次存档 ——
+        // 不刷的话同一会话里再点该格会**重复进入**（一次性节点失效；§32 批修过同一处，随村庄专用场景撤除又失效了）。
+        map.RefreshVisitedFlags();
         ConfigureGlobalTopBar(FindBattle(host));
 
         // 当天已耗尽（战斗 / 移动跨过日界）时回到地图必须立刻进营地：否则玩家能在"新一天"继续走。

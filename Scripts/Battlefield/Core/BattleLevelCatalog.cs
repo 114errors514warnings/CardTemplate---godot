@@ -9,6 +9,12 @@ public sealed record BattleLevelObject(string InstanceId, string ObjectType, str
 {
     /// <summary>关卡 CSV 的 `InitialValue` 列（初始生命 / 初始状态等）；语法与应用见 <see cref="UnitInitialStateConfig"/>。</summary>
     public string InitialValue { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 关卡 CSV 第 12 列 `Extra`（2026-10-07 起由 `Parse` 实装）：`InteractPoint` 行写 `Door` = 该行是
+    /// **可通行、踏入即触发该交互点**的门口格；留空 = 本体格（不可通行、不触发）。见 10 月施工文档 §33.2.1。
+    /// </summary>
+    public string Extra { get; init; } = string.Empty;
 }
 public sealed class BattleLevelConfig
 {
@@ -57,7 +63,11 @@ public static class BattleLevelCatalog
                 throw new ArgumentException($"关卡配置的地图、掉落、类型或难度不一致：{levelId}");
             else if (rulesBound && !SameRules(config.Rules, rowRules))
                 throw new ArgumentException($"关卡配置的战斗规则不一致：{levelId}");
-            config.Objects.Add(new BattleLevelObject(f[4], f[5], f[6], q, r) { InitialValue = f[10].Trim() });
+            config.Objects.Add(new BattleLevelObject(f[4], f[5], f[6], q, r)
+            {
+                InitialValue = f[10].Trim(),
+                Extra = f.Length >= 12 ? f[11].Trim() : string.Empty,
+            });
         }
         if (string.IsNullOrEmpty(config.MapId)) throw new ArgumentException($"关卡没有对象配置：{levelId}");
         return config;

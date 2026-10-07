@@ -54,6 +54,12 @@ public sealed class HexBoardData
 	public int StartNodeId = -1;
 	public int BossNodeId = -1;
 	public int VillageNodeId = -1;
+
+	/// <summary>
+	/// 本层商人格的 NodeId（每层随机落在普通格上，由 `MapGeometry.Generate` 记下）。
+	/// 商人节点的内容改走 `FixedNode.csv` 的 `Merchant` 行（2026-10-07，§33）：靠它与 NodeKey 对齐解析。
+	/// </summary>
+	public int MerchantNodeId = -1;
 	public int EliteMidNodeId = -1;
 	public int EliteUpNodeId = -1;
 	public int EliteDownNodeId = -1;
