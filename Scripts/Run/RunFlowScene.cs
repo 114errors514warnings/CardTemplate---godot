@@ -349,6 +349,7 @@ public partial class RunFlowScene : Control
     /// <summary>
     /// 结算已落档：按存档复现面板 / 浮窗（读档重进只看 `SettlementPanelClosed`，§6.5）。
     /// 面板一出现就让战场转入战后操作态（2026-10-01 用户改判；原口径是「关闭面板之后才收」）。
+    /// 面板**没**出现（落档就是「待领取态」= 只显示浮窗）时按「面板已关」同一口径收尾 —— 见 `ApplyPanelClosedSettlementLayout`。
     /// </summary>
     private void OnSettlementReady(int refundedStolenGold)
     {
@@ -356,6 +357,12 @@ public partial class RunFlowScene : Control
         settlementUi.RefundedStolenGold = refundedStolenGold;
         settlementUi.RefreshFromSave();
         if (settlementUi.IsPanelOpen) map.SetReadOnly(true);
+        // 2026-10-07 用户 bug 1（继续游戏正处「结算待领取态」→ 点节点进不去，必须先开一次结算面板才行）：
+        // 读档重进就是「结算已落档 + 面板没打开」这一态。进入内容那一下（`StartLevel` / `StartEvent`）设下的
+        // 只读闸门原本没人放开 —— `OnSettlementPanelClosed` 只在面板**真的关过一次**时才跑，于是
+        // `mapSelectable` 停在 false、地图停在只读，点节点只得到一行「当前内容进行中，地图仅可查看。」。
+        // 这里与面板关闭共用同一口径收尾：有实机战场且仍有未领取 → 停留战场（地图转可选），否则回可选地图。
+        else ApplyPanelClosedSettlementLayout();
         EnterPostBattleStateForSettlement();
     }
 
@@ -387,7 +394,16 @@ public partial class RunFlowScene : Control
     /// <summary>
     /// 面板关闭（§6.2 / §7.3 / 新案 §三）：浮窗接管；有实机战场时**停留战场**，全部领完则视为结算完成、直接回地图。
     /// </summary>
-    private void OnSettlementPanelClosed()
+    private void OnSettlementPanelClosed() => ApplyPanelClosedSettlementLayout();
+
+    /// <summary>
+    /// 「结算已落档、面板没打开」这一态的地图与内容归属（§6.2 / 新案 §三）：有实机战场且仍有未领取 → **停留战场**
+    /// （地图只转可选、不自动打开）；其余（没有战场 / 已领完）→ 回到可选地图，全部领完才算内容完成。
+    /// 两条入口共用同一口径：① 面板从打开变关闭（`OnSettlementPanelClosed`）；
+    /// ② **读档重进本来就落在这一态**（`OnSettlementReady` 里 `RefreshFromSave` 后面板没自动打开，
+    /// 2026-10-07 用户 bug 1）—— 那里必须补上这次收尾，否则进内容时设下的只读闸门没人放开。
+    /// </summary>
+    private void ApplyPanelClosedSettlementLayout()
     {
         if (settlementUi.HasUnclaimed && HasLiveBattlefield())
         {
@@ -640,7 +656,15 @@ public partial class RunFlowScene : Control
     }
     private void AttachMapToContent()
     {
-        if (mapSelectable) return; // 内容已完成：地图已作为覆盖层打开，不再回写内容态按钮栏。
+        if (mapSelectable)
+        {
+            // 内容已完成 / 结算待领取态（读档重进时已在 `OnSettlementReady` 收尾）：地图已作为覆盖层打开或已转可选，
+            // 不再回写内容态按钮栏；但 `Esc` 逐层退出的接线（§九）不能少 —— 少了它，战后没有内部状态可退时按 Esc
+            // 会直接落回暂停而不是逐层关闭浮窗 / 地图。
+            HexBattleScene settledBattle = FindBattle(host);
+            if (settledBattle != null) settledBattle.EscapeFallback = HandleEscapeLayers;
+            return;
+        }
         HexBattleScene battle = FindBattle(host);
         if (battle == null || battle.MapView == null)
         {
@@ -1043,6 +1067,23 @@ public partial class RunFlowScene : Control
             if (arg.StartsWith(prefix, StringComparison.Ordinal) && arg.Length > prefix.Length)
                 return arg.Substring(prefix.Length).Trim().ToLowerInvariant();
         return null;
+    }
+
+    /// <summary>
+    /// 烟测断言（2026-10-07 用户 bug 2）：把鼠标放到 `point`，判命中的控件不是「已收起的手牌区」——
+    /// 收起手牌后容器仍是 MOUSE_FILTER_STOP 的矩形，会把下面几行格点的点击整片吃掉（选人 / 战后点选移动都点不到）。
+    /// 口径同 §六：`WarpMouse` + `PushInput(MouseMotion)` + `GuiGetHoveredControl`。
+    /// </summary>
+    private async System.Threading.Tasks.Task RequireHandAreaPassThrough(HexBattleScene battle, Vector2 point, string where)
+    {
+        GetViewport().WarpMouse(point);
+        GetViewport().PushInput(new InputEventMouseMotion { Position = point, GlobalPosition = point });
+        await WaitFrames(1);
+        Control hovered = GetViewport().GuiGetHoveredControl();
+        GD.Print($"RUN_FLOW_UI_SMOKE_HAND_AREA_HOVER: where={where} point={point} " +
+            $"hovered={hovered?.GetPath().ToString() ?? "<none>"}");
+        Require(hovered != null, $"战后{where}应命中下层控件（命中 <none> = 这一点被射线吃掉）。");
+        Require(!battle.IsHandAreaNode(hovered), $"战后{where}仍在吃鼠标射线（用户 bug 2）：命中 {hovered.GetPath()}。");
     }
 
     /// <summary>运行局 UI 回归烟测：验证世界地图上方的 ModalLayer 能接收调试窗关闭按钮的真实鼠标输入。</summary>
@@ -1596,6 +1637,14 @@ public partial class RunFlowScene : Control
             Require(realBattle.IsPostSettlementMode, "关闭结算面板后战场应进入战后战场操作态。");
             Require(realBattle.PostSettlementUiCollapsed,
                 "战后应隐藏手牌槽 / 底部底板 / 能量与额度面板 / 结束回合，且移动按钮文案不含「能量」。");
+            // 2026-10-07 用户报 bug 2「手牌区隐藏了还挡鼠标射线」：手牌槽与底部底板只是**不可见**，外层容器
+            // `handPanel`（0.23–0.72 × 0.69–0.99）与它第一行的角色 Tab 行仍是 MOUSE_FILTER_STOP 控件 ——
+            // 那两片矩形会把点击全吃掉（点不到下面的战场：选人 / 自由移动）。判据 = 把鼠标放进矩形里的**空白处**
+            // （容器中心 = 卡面区；Tab 行左端 = Tab 居中排布留下的空档），命中的控件不得落在手牌区子树里
+            // （图形版烟测的 GUI 命中口径，见 Skill/smoke-test-choice §六）。
+            await RequireHandAreaPassThrough(realBattle, realBattle.HandPanelNode.GetGlobalRect().GetCenter(), "卡面区（容器矩形中心）");
+            Rect2 tabRowRect = realBattle.HandTabRowNode.GetGlobalRect();
+            await RequireHandAreaPassThrough(realBattle, tabRowRect.Position + new Vector2(4f, tabRowRect.Size.Y / 2f), "角色 Tab 行左端空白");
             int postMover = realBattle.Session.SelectedId;
             AxialHex moverFrom = realBattle.Session.Occupancy.Placements[postMover].Coord;
             int postEnergy = realBattle.Session.Occupancy.Placements[postMover].Unit.Energy;
@@ -1750,9 +1799,28 @@ public partial class RunFlowScene : Control
             // ── 读档重进结算界面：内容宿主按落档重建同一张战场（`RunBattleScene` 的 InSettlement 分支）──
             // 临时实例化一个内容宿主走同一条 `_Ready` 路径：有落档 → 重建战场 + 还原布局 + 直接进入战后操作态。
             var reloadedContent = new RunBattleScene();
+            // 2026-10-07 用户报 bug 1 回归（继续游戏正处「结算待领取态」→ 点节点进不去，必须先开一次结算面板才进得去）：
+            // 进场景那一下（`StartLevel`）先 `mapSelectable = false` + 隐藏地图 + `map.SetReadOnly(true)`，而结算面板
+            // **不会**自动打开（§6.5 只显示浮窗）—— 只有 `RunBattleScene._Ready` 里同步广播的 `OnSettlementReady`
+            // 有机会把地图放回可选。这里把进入态尽量同序复现（只省掉 `ClearHost`：本轮要留着 `realBattle` 继续跑后面的段）。
+            mapSelectable = false;
+            SetWorldMapVisible(false);
+            map.SetReadOnly(true);
+            reloadedContent.SettlementReady += OnSettlementReady;   // 与 StartLevel 一样：AddChild 之前订阅
             AddChild(reloadedContent);
             await WaitFrames(2);
             Require(reloadedContent.HasLiveBattlefield, "有战后落档时，重进结算界面应重建出实机战场。");
+            Require(IsMapSelectable && !map.IsReadOnly,
+                "读档重进待领取态：地图必须已转可选（只读态下点节点会被只读闸门吞掉 = 用户 bug 1）。");
+            var confirmBeforeSave = run.Current;
+            bool suppressConfirmBefore = confirmBeforeSave.SuppressAbandonSettlementConfirm;
+            confirmBeforeSave.SuppressAbandonSettlementConfirm = false;   // 只改内存：让闸门走「弹放弃确认」这条分支
+            Require(map.SimulateClickReachableNode(), "读档重进待领取态：地图上应有可达格可点。");
+            bool abandonConfirmOpened = settlementUi.IsConfirmOpen;
+            settlementUi.CancelAbandonConfirm();
+            confirmBeforeSave.SuppressAbandonSettlementConfirm = suppressConfirmBefore;
+            Require(abandonConfirmOpened,
+                "读档重进待领取态：点节点应先弹放弃确认弹窗（旧 bug 是静默无反应、只打一行状态字）。");
             HexBattleScene reloadedBattle = reloadedContent.BattleView;
             Require(reloadedBattle.IsPostSettlementMode, "重建的战场应直接进入战后操作态（手牌 / 能量 / 结束回合已收起）。");
             Require(reloadedBattle.Session.Phase == CardSimulator.Battlefield.BattlefieldSession.BattlePhase.Victory,

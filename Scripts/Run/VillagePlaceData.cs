@@ -36,8 +36,11 @@ public static class VillagePlaceData
 		return pool;
 	}
 
-	/// <summary>材料显示名（材料表；查不到时由 `ItemNameResolver` 退回兜底名）。</summary>
-	public static string MaterialName(int materialId) => ItemNameResolver.NameOf(BagCategory.Material, materialId);
+	/// <summary>
+	/// 材料显示名（材料表）。查不到时走 `DisplayMaterial` 的显式兜底 `未定义材料(ID)` ——
+	/// 旧路径 `NameOf(BagCategory.Material, id)` 静默返回空串，会让锻铁铺出现「消耗 ×2」这种没有名字的行（P1-1，2026-10-07 改）。
+	/// </summary>
+	public static string MaterialName(int materialId) => ItemNameResolver.DisplayMaterial(materialId);
 
 	/// <summary>
 	/// 一次抽样用的随机源：种子绑在（本局种子 × 天数 × 用途盐）上 ——

@@ -37,6 +37,7 @@ public partial class HexBattleScene : Control
     public bool IsMovePlanning => movePlanning;
     /// <summary>
     /// 烟测断言用（新案 §九 6）：战后操作态下，手牌槽 / 能量与额度面板 / 结束回合 / **底部操作区底板**必须全部隐藏，
+    /// **且手牌容器与角色 Tab 行必须不再吃射线**（2026-10-07 用户 bug 2），
     /// 且移动按钮文案不含「能量」。规划态下按钮文案是「取消移动」，该断言只在非规划态成立。
     /// </summary>
     public bool PostSettlementUiCollapsed => IsPostSettlementMode
@@ -44,7 +45,30 @@ public partial class HexBattleScene : Control
         && resPanelNode != null && !resPanelNode.Visible
         && endTurnButton != null && !endTurnButton.Visible
         && bottomHudBackdropNode != null && !bottomHudBackdropNode.Visible
+        // 2026-10-07 用户 bug 2「手牌区虽然隐藏，但是还是会遮挡鼠标射线」：收起的只是**内容**，
+        // 手牌容器与角色 Tab 行仍是「看不见但吃射线」的矩形 —— 两者都必须转 Ignore（见 `ApplyPostSettlementVisibility`）。
+        && handPanelNode != null && handPanelNode.MouseFilter == MouseFilterEnum.Ignore
+        && handTabRowNode != null && handTabRowNode.MouseFilter == MouseFilterEnum.Ignore
         && moveButton != null && moveButton.Text == "移动";
+
+    /// <summary>
+    /// 手牌区容器（`handPanel`；**烟测断言用**，2026-10-07 用户 bug 2）：拿它的屏幕矩形算出「该穿透的那一点」。
+    /// </summary>
+    public Control HandPanelNode => handPanelNode;
+
+    /// <summary>
+    /// 烟测断言用（2026-10-07 用户 bug 2）：某节点是否落在**手牌区子树**里（含容器自身）——
+    /// 用来判「鼠标命中的这一点，是不是被（已收起手牌的）手牌区吃了」。
+    /// </summary>
+    public bool IsHandAreaNode(Node node)
+        => node != null && handPanelNode != null && GodotObject.IsInstanceValid(handPanelNode)
+        && (node == handPanelNode || handPanelNode.IsAncestorOf(node));
+
+    /// <summary>
+    /// 角色 Tab 行（`handPanel` 第一行；**烟测断言用**，2026-10-07 用户 bug 2）：Tab 居中排布，行左端没有按钮，
+    /// 正是「容器行本身还在吃射线」的那一段。
+    /// </summary>
+    public Control HandTabRowNode => handTabRowNode;
 
     /// <summary>
     /// 底部操作区底板（`bottomHudBackdrop`）是否已隐藏（2026-10-02 用户口径「底板随手牌区一起消失」）：烟测断言入口。
@@ -52,6 +76,11 @@ public partial class HexBattleScene : Control
     public bool IsBottomHudBackdropHidden => bottomHudBackdropNode == null || !bottomHudBackdropNode.Visible;
     private Control handRow;
     private Control handPanelNode;
+    /// <summary>
+    /// 角色 Tab 行（`handPanel` 的第一行）：战后仍保留可点（切换角色），但**行矩形本身不得吃射线**
+    /// （2026-10-07 用户 bug 2：Tab 居中排布，行左端那一大片空白同样盖住战场格点）。
+    /// </summary>
+    private Control handTabRowNode;
     private EventStoryOverlay storyOverlay;
     /// <summary>当前剧情的标题（非战斗来源发卡的结算来源名，§5.7）：与 OpenStoryEvent 加载的配置同源。</summary>
     private string storyEventTitle = string.Empty;
@@ -729,6 +758,7 @@ public partial class HexBattleScene : Control
         AddChild(handPanel);
         handPanelNode = handPanel;
         var tabRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; tabRow.AddThemeConstantOverride("separation", 6); handPanel.AddChild(tabRow);
+        handTabRowNode = tabRow;
         for (int i = 0; i < 3; i++)
         {
             int index = i;
@@ -1090,6 +1120,8 @@ public partial class HexBattleScene : Control
     /// <summary>
     /// 战后表现收口（新案 §四）：手牌槽 / 底部操作区底板 / 能量与额度 / 牌堆 / 结束回合整块隐藏；
     /// 角色 Tab 行、左右手装备槽、当前格与随身道具槽保留（只读，不响应拖拽）。
+    /// **手牌容器与角色 Tab 行还要一起停掉鼠标射线（2026-10-07 用户 bug 2）**：只 `Visible=false` 收掉内容时，
+    /// 两个容器仍是「看不见但吃射线」的矩形，会盖掉底部几行格点的点击（选人 / 战后点选移动都点不到）。
     /// **底部底板随手牌区一起消失是 2026-10-02 用户口径**（原来只收手牌槽、底板留着）；
     /// 回改方式：删掉下面这一行 + `PostSettlementUiCollapsed` 里的对应条件即可（其余不变）。
     /// </summary>
@@ -1099,6 +1131,11 @@ public partial class HexBattleScene : Control
         if (bottomHudBackdropNode != null) bottomHudBackdropNode.Visible = !IsPostSettlementMode;
         if (resPanelNode != null) resPanelNode.Visible = !IsPostSettlementMode;
         if (endTurnButton != null) endTurnButton.Visible = !IsPostSettlementMode;
+        // 2026-10-07 用户 bug 2「手牌区虽然隐藏，但是还是会遮挡鼠标射线」：`handPanel`（0.23–0.72 × 0.69–0.99）
+        // 与它第一行的角色 Tab 行都是默认 MOUSE_FILTER_STOP 的容器 —— 收起手牌后它们仍是两片**看不见的矩形**。
+        // 战后降为 Ignore：里面保留的「角色 N」Tab 按钮自带 Stop，切换角色不受影响；底板已隐藏，底部格点即可直接点到。
+        if (handPanelNode != null) handPanelNode.MouseFilter = IsPostSettlementMode ? MouseFilterEnum.Ignore : MouseFilterEnum.Stop;
+        if (handTabRowNode != null) handTabRowNode.MouseFilter = IsPostSettlementMode ? MouseFilterEnum.Ignore : MouseFilterEnum.Stop;
         if (moveButton != null) moveButton.Visible = true;
         if (IsPostSettlementMode && moveConfirmRow != null) moveConfirmRow.Visible = false;
         if (IsPostSettlementMode && pileOverlay != null) pileOverlay.Visible = false;

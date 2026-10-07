@@ -749,15 +749,19 @@ public partial class CampScene : Control
 			: $"共 {recipes.Count} 条已放行配方。");
 	}
 
-	/// <summary>配方一行的输入文案：`烤蟾蜍 ×2 + 香草炖菜 ×1`（名字取自 `ItemNameResolver` 的注册表）。</summary>
+	/// <summary>
+	/// 配方一行的输入文案：`烤蟾蜍 ×2 + 香草炖菜 ×1`（名字取自 `ItemNameResolver` 的注册表）。
+	/// 未注册一律走显式兜底名（`未定义食物(401)` / `未定义材料(101)`）：旧路径静默返回空串，
+	/// 会显示成「 ×2」这种看不出缺哪一行的废行（P1-1，2026-10-07 改）。
+	/// </summary>
 	private static string DescribeRecipe(FoodRecipeDefinition recipe)
 	{
 		List<string> inputs = new List<string>();
 		foreach (RecipeInputSpec input in recipe.Inputs)
 		{
 			string name = input.Kind == RecipeInputKind.Food
-				? ItemNameResolver.Food(input.Id)
-				: ItemNameResolver.Material(input.Id);
+				? ItemNameResolver.DisplayFood(input.Id)
+				: ItemNameResolver.DisplayMaterial(input.Id);
 			inputs.Add($"{name} ×{input.Count}");
 		}
 

@@ -46,6 +46,14 @@ $p = Start-Process -FilePath $exe -PassThru -ArgumentList @(
 同上命令去掉 `=<段名>`；末尾须打印 `RUN_FLOW_UI_SMOKE_PASS`（失败 `RUN_FLOW_UI_SMOKE_FAIL: <原因>`）。
 必须用**图形版 console exe**（GUI 命中类断言在 headless 下失真），窗口用 `--position 3000,3000` 挪到屏幕外。
 
+**PASS 与 FAIL 不在同一条流上**（2026-10-07 实测）：`RUN_FLOW_UI_SMOKE_PASS` 走 stdout（`GD.Print`），
+`RUN_FLOW_UI_SMOKE_FAIL: <原因>` + 堆栈（含 `RunFlowScene.cs:line N`）走 **stderr**（`GD.PrintErr`）。
+只轮询 `*-out.txt` 会得到「进程已退出、既无 PASS 也无 FAIL」的假象 —— **判据要 out 与 err 两个文件一起看**。
+
+玩家自己的 Godot 编辑器窗口开着时会占住 `http://127.0.0.1:17880/api/game/`，err 里会刷几条
+`[API] 启动失败：… conflicts with an existing registration` —— 与 UI 烟测**无关**（UI 烟测直接驱动界面，不走局内 API），
+不要据此判失败；要清干净只能由用户自己关编辑器窗口，**不要按进程名杀 Godot**。
+
 ## 四、`--battlefield-smoke`（headless）
 
 ```powershell
