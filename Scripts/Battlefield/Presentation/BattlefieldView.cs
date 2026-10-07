@@ -230,7 +230,7 @@ public partial class BattlefieldView : Control
             }
             defeatedActorSeconds.Remove(id);
             actor.Visible = true;
-            PixelHeroActor.Loadout nextLoadout = characterId == 1003 ? PixelHeroActor.Loadout.Bow : ResolvePixelLoadout(Session.GetLoadout(id));
+            PixelHeroActor.Loadout nextLoadout = ResolvePixelLoadout(Session.GetLoadout(id));
             if (actor.CurrentLoadout != nextLoadout) actor.SetLoadout(nextLoadout);
             Vector2 center = visualUnitPositions.TryGetValue(id, out Vector2 visual) ? visual : CellPosition(placement.Coord);
             actor.SetHomePosition(center + new Vector2(0, -72));
@@ -246,6 +246,7 @@ public partial class BattlefieldView : Control
         {
             if (twoHand.DefinitionId.Contains("弓")) return PixelHeroActor.Loadout.Bow;
             if (twoHand.DefinitionId.Contains("典") || twoHand.DefinitionId.Contains("书")) return PixelHeroActor.Loadout.Tome;
+            if (twoHand.DefinitionId.Contains("枪") || twoHand.DefinitionId.Contains("矛")) return PixelHeroActor.Loadout.Spear;
             return PixelHeroActor.Loadout.TwoHandedWeapon;
         }
         bool shield = left?.DefinitionId.Contains("盾") == true;

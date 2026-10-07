@@ -59,11 +59,12 @@ public partial class AnimationMaterialTestScene : Control
         equipmentButtons.Add(AddButton(content, "左手：盾", () => Select(PixelHeroActor.Loadout.LeftShield, "左手盾")));
         equipmentButtons.Add(AddButton(content, "剑 + 盾", () => Select(PixelHeroActor.Loadout.SwordAndShield, "剑盾")));
         equipmentButtons.Add(AddButton(content, "双剑", () => Select(PixelHeroActor.Loadout.DualSwords, "双剑")));
-        equipmentButtons.Add(AddButton(content, "双手武器", () => Select(PixelHeroActor.Loadout.TwoHandedWeapon, "双手武器")));
+        equipmentButtons.Add(AddButton(content, "双手剑", () => Select(PixelHeroActor.Loadout.TwoHandedWeapon, "双手剑")));
+        equipmentButtons.Add(AddButton(content, "长枪", () => Select(PixelHeroActor.Loadout.Spear, "长枪")));
         equipmentButtons.Add(AddButton(content, "弓箭", () => Select(PixelHeroActor.Loadout.Bow, "弓箭")));
         equipmentButtons.Add(AddButton(content, "法器", () => Select(PixelHeroActor.Loadout.Tome, "法器")));
         equipmentButtons.Add(AddButton(content, "卸下装备", () => Select(PixelHeroActor.Loadout.None, "空手")));
-        content.AddChild(MakeLabel("默认双手剑与精灵弓使用改进帧资源。去装备人物帧用于补画和换装对照；同类装备按逐帧握点替换。", 12, new Color("8fa4b7")));
+        content.AddChild(MakeLabel("双手剑、长枪、弓、法典均播放各自的完整动作帧。去装备人物帧用于制作对照。", 12, new Color("8fa4b7")));
         AddButton(content, "返回主界面", () => GetTree().ChangeSceneToFile(MainMenuScenePath));
     }
 
@@ -73,7 +74,7 @@ public partial class AnimationMaterialTestScene : Control
         hero.SetCharacter(kind); PositionHero();
         bool isElf = kind == PixelHeroActor.CharacterKind.Elf;
         characterLabel.Text = (isElf ? "精灵 · 伊瑟拉" : "重剑手") + " · 像素动作图集";
-        foreach (Button button in equipmentButtons) button.Disabled = isElf;
+        for (int i = 0; i < equipmentButtons.Count; i++) equipmentButtons[i].Disabled = isElf && (i < 4 || i == equipmentButtons.Count - 1);
         SetState("待机");
     }
     private void PositionHero() { if (map != null && hero != null) hero.SetHomePosition(new Vector2(map.Size.X * .5f, map.Size.Y * .54f - 72f * hero.PreviewScale)); }
@@ -121,10 +122,15 @@ public partial class AnimationMaterialTestScene : Control
                     foreach (PixelHeroActor.Loadout loadout in Enum.GetValues<PixelHeroActor.Loadout>())
                     {
                         hero.SetLoadout(loadout);
+                        SetState("待机");
                         if (!hero.IsIdlePlaying) throw new InvalidOperationException($"{loadout} 切换后未播放待机。");
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                         if (!CaptureFrame($"res://Tests/animation-material-{loadout}.png")) throw new InvalidOperationException($"{loadout} 截图失败。");
                     }
+                    hero.SetLoadout(PixelHeroActor.Loadout.RightSword); hero.PlayDeath();
+                    await ToSignal(GetTree().CreateTimer(.65), SceneTreeTimer.SignalName.Timeout);
+                    if (hero.IsDedicatedDeathVisible || !CaptureFrame("res://Tests/animation-material-RightSword-death.png"))
+                        throw new InvalidOperationException("单手短剑死亡动画未播放独立帧。");
                     hero.SetLoadout(PixelHeroActor.Loadout.TwoHandedWeapon);
                 }
                 if (!hero.IsIdlePlaying) throw new InvalidOperationException($"{name} 未播放待机。");
@@ -152,10 +158,27 @@ public partial class AnimationMaterialTestScene : Control
                     await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                     if (!hero.IsAttackEffectVisible || !CaptureFrame("res://Tests/animation-material-Bow-attack.png"))
                         throw new InvalidOperationException("弓箭释放特效无效。");
+                    hero.PlayDeath();
+                    await ToSignal(GetTree().CreateTimer(.65), SceneTreeTimer.SignalName.Timeout);
+                    if (hero.IsDedicatedDeathVisible || !CaptureFrame("res://Tests/animation-material-Bow-death.png"))
+                        throw new InvalidOperationException("弓箭死亡动画未播放独立帧。");
                     hero.SetLoadout(PixelHeroActor.Loadout.Tome); hero.ShowAuditPose(5);
                     await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                     if (!hero.IsAttackEffectVisible || !CaptureFrame("res://Tests/animation-material-Tome-attack.png"))
                         throw new InvalidOperationException("法典释放特效无效。");
+                    hero.PlayDeath();
+                    await ToSignal(GetTree().CreateTimer(.65), SceneTreeTimer.SignalName.Timeout);
+                    if (hero.IsDedicatedDeathVisible || !CaptureFrame("res://Tests/animation-material-Tome-death.png"))
+                        throw new InvalidOperationException("法典死亡动画未播放独立帧。");
+                    hero.SetLoadout(PixelHeroActor.Loadout.Spear); hero.ShowAuditPose(5);
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (!CaptureFrame("res://Tests/animation-material-Spear-attack.png"))
+                        throw new InvalidOperationException("长枪刺击截图失败。");
+                    hero.PlayDeath();
+                    await ToSignal(GetTree().CreateTimer(.65), SceneTreeTimer.SignalName.Timeout);
+                    if (hero.IsDedicatedDeathVisible || !CaptureFrame("res://Tests/animation-material-Spear-death.png"))
+                        throw new InvalidOperationException("长枪死亡动画未播放独立帧。");
+                    hero.SetLoadout(PixelHeroActor.Loadout.TwoHandedWeapon);
                 }
                 hero.PlayHit();
                 await ToSignal(GetTree().CreateTimer(.08), SceneTreeTimer.SignalName.Timeout);
@@ -216,8 +239,42 @@ public partial class AnimationMaterialTestScene : Control
                     if (!CaptureFrame($"res://Tests/frame-v2-{name}-equipped-{sourceFrame}-2x.png"))
                         throw new InvalidOperationException($"{name} 2x frame {sourceFrame} screenshot failed.");
                 }
+                PixelHeroActor.Loadout[] loadouts = kind == PixelHeroActor.CharacterKind.Greatsword
+                    ? new[] { PixelHeroActor.Loadout.RightSword, PixelHeroActor.Loadout.TwoHandedWeapon, PixelHeroActor.Loadout.Spear, PixelHeroActor.Loadout.Bow, PixelHeroActor.Loadout.Tome }
+                    : new[] { PixelHeroActor.Loadout.TwoHandedWeapon, PixelHeroActor.Loadout.Spear, PixelHeroActor.Loadout.Bow, PixelHeroActor.Loadout.Tome };
+                foreach (PixelHeroActor.Loadout loadout in loadouts)
+                {
+                    hero.SetLoadout(loadout);
+                    SetState("固定帧检查");
+                    foreach (float scale in new[] { 1f, 2f })
+                    {
+                        hero.SetPreviewScale(scale); PositionHero();
+                        foreach (int sourceFrame in new[] { 0, 4, 5 })
+                        {
+                            hero.ShowAuditPose(sourceFrame);
+                            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                            if (!CaptureFrame($"res://Tests/equipment-{name}-{loadout}-{sourceFrame}-{scale:0}x.png"))
+                                throw new InvalidOperationException($"{name} {loadout} frame {sourceFrame} screenshot failed.");
+                        }
+                    }
+                    if (kind == PixelHeroActor.CharacterKind.Greatsword &&
+                        (loadout is PixelHeroActor.Loadout.RightSword or PixelHeroActor.Loadout.Spear or PixelHeroActor.Loadout.Bow or PixelHeroActor.Loadout.Tome))
+                    {
+                        foreach (float scale in new[] { 1f, 2f })
+                        {
+                            hero.SetPreviewScale(scale); PositionHero();
+                            for (int deathFrame = 0; deathFrame < 4; deathFrame++)
+                            {
+                                hero.ShowAuditDeathFrame(deathFrame);
+                                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                                if (!CaptureFrame($"res://Tests/equipment-swordmaster-{loadout}-death-{deathFrame}-{scale:0}x.png"))
+                                    throw new InvalidOperationException($"{loadout} 死亡帧 {deathFrame} 截图失败。");
+                            }
+                        }
+                    }
+                }
             }
-            GD.Print("FRAME_ART_SMOKE_PASS: seven fixed-position frames and body drafts for both characters");
+            GD.Print("FRAME_ART_SMOKE_PASS: seven fixed-position frames, body drafts and four two-hand loadouts for both characters");
             GetTree().Quit();
         }
         catch (Exception ex)
@@ -260,7 +317,7 @@ public partial class PixelBattleMap : Control
 public partial class PixelHeroActor : Node2D
 {
     public enum CharacterKind { Greatsword, Elf }
-    public enum Loadout { None, RightSword, LeftShield, SwordAndShield, DualSwords, TwoHandedWeapon, Bow, Tome }
+    public enum Loadout { None, RightSword, LeftShield, SwordAndShield, DualSwords, TwoHandedWeapon, Spear, Bow, Tome }
     private Node2D artRoot;
     private AnimatedSprite2D actionSprite;
     private SpriteFrames swordFrames;
@@ -272,12 +329,17 @@ public partial class PixelHeroActor : Node2D
     public bool IsBodyPreview => bodyPreview;
     public void SetBodyPreview(bool enabled)
     {
-        if (characterKind == CharacterKind.Greatsword) SetLoadout(Loadout.TwoHandedWeapon);
+        SetLoadout(characterKind == CharacterKind.Greatsword ? Loadout.TwoHandedWeapon : Loadout.Bow);
         bodyPreview = enabled;
         ResetActor();
     }
     private SpriteFrames bowFrames;
     private SpriteFrames tomeFrames;
+    private SpriteFrames spearFrames;
+    private SpriteFrames shortSwordFrames;
+    private SpriteFrames elfSpearFrames;
+    private SpriteFrames elfTomeFrames;
+    private SpriteFrames elfGreatswordFrames;
     private Sprite2D leftHandEquipment;
     private Sprite2D rightHandEquipment;
     private Sprite2D twoHandEquipment;
@@ -302,7 +364,7 @@ public partial class PixelHeroActor : Node2D
     private float leftRestRotation;
     private float rightRestRotation;
     private float twoHandRestRotation;
-    public string LoadoutLabel => bodyPreview ? "去装备人物帧（制作稿）" : characterKind == CharacterKind.Elf ? "默认弓箭" : loadout switch { Loadout.RightSword => "右手剑", Loadout.LeftShield => "左手盾", Loadout.SwordAndShield => "剑盾", Loadout.DualSwords => "双剑", Loadout.TwoHandedWeapon => "双手武器", Loadout.Bow => "弓箭", Loadout.Tome => "法器", _ => "空手" };
+    public string LoadoutLabel => bodyPreview ? "去装备人物帧（制作稿）" : loadout switch { Loadout.RightSword => "右手剑", Loadout.LeftShield => "左手盾", Loadout.SwordAndShield => "剑盾", Loadout.DualSwords => "双剑", Loadout.TwoHandedWeapon => "双手剑", Loadout.Spear => "长枪", Loadout.Bow => "弓箭", Loadout.Tome => "法典", _ => "空手" };
 
     public override void _Ready()
     {
@@ -314,8 +376,19 @@ public partial class PixelHeroActor : Node2D
         equipmentFrames = CreateActionFrames(Load("swordmaster_pixel_action_equipment_sheet.png"));
         elfFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV2/isera_equipped.tres");
         elfBodyFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV2/isera_body.tres");
-        bowFrames = CreateActionFrames(Load("swordmaster_bow_action_sheet_v2.png"));
-        tomeFrames = CreateActionFrames(Load("swordmaster_tome_action_sheet_v2.png"));
+        bowFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV3/swordmaster_bow.tres");
+        tomeFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV3/swordmaster_tome.tres");
+        spearFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV3/swordmaster_spear.tres");
+        shortSwordFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV3/swordmaster_short_sword.tres");
+        elfSpearFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV2/isera_spear_equipped.tres");
+        elfTomeFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV2/isera_tome_equipped.tres");
+        elfGreatswordFrames = GD.Load<SpriteFrames>("res://Resources/Images/Characters/FrameV2/isera_greatsword_equipped.tres");
+        foreach (SpriteFrames frames in new[] { swordFrames, swordBodyFrames, equipmentFrames, elfFrames, elfBodyFrames,
+                     bowFrames, tomeFrames, spearFrames, shortSwordFrames, elfSpearFrames, elfTomeFrames, elfGreatswordFrames })
+            if (frames == null || !frames.HasAnimation("idle") || !frames.HasAnimation("attack") || frames.GetFrameCount("attack") < 2)
+                throw new InvalidOperationException("角色装备帧资源未能完整加载，请先运行 Godot 导入。");
+        if (spearFrames.GetFrameCount("death") < 4 || bowFrames.GetFrameCount("death") < 4 || tomeFrames.GetFrameCount("death") < 4 || shortSwordFrames.GetFrameCount("death") < 4)
+            throw new InvalidOperationException("重剑手短剑、长枪、弓或法典缺少独立死亡帧。");
         actionSprite = new AnimatedSprite2D { SpriteFrames = swordFrames, Scale = Vector2.One * .32f, ZIndex = 1 };
         artRoot.AddChild(actionSprite);
         actionSprite.FrameChanged += UpdateEquipmentPose;
@@ -351,33 +424,32 @@ public partial class PixelHeroActor : Node2D
     }
     private static void Attach(Sprite2D sprite, Texture2D texture, Vector2 anchor, float scale, float rotation = 0) { sprite.Texture = texture; sprite.Position = anchor; sprite.Scale = Vector2.One * scale; sprite.Rotation = rotation; sprite.Visible = true; }
     private void ClearEquipment() { foreach (Sprite2D sprite in new[] { leftHandEquipment, rightHandEquipment, twoHandEquipment }) { sprite.Visible = false; sprite.Texture = null; sprite.Rotation = 0; sprite.FlipH = false; } }
+    private bool IsPackedFrames() => ReferenceEquals(actionSprite.SpriteFrames, swordFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfFrames)
+        || ReferenceEquals(actionSprite.SpriteFrames, swordBodyFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfBodyFrames)
+        || ReferenceEquals(actionSprite.SpriteFrames, spearFrames) || ReferenceEquals(actionSprite.SpriteFrames, bowFrames)
+        || ReferenceEquals(actionSprite.SpriteFrames, tomeFrames) || ReferenceEquals(actionSprite.SpriteFrames, shortSwordFrames)
+        || ReferenceEquals(actionSprite.SpriteFrames, elfSpearFrames)
+        || ReferenceEquals(actionSprite.SpriteFrames, elfTomeFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfGreatswordFrames);
 
     public void SetLoadout(Loadout next)
     {
         bodyPreview = false;
-        if (characterKind == CharacterKind.Elf)
-        {
-            loadout = Loadout.Bow;
-            ClearEquipment();
-            ResetActor();
-            return;
-        }
-        loadout = next;
+        loadout = characterKind == CharacterKind.Elf && next is not (Loadout.Bow or Loadout.Tome or Loadout.Spear or Loadout.TwoHandedWeapon) ? Loadout.Bow : next;
         ClearEquipment();
+        if (characterKind == CharacterKind.Elf) { ResetActor(); return; }
         switch (next)
         {
-            case Loadout.RightSword: Attach(rightHandEquipment, Load("equipment_sword.png"), new Vector2(24, -7), .050f, Mathf.DegToRad(-14)); break;
+            case Loadout.RightSword: break; // 短剑已包含在逐帧美术资源中。
             case Loadout.LeftShield: Attach(leftHandEquipment, Load("equipment_shield.png"), new Vector2(-8, 17), .045f); break;
             case Loadout.SwordAndShield:
                 Attach(rightHandEquipment, Load("equipment_sword.png"), new Vector2(24, -7), .050f, Mathf.DegToRad(-14)); Attach(leftHandEquipment, Load("equipment_shield.png"), new Vector2(-8, 17), .045f); break;
             case Loadout.DualSwords:
                 Attach(leftHandEquipment, Load("equipment_sword.png"), new Vector2(-12, -7), .050f, Mathf.DegToRad(14)); leftHandEquipment.FlipH = true;
                 Attach(rightHandEquipment, Load("equipment_sword.png"), new Vector2(24, -7), .050f, Mathf.DegToRad(-14)); break;
-            // 大剑、战斧、长枪、双手锤都复用此双手锚点，只替换对应 PNG。
-            case Loadout.TwoHandedWeapon: break; // 原动作表已画好双手剑和握持动作。
-            // 弓箭和法器是允许拥有专属双手姿势的两类。
-            case Loadout.Bow: break; // 使用完整弓箭动作图集。
-            case Loadout.Tome: break; // 使用完整法典动作图集。
+            case Loadout.TwoHandedWeapon:
+            case Loadout.Spear:
+            case Loadout.Bow:
+            case Loadout.Tome: break; // 各自播放包含装备的完整帧资源。
         }
         leftRestPosition = leftHandEquipment.Position; rightRestPosition = rightHandEquipment.Position; twoHandRestPosition = twoHandEquipment.Position;
         leftRestRotation = leftHandEquipment.Rotation; rightRestRotation = rightHandEquipment.Rotation; twoHandRestRotation = twoHandEquipment.Rotation;
@@ -404,20 +476,27 @@ public partial class PixelHeroActor : Node2D
     private void PlayActionSheet(string animation)
     {
         deathSprite.Visible = false;
-        actionSprite.SpriteFrames = bodyPreview ? (characterKind == CharacterKind.Elf ? elfBodyFrames : swordBodyFrames) : characterKind == CharacterKind.Elf ? elfFrames : loadout switch
+        actionSprite.SpriteFrames = bodyPreview ? (characterKind == CharacterKind.Elf ? elfBodyFrames : swordBodyFrames) : characterKind == CharacterKind.Elf ? loadout switch
+        {
+            Loadout.TwoHandedWeapon => elfGreatswordFrames,
+            Loadout.Spear => elfSpearFrames,
+            Loadout.Tome => elfTomeFrames,
+            _ => elfFrames,
+        } : loadout switch
         {
             Loadout.TwoHandedWeapon => swordFrames,
+            Loadout.RightSword => shortSwordFrames,
+            Loadout.Spear => spearFrames,
             Loadout.Bow => bowFrames,
             Loadout.Tome => tomeFrames,
             _ => equipmentFrames,
         };
-        bool packedFrames = ReferenceEquals(actionSprite.SpriteFrames, swordFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfFrames)
-            || ReferenceEquals(actionSprite.SpriteFrames, swordBodyFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfBodyFrames);
+        bool packedFrames = IsPackedFrames();
         artRoot.Scale = Vector2.One * (packedFrames ? 1f : 1.25f);
         artRoot.Position = packedFrames ? Vector2.Zero : new Vector2(0, -20);
         actionSprite.Visible = true;
         bool showEquipment = characterKind == CharacterKind.Greatsword
-            && loadout is not (Loadout.TwoHandedWeapon or Loadout.Bow or Loadout.Tome);
+            && loadout is not (Loadout.RightSword or Loadout.TwoHandedWeapon or Loadout.Spear or Loadout.Bow or Loadout.Tome);
         leftHandEquipment.Visible = showEquipment && leftHandEquipment.Texture != null;
         rightHandEquipment.Visible = showEquipment && rightHandEquipment.Texture != null;
         twoHandEquipment.Visible = showEquipment && twoHandEquipment.Texture != null;
@@ -443,21 +522,31 @@ public partial class PixelHeroActor : Node2D
         actionSprite.Frame = sourceFrame is 1 or 3 or 5 ? 1 : 0;
         UpdateEquipmentPose();
     }
+    public void ShowAuditDeathFrame(int frame)
+    {
+        ResetActor();
+        PlayActionSheet("death");
+        if (frame < 0 || frame >= actionSprite.SpriteFrames.GetFrameCount("death"))
+            throw new ArgumentOutOfRangeException(nameof(frame));
+        actionSprite.Stop();
+        actionSprite.Frame = frame;
+        UpdateEquipmentPose();
+    }
     private void UpdateEquipmentPose()
     {
         if (leftHandEquipment == null || rightHandEquipment == null || twoHandEquipment == null || actionEffect == null) return;
         actionEffect.Visible = false;
-        bool packedFrames = ReferenceEquals(actionSprite.SpriteFrames, swordFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfFrames)
-            || ReferenceEquals(actionSprite.SpriteFrames, swordBodyFrames) || ReferenceEquals(actionSprite.SpriteFrames, elfBodyFrames);
+        bool packedFrames = IsPackedFrames();
         if (packedFrames)
         {
             actionSprite.Scale = Vector2.One;
             actionSprite.Offset = new Vector2(0, -28);
-            if (characterKind == CharacterKind.Elf && !bodyPreview && actionSprite.Animation == "attack" && actionSprite.Frame == 1)
+            if (!bodyPreview && (loadout is Loadout.Bow or Loadout.Tome) && actionSprite.Animation == "attack" && actionSprite.Frame == 1)
             {
-                actionEffect.Texture = Load("fx_bow_arrow_trail.png");
-                actionEffect.Position = new Vector2(65, -24);
-                actionEffect.Scale = Vector2.One * .32f;
+                bool bow = loadout == Loadout.Bow;
+                actionEffect.Texture = Load(bow ? "fx_bow_arrow_trail.png" : "fx_tome_cast_rune.png");
+                actionEffect.Position = bow ? new Vector2(65, -24) : new Vector2(54, -27);
+                actionEffect.Scale = Vector2.One * (bow ? .32f : .075f);
                 actionEffect.Visible = true;
             }
             return;
@@ -501,7 +590,7 @@ public partial class PixelHeroActor : Node2D
             actionEffect.Visible = true;
             return;
         }
-        if (animation != "attack" || loadout is Loadout.TwoHandedWeapon or Loadout.Bow or Loadout.Tome) return;
+        if (animation != "attack" || loadout is Loadout.TwoHandedWeapon or Loadout.Spear or Loadout.Bow or Loadout.Tome) return;
         if (frame == 0)
         {
             if (rightHandEquipment.Visible) { rightHandEquipment.Position = new Vector2(-10, -35); rightHandEquipment.Rotation = Mathf.DegToRad(-70); }
@@ -606,7 +695,12 @@ public partial class PixelHeroActor : Node2D
     public void PlayDeath()
     {
         ResetActor();
-        if (characterKind == CharacterKind.Greatsword)
+        if (characterKind == CharacterKind.Greatsword && (loadout is Loadout.RightSword or Loadout.Spear or Loadout.Bow or Loadout.Tome))
+        {
+            PlayActionSheet("death");
+            return;
+        }
+        if (characterKind == CharacterKind.Greatsword && loadout == Loadout.TwoHandedWeapon)
         {
             actionSprite.Stop(); actionSprite.Visible = false; actionEffect.Visible = false;
             deathSprite.Visible = true;
@@ -628,7 +722,7 @@ public partial class PixelHeroActor : Node2D
     public void PlayBattleHurt() => PlayActionSheet("hurt");
     public void PlayBattleDeath()
     {
-        if (characterKind == CharacterKind.Elf) { PlayActionSheet("death"); return; }
+        if (characterKind == CharacterKind.Elf || loadout != Loadout.TwoHandedWeapon) { PlayActionSheet("death"); return; }
         actionSprite.Stop(); actionSprite.Visible = false; actionEffect.Visible = false;
         deathSprite.Visible = true;
         ConfigureFallenEquipment();
